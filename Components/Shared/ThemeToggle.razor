@@ -1,0 +1,99 @@
+@inject IJSRuntime JSRuntime
+@implements IDisposable
+
+<div class="global-theme-toggle" @onclick="ToggleTheme" title="Toggle theme">
+    @if (isDarkMode)
+    {
+        <i class="fas fa-sun"></i>
+    }
+    else
+    {
+        <i class="fas fa-moon"></i>
+    }
+</div>
+
+@code {
+    private bool isDarkMode = false;
+    private bool isInitialized = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !isInitialized)
+        {
+            isInitialized = true;
+            await LoadThemePreference();
+            StateHasChanged();
+        }
+    }
+
+    private async Task ToggleTheme()
+    {
+        isDarkMode = !isDarkMode;
+        await ApplyTheme();
+        await SaveThemePreference();
+        StateHasChanged();
+    }
+
+    private async Task LoadThemePreference()
+    {
+        try
+        {
+            var savedTheme = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "admin-theme");
+            
+            // If no saved preference, detect system preference
+            if (string.IsNullOrEmpty(savedTheme))
+            {
+                var systemPrefersDark = await JSRuntime.InvokeAsync<bool>("window.matchMedia", "(prefers-color-scheme: dark)");
+                isDarkMode = systemPrefersDark;
+            }
+            else
+            {
+                isDarkMode = savedTheme == "dark";
+            }
+            
+            await ApplyTheme();
+        }
+        catch (Exception)
+        {
+            // Default to light mode if there's any error
+            isDarkMode = false;
+            await ApplyTheme();
+        }
+    }
+
+    private async Task SaveThemePreference()
+    {
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("localStorage.setItem", "admin-theme", isDarkMode ? "dark" : "light");
+        }
+        catch (Exception)
+        {
+            // Ignore errors when saving theme preference
+        }
+    }
+
+    private async Task ApplyTheme()
+    {
+        try
+        {
+            if (isDarkMode)
+            {
+                await JSRuntime.InvokeVoidAsync("document.documentElement.setAttribute", "data-theme", "dark");
+            }
+            else
+            {
+                await JSRuntime.InvokeVoidAsync("document.documentElement.removeAttribute", "data-theme");
+            }
+        }
+        catch (Exception)
+        {
+            // Ignore errors when applying theme
+        }
+    }
+
+    public void Dispose()
+    {
+        // Component cleanup if needed
+    }
+}

@@ -1,0 +1,113 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["AdminConsole.styles.css"]" />
+    <title>ERPURE.AI Admin Console</title>
+    
+    <ImportMap />
+    <link rel="icon" type="image/png" href="company-logo.png" />
+    <link rel="alternate icon" type="image/x-icon" href="company-logo.ico" />
+    <HeadOutlet />
+</head>
+
+<body>
+    <Routes />
+    <script src="@Assets["lib/bootstrap/dist/js/bootstrap.bundle.min.js"]"></script>
+    <script src="_framework/blazor.web.js"></script>
+    <script src="js/unsaved-changes.js"></script>
+    
+    <!-- Fallback inline unsaved changes detection -->
+    <script>
+        // Ensure unsavedChanges object exists
+        if (typeof window.unsavedChanges === 'undefined') {
+            console.log('Loading fallback unsaved changes detection');
+            window.unsavedChanges = {
+                hasUnsavedChanges: false,
+                customMessage: "You have unsaved changes. Are you sure you want to leave without saving?",
+                beforeUnloadHandler: null,
+                
+                enable: function(message) {
+                    console.log('Enabling unsaved changes detection (fallback)');
+                    this.hasUnsavedChanges = true;
+                    if (message) this.customMessage = message;
+                    this.attachEventHandlers();
+                },
+                
+                disable: function() {
+                    console.log('Disabling unsaved changes detection (fallback)');
+                    this.hasUnsavedChanges = false;
+                    this.detachEventHandlers();
+                },
+                
+                attachEventHandlers: function() {
+                    if (this.beforeUnloadHandler) {
+                        window.removeEventListener('beforeunload', this.beforeUnloadHandler);
+                    }
+                    
+                    this.beforeUnloadHandler = (event) => {
+                        if (this.hasUnsavedChanges) {
+                            event.preventDefault();
+                            event.returnValue = '';
+                            return '';
+                        }
+                    };
+                    
+                    window.addEventListener('beforeunload', this.beforeUnloadHandler);
+                    
+                    // Intercept navigation
+                    document.addEventListener('click', (event) => {
+                        if (this.hasUnsavedChanges && event.target && event.target.tagName === 'A') {
+                            const confirmed = confirm(this.customMessage);
+                            if (!confirmed) {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                return false;
+                            }
+                        }
+                    }, true);
+                },
+                
+                detachEventHandlers: function() {
+                    if (this.beforeUnloadHandler) {
+                        window.removeEventListener('beforeunload', this.beforeUnloadHandler);
+                        this.beforeUnloadHandler = null;
+                    }
+                },
+                
+                confirmNavigation: function(message) {
+                    if (this.hasUnsavedChanges) {
+                        return confirm(message || this.customMessage);
+                    }
+                    return true;
+                },
+                
+                debug: function() {
+                    console.log('Unsaved changes state:', {
+                        hasUnsavedChanges: this.hasUnsavedChanges,
+                        customMessage: this.customMessage
+                    });
+                }
+            };
+        }
+        
+        console.log('Unsaved changes detection initialized');
+    </script>
+    
+    <!-- Blazor SignalR reconnection configuration -->
+    <script>
+        Blazor.start({
+            reconnectionOptions: {
+                maxRetries: 8,
+                retryIntervalMilliseconds: 2000
+            }
+        });
+    </script>
+</body>
+
+</html>

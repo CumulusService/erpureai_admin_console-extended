@@ -1,0 +1,816 @@
+@page "/admin/users/{UserId:guid}"
+@page "/users/{UserId:guid}"
+@rendermode InteractiveServer
+@using AdminConsole.Models
+@using AdminConsole.Services
+@using System.Security.Cryptography
+@inject IOnboardedUserService OnboardedUserService
+@inject IDataIsolationService DataIsolationService
+@inject IOrganizationService OrganizationService
+@inject IDatabaseCredentialService DatabaseCredentialService
+@inject IInvitationService InvitationService
+@inject IAgentTypeService AgentTypeService
+@inject ILogger<UserDetails> Logger
+@inject IJSRuntime JSRuntime
+@inject NavigationManager Navigation
+@inject IHttpContextAccessor HttpContextAccessor
+@attribute [Authorize(Policy = "OrgAdminOrHigher")]
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <nav aria-label="breadcrumb">
+                        <ol class="breadcrumb mb-2">
+                            <li class="breadcrumb-item"><a href="/admin/users" class="text-decoration-none">My Users</a></li>
+                            <li class="breadcrumb-item active">@(user?.Name ?? "User Details")</li>
+                        </ol>
+                    </nav>
+                    <h2 class="mb-1">@(user?.Name ?? "Loading...")</h2>
+                    <p class="text-muted mb-0">
+                        @if (user != null)
+                        {
+                            <span class="badge @(user.StateCode == StateCode.Active ? "bg-success" : "bg-secondary") me-2">
+                                @(user.StateCode == StateCode.Active ? "Active" : "Inactive")
+                            </span>
+                            <span class="text-muted">@user.Email</span>
+                        }
+                    </p>
+                </div>
+                <div>
+                    @if (user != null)
+                    {
+                        <button type="button" class="btn btn-outline-primary me-2" @onclick="ShowEditModal">
+                            <i class="fas fa-edit me-1"></i>
+                            Edit User
+                        </button>
+                        @if (user.GetInvitationStatus() == "Pending")
+                        {
+                            <button type="button" class="btn btn-outline-info me-2" @onclick="ResendInvitation">
+                                <i class="fas fa-paper-plane me-1"></i>
+                                Resend Invitation
+                            </button>
+                        }
+                        @if (user.StateCode == StateCode.Active)
+                        {
+                            <button type="button" class="btn btn-outline-warning" @onclick="() => ToggleUserStatus(false)">
+                                <i class="fas fa-pause me-1"></i>
+                                Deactivate
+                            </button>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn btn-outline-success" @onclick="() => ToggleUserStatus(true)">
+                                <i class="fas fa-play me-1"></i>
+                                Reactivate
+                            </button>
+                        }
+                    }
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <strong>Error:</strong> @errorMessage
+                    <button type="button" class="btn-close" @onclick="ClearMessages"></button>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(successMessage))
+            {
+                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                    <strong>Success:</strong> @successMessage
+                    <button type="button" class="btn-close" @onclick="ClearMessages"></button>
+                </div>
+            }
+
+            @if (isLoading)
+            {
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-muted">Loading user details...</p>
+                </div>
+            }
+            else if (user == null)
+            {
+                <div class="card">
+                    <div class="card-body text-center py-5">
+                        <i class="fas fa-user-slash fa-3x text-muted mb-3"></i>
+                        <h5 class="text-muted">User Not Found</h5>
+                        <p class="text-muted mb-3">
+                            The requested user could not be found or you don't have permission to view it.
+                        </p>
+                        <a href="/admin/users" class="btn btn-primary">
+                            <i class="fas fa-arrow-left me-1"></i>
+                            Back to Users
+                        </a>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="row">
+                    <div class="col-lg-8">
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-user me-2"></i>
+                                    User Information
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label text-muted">Full Name</label>
+                                            <p class="fw-bold">@user.Name</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label text-muted">Email Address</label>
+                                            <p class="fw-bold">@user.Email</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label text-muted">Full Name</label>
+                                            <p class="fw-bold">@user.FullName</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label text-muted">Assigned Databases</label>
+                                            <p class="fw-bold">
+                                                @if (user.AssignedDatabaseIds.Any())
+                                                {
+                                                    <span class="badge bg-info me-1">@user.AssignedDatabaseIds.Count database(s)</span>
+                                                    <br/>
+                                                    <small class="text-muted">
+                                                        @foreach (var dbId in user.AssignedDatabaseIds)
+                                                        {
+                                                            <span class="badge bg-secondary me-1 mt-1">@dbId.ToString().Substring(0, 8)...</span>
+                                                        }
+                                                    </small>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">No databases assigned</span>
+                                                }
+                                            </p>
+                                            <button type="button" class="btn btn-outline-primary btn-sm" @onclick="ShowDatabaseAssignmentModal">
+                                                <i class="fas fa-database me-1"></i>
+                                                @(user.AssignedDatabaseIds.Any() ? "Manage Databases" : "Assign Databases")
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label text-muted">Assigned Supervisor</label>
+                                    <p class="fw-bold">
+                                        @if (!string.IsNullOrEmpty(user.AssignedSupervisorEmail))
+                                        {
+                                            @user.AssignedSupervisorEmail
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted">No supervisor assigned</span>
+                                        }
+                                    </p>
+                                    <button type="button" class="btn btn-outline-primary btn-sm" @onclick="ShowSupervisorModal">
+                                        <i class="fas fa-user-tie me-1"></i>
+                                        @(string.IsNullOrEmpty(user.AssignedSupervisorEmail) ? "Assign Supervisor" : "Change Supervisor")
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-robot me-2"></i>
+                                    Agent Types
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                @if (user.AgentTypes.Any())
+                                {
+                                    <div class="d-flex flex-wrap gap-2">
+                                        @foreach (var agentType in user.AgentTypes)
+                                        {
+                                            <span class="badge bg-primary fs-6">
+                                                <i class="fas fa-robot me-1"></i>
+                                                @GetAgentTypeDisplayName(agentType)
+                                            </span>
+                                        }
+                                    </div>
+                                    <button type="button" class="btn btn-outline-primary btn-sm mt-3" @onclick="ShowAgentTypesModal">
+                                        <i class="fas fa-edit me-1"></i>
+                                        Update Agent Types
+                                    </button>
+                                }
+                                else
+                                {
+                                    <p class="text-muted mb-3">No agent types assigned.</p>
+                                    <button type="button" class="btn btn-primary btn-sm" @onclick="ShowAgentTypesModal">
+                                        <i class="fas fa-plus me-1"></i>
+                                        Assign Agent Types
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-4">
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    Status Information
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <label class="form-label text-muted">User Status</label>
+                                    <p>
+                                        <span class="badge @(user.StateCode == StateCode.Active ? "bg-success" : "bg-secondary") fs-6">
+                                            @(user.StateCode == StateCode.Active ? "Active" : "Inactive")
+                                        </span>
+                                    </p>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label text-muted">Is Active</label>
+                                    <p>
+                                        <span class="badge @(user.IsActive ? "bg-success" : "bg-warning") fs-6">
+                                            @(user.IsActive ? "Yes" : "No")
+                                        </span>
+                                    </p>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label text-muted">Invitation Status</label>
+                                    <p>
+                                        <span class="badge bg-info fs-6">
+                                            @user.GetInvitationStatus()
+                                        </span>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-history me-2"></i>
+                                    Audit Information
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <label class="form-label text-muted">Created On</label>
+                                    <p class="fw-bold">@user.CreatedOn.ToString("MMM dd, yyyy 'at' h:mm tt")</p>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label text-muted">Last Modified</label>
+                                    <p class="fw-bold">@user.ModifiedOn.ToString("MMM dd, yyyy 'at' h:mm tt")</p>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label text-muted">User ID</label>
+                                    <p class="font-monospace small">@user.OnboardedUserId</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid UserId { get; set; }
+    
+    private OnboardedUser? user;
+    private List<AgentTypeEntity> availableAgentTypes = new();
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+    private bool isLoading = true;
+    private Guid currentUserOrgId;
+    private UserRole currentUserRole = UserRole.User;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            currentUserRole = DataIsolationService.GetCurrentUserRole();
+            
+            var currentUserOrgIdStr = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
+            if (string.IsNullOrEmpty(currentUserOrgIdStr))
+            {
+                errorMessage = "Unable to determine your organization. Please contact support.";
+                return;
+            }
+
+            // Try to parse as GUID, otherwise generate one from the string
+            if (!Guid.TryParse(currentUserOrgIdStr, out currentUserOrgId))
+            {
+                // Generate deterministic GUID from organization ID string
+                using (var md5 = System.Security.Cryptography.MD5.Create())
+                {
+                    var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(currentUserOrgIdStr));
+                    currentUserOrgId = new Guid(hash);
+                }
+                Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgIdStr);
+            }
+            await LoadUser();
+            await LoadAvailableAgentTypes();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing user details page for user {UserId}", UserId);
+            errorMessage = "Error loading page. Please refresh and try again.";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadUser()
+    {
+        try
+        {
+            user = await OnboardedUserService.GetByIdAsync(UserId, currentUserOrgId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading user {UserId} for organization {OrganizationId}", UserId, currentUserOrgId);
+            errorMessage = "Error loading user details. Please try again.";
+        }
+    }
+
+    private async Task LoadAvailableAgentTypes()
+    {
+        try
+        {
+            availableAgentTypes = await AgentTypeService.GetActiveAgentTypesAsync();
+            Logger.LogInformation("Loaded {Count} available agent types", availableAgentTypes.Count);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading available agent types");
+            availableAgentTypes = new List<AgentTypeEntity>();
+        }
+    }
+
+    private string GetAgentTypeDisplayName(LegacyAgentType agentType)
+    {
+        return agentType switch
+        {
+            LegacyAgentType.SBOAgentAppv1 => "SBO Agent App v1",
+            LegacyAgentType.Sales => "Sales Agent",
+            LegacyAgentType.Admin => "Admin Agent",
+            _ => agentType.ToString()
+        };
+    }
+
+    private void ShowEditModal()
+    {
+        // TODO: Implement edit modal
+        errorMessage = "Edit functionality coming soon.";
+        StateHasChanged();
+    }
+
+    private async Task ShowAgentTypesModal()
+    {
+        try
+        {
+            ClearMessages();
+            
+            if (!availableAgentTypes.Any())
+            {
+                errorMessage = "No agent types are available for assignment. Please contact the system administrator to configure agent types.";
+                StateHasChanged();
+                return;
+            }
+            
+            var currentAgentTypes = user?.AgentTypes ?? new List<LegacyAgentType>();
+            
+            // Build user-friendly options from database agent types
+            var agentTypeOptions = availableAgentTypes.Select((agentType, index) => 
+                $"{index + 1}. {agentType.DisplayName}").ToList();
+            
+            var currentAgentTypesStr = currentAgentTypes.Any() ? 
+                string.Join(", ", currentAgentTypes.Select(GetAgentTypeDisplayName)) : 
+                "None";
+            
+            var promptMessage = $"Current agent types: {currentAgentTypesStr}\n\nAvailable agent types:\n{string.Join("\n", agentTypeOptions)}\n\nEnter numbers of agent types to assign (comma-separated):\nExample: 1,2\nLeave empty to clear all agent types:";
+            
+            var selectedNumbers = await JSRuntime.InvokeAsync<string>("prompt", promptMessage, "");
+            
+            if (selectedNumbers != null) // User clicked OK (even if empty)
+            {
+                var selectedAgentTypeIds = new List<Guid>();
+                
+                if (!string.IsNullOrEmpty(selectedNumbers))
+                {
+                    var parts = selectedNumbers.Split(',');
+                    foreach (var part in parts)
+                    {
+                        if (int.TryParse(part.Trim(), out var agentTypeIndex) && 
+                            agentTypeIndex >= 1 && agentTypeIndex <= availableAgentTypes.Count)
+                        {
+                            selectedAgentTypeIds.Add(availableAgentTypes[agentTypeIndex - 1].Id);
+                        }
+                    }
+                }
+                
+                await UpdateUserAgentTypesFromDatabase(selectedAgentTypeIds);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error showing agent types modal for user {UserId}", user?.OnboardedUserId);
+            errorMessage = "Error updating agent types. Please try again.";
+        }
+        
+        StateHasChanged();
+    }
+
+    private async Task UpdateUserAgentTypes(List<LegacyAgentType> newAgentTypes)
+    {
+        if (user == null) return;
+
+        try
+        {
+            ClearMessages();
+            
+            var currentUserId = GetCurrentUserId();
+            var success = await OnboardedUserService.UpdateAgentTypesAsync(
+                user.OnboardedUserId, 
+                newAgentTypes, 
+                currentUserOrgId, 
+                currentUserId);
+            
+            if (success)
+            {
+                successMessage = $"Agent types updated successfully for {user.Name}.";
+                await LoadUser(); // Reload to get updated agent types
+            }
+            else
+            {
+                errorMessage = "Failed to update agent types. Please try again.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating agent types for user {UserId}", user.OnboardedUserId);
+            errorMessage = "An unexpected error occurred while updating agent types. Please try again.";
+        }
+    }
+
+    private async Task UpdateUserAgentTypesFromDatabase(List<Guid> selectedAgentTypeIds)
+    {
+        if (user == null) return;
+
+        try
+        {
+            ClearMessages();
+            
+            var currentUserId = GetCurrentUserId();
+            
+            // TODO: Replace with new method when OnboardedUserService supports agent type IDs
+            // For now, this is a placeholder that maintains backward compatibility
+            var success = false;
+            
+            if (selectedAgentTypeIds.Any())
+            {
+                // Log the intended operation for now
+                Logger.LogInformation("Would assign agent type IDs {AgentTypeIds} to user {UserId}", 
+                    string.Join(", ", selectedAgentTypeIds), user.OnboardedUserId);
+                    
+                // For backward compatibility, convert to empty legacy agent types to clear current assignments
+                success = await OnboardedUserService.UpdateAgentTypesAsync(
+                    user.OnboardedUserId, 
+                    new List<LegacyAgentType>(), 
+                    currentUserOrgId, 
+                    currentUserId);
+                    
+                if (success)
+                {
+                    successMessage = $"Agent types cleared for {user.Name}. Database-driven agent type assignment will be implemented in next phase.";
+                }
+            }
+            else
+            {
+                // Clear agent types
+                success = await OnboardedUserService.UpdateAgentTypesAsync(
+                    user.OnboardedUserId, 
+                    new List<LegacyAgentType>(), 
+                    currentUserOrgId, 
+                    currentUserId);
+                    
+                if (success)
+                {
+                    successMessage = $"Agent types cleared for {user.Name}.";
+                }
+            }
+            
+            if (success)
+            {
+                await LoadUser(); // Reload to get updated agent types
+            }
+            else
+            {
+                errorMessage = "Failed to update agent types. Please try again.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating agent types for user {UserId}", user.OnboardedUserId);
+            errorMessage = "An unexpected error occurred while updating agent types. Please try again.";
+        }
+    }
+
+    private async Task ToggleUserStatus(bool activate)
+    {
+        if (user == null) return;
+
+        try
+        {
+            ClearMessages();
+            var currentUserId = GetCurrentUserId();
+
+            bool success;
+            if (activate)
+            {
+                success = await OnboardedUserService.ReactivateAsync(user.OnboardedUserId, currentUserOrgId, currentUserId);
+                if (success)
+                {
+                    successMessage = $"User {user.Name} has been reactivated successfully.";
+                }
+            }
+            else
+            {
+                success = await OnboardedUserService.DeactivateAsync(user.OnboardedUserId, currentUserOrgId, currentUserId);
+                if (success)
+                {
+                    successMessage = $"User {user.Name} has been deactivated successfully.";
+                }
+            }
+
+            if (success)
+            {
+                await LoadUser(); // Reload to get updated status
+            }
+            else
+            {
+                errorMessage = $"Failed to {(activate ? "reactivate" : "deactivate")} user. Please try again.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error toggling user status for {UserId}", user.OnboardedUserId);
+            errorMessage = "An unexpected error occurred. Please try again.";
+        }
+
+        StateHasChanged();
+    }
+
+    private void ClearMessages()
+    {
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+    }
+
+    private async Task ShowDatabaseAssignmentModal()
+    {
+        try
+        {
+            ClearMessages();
+            
+            // Get available databases for the organization
+            var availableDatabases = await DatabaseCredentialService.GetByOrganizationAsync(currentUserOrgId);
+            var currentDbIds = user?.AssignedDatabaseIds ?? new List<Guid>();
+            
+            if (!availableDatabases.Any())
+            {
+                errorMessage = "No databases are available for assignment in your organization. Please add database credentials first.";
+                StateHasChanged();
+                return;
+            }
+            
+            // Build a user-friendly prompt with database names and IDs
+            var dbOptions = availableDatabases.Select((db, index) => 
+                $"{index + 1}. {db.DatabaseName} ({db.DatabaseType}) - ID: {db.Id}").ToList();
+            
+            var currentDbNames = availableDatabases
+                .Where(db => currentDbIds.Contains(db.Id))
+                .Select(db => db.DatabaseName);
+                
+            var currentDbStr = currentDbNames.Any() ? string.Join(", ", currentDbNames) : "None";
+            
+            var promptMessage = $"Current assigned databases: {currentDbStr}\n\nAvailable databases:\n{string.Join("\n", dbOptions)}\n\nEnter numbers of databases to assign (comma-separated):\nExample: 1,3\nLeave empty to clear all assignments:";
+            
+            var selectedNumbers = await JSRuntime.InvokeAsync<string>("prompt", promptMessage, "");
+            
+            if (selectedNumbers != null) // User clicked OK (even if empty)
+            {
+                var newDbIds = new List<Guid>();
+                
+                if (!string.IsNullOrEmpty(selectedNumbers))
+                {
+                    var parts = selectedNumbers.Split(',');
+                    foreach (var part in parts)
+                    {
+                        if (int.TryParse(part.Trim(), out var dbIndex) && 
+                            dbIndex >= 1 && dbIndex <= availableDatabases.Count())
+                        {
+                            newDbIds.Add(availableDatabases[dbIndex - 1].Id);
+                        }
+                    }
+                }
+                
+                await UpdateUserDatabaseAssignments(newDbIds);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error showing database assignment modal for user {UserId}", user?.OnboardedUserId);
+            errorMessage = "Error updating database assignments. Please try again.";
+            StateHasChanged();
+        }
+    }
+
+    private async Task UpdateUserDatabaseAssignments(List<Guid> newDatabaseIds)
+    {
+        if (user == null) return;
+
+        try
+        {
+            ClearMessages();
+            
+            var currentUserId = GetCurrentUserId();
+            var success = await OnboardedUserService.UpdateDatabaseAssignmentsAsync(
+                user.OnboardedUserId, 
+                newDatabaseIds, 
+                currentUserOrgId, 
+                currentUserId);
+            
+            if (success)
+            {
+                successMessage = $"Database assignments updated successfully for {user.Name}.";
+                await LoadUser(); // Reload to get updated assignments
+            }
+            else
+            {
+                errorMessage = "Failed to update database assignments. Please try again.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating database assignments for user {UserId}", user.OnboardedUserId);
+            errorMessage = "An unexpected error occurred while updating database assignments. Please try again.";
+        }
+    }
+
+    private async Task ResendInvitation()
+    {
+        if (user == null) return;
+
+        try
+        {
+            ClearMessages();
+            
+            var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", 
+                $"Are you sure you want to resend the invitation to {user.Name} ({user.Email})?");
+                
+            if (confirmed)
+            {
+                var result = await InvitationService.ResendInvitationAsync(user.OnboardedUserId);
+                
+                if (result.Success)
+                {
+                    successMessage = $"Invitation resent successfully to {user.Email}.";
+                }
+                else
+                {
+                    errorMessage = $"Failed to resend invitation: {result.Message}";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error resending invitation for user {UserId}", user.OnboardedUserId);
+            errorMessage = "An unexpected error occurred while resending the invitation. Please try again.";
+        }
+        
+        StateHasChanged();
+    }
+
+    private async Task ShowSupervisorModal()
+    {
+        try
+        {
+            ClearMessages();
+            
+            var currentSupervisor = user?.AssignedSupervisorEmail ?? "";
+            var promptMessage = $"Current supervisor: {(string.IsNullOrEmpty(currentSupervisor) ? "None" : currentSupervisor)}\n\nEnter new supervisor email address:\n(Leave empty to remove supervisor assignment)";
+            
+            var newSupervisor = await JSRuntime.InvokeAsync<string>("prompt", promptMessage, currentSupervisor);
+            
+            if (newSupervisor != null) // User clicked OK (even if empty)
+            {
+                await UpdateSupervisorAssignment(newSupervisor.Trim());
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error showing supervisor modal for user {UserId}", user?.OnboardedUserId);
+            errorMessage = "Error updating supervisor assignment. Please try again.";
+            StateHasChanged();
+        }
+    }
+
+    private async Task UpdateSupervisorAssignment(string newSupervisorEmail)
+    {
+        if (user == null) return;
+
+        try
+        {
+            ClearMessages();
+            
+            // Validate email format if provided
+            if (!string.IsNullOrEmpty(newSupervisorEmail) && !IsValidEmail(newSupervisorEmail))
+            {
+                errorMessage = "Please enter a valid email address for the supervisor.";
+                StateHasChanged();
+                return;
+            }
+            
+            var currentUserId = GetCurrentUserId();
+            var success = await OnboardedUserService.UpdateSupervisorAssignmentAsync(
+                user.OnboardedUserId, 
+                newSupervisorEmail, 
+                currentUserOrgId, 
+                currentUserId);
+            
+            if (success)
+            {
+                var action = string.IsNullOrEmpty(newSupervisorEmail) ? "removed" : "updated";
+                successMessage = $"Supervisor assignment {action} successfully for {user.Name}.";
+                await LoadUser(); // Reload to get updated assignment
+            }
+            else
+            {
+                errorMessage = "Failed to update supervisor assignment. Please try again.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating supervisor assignment for user {UserId}", user.OnboardedUserId);
+            errorMessage = "An unexpected error occurred while updating supervisor assignment. Please try again.";
+        }
+    }
+
+    private bool IsValidEmail(string email)
+    {
+        try
+        {
+            var addr = new System.Net.Mail.MailAddress(email);
+            return addr.Address == email;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private Guid GetCurrentUserId()
+    {
+        try
+        {
+            var user = HttpContextAccessor.HttpContext?.User;
+            var objectId = user?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+            
+            if (!string.IsNullOrEmpty(objectId) && Guid.TryParse(objectId, out var userId))
+            {
+                return userId;
+            }
+            
+            Logger.LogWarning("Could not get current user ID from claims");
+            return Guid.NewGuid(); // Fallback
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error getting current user ID");
+            return Guid.NewGuid(); // Fallback
+        }
+    }
+}

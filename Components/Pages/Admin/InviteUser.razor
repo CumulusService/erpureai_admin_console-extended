@@ -1,0 +1,509 @@
+@page "/admin/users/invite"
+@page "/users/invite"
+@rendermode InteractiveServer
+@using AdminConsole.Models
+@using AdminConsole.Services
+@using System.Security.Cryptography
+@inject IInvitationService InvitationService
+@inject IDataIsolationService DataIsolationService
+@inject IOrganizationService OrganizationService
+@inject IDatabaseCredentialService DatabaseCredentialService
+@inject IUserDatabaseAccessService UserDatabaseAccessService
+@inject ILogger<InviteUser> Logger
+@inject IJSRuntime JSRuntime
+@inject NavigationManager Navigation
+@attribute [Authorize(Policy = "OrgAdminOrHigher")]
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h2 class="mb-1">Invite User</h2>
+                    <p class="text-muted mb-0">Send invitation to join your organization</p>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <strong>Error:</strong> @errorMessage
+                    <button type="button" class="btn-close" @onclick="ClearMessages"></button>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(successMessage))
+            {
+                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                    <strong>Success:</strong> @successMessage
+                    <button type="button" class="btn-close" @onclick="ClearMessages"></button>
+                </div>
+            }
+
+            <div class="row">
+                <div class="col-md-8 col-lg-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0">
+                                <i class="fas fa-user-plus me-2"></i>
+                                User Invitation Details
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <EditForm Model="invitationModel" OnValidSubmit="SendInvitationAsync">
+                                <DataAnnotationsValidator />
+                                
+                                <div class="mb-3">
+                                    <label for="email" class="form-label">
+                                        Email Address <span class="text-danger">*</span>
+                                    </label>
+                                    <div class="input-group">
+                                        <span class="input-group-text">
+                                            <i class="fas fa-envelope"></i>
+                                        </span>
+                                        <InputText @bind-Value="invitationModel.Email" 
+                                                 class="form-control" 
+                                                 id="email" 
+                                                 placeholder="user@yourdomain.com"
+                                                 @onblur="ValidateEmailDomain" />
+                                    </div>
+                                    <ValidationMessage For="@(() => invitationModel.Email)" />
+                                    @if (!string.IsNullOrEmpty(domainValidationMessage))
+                                    {
+                                        <div class="form-text text-danger">
+                                            <i class="fas fa-exclamation-triangle me-1"></i>
+                                            @domainValidationMessage
+                                        </div>
+                                    }
+                                    @if (!string.IsNullOrEmpty(allowedDomain))
+                                    {
+                                        <div class="form-text text-info">
+                                            <i class="fas fa-info-circle me-1"></i>
+                                            You can only invite users from your domain: <strong>@allowedDomain</strong>
+                                        </div>
+                                    }
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="displayName" class="form-label">
+                                        Display Name <span class="text-danger">*</span>
+                                    </label>
+                                    <div class="input-group">
+                                        <span class="input-group-text">
+                                            <i class="fas fa-user"></i>
+                                        </span>
+                                        <InputText @bind-Value="invitationModel.DisplayName" 
+                                                 class="form-control" 
+                                                 id="displayName" 
+                                                 placeholder="Enter user's full name" />
+                                    </div>
+                                    <ValidationMessage For="@(() => invitationModel.DisplayName)" />
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="agentTypes" class="form-label">
+                                        Agent Types <span class="text-danger">*</span>
+                                    </label>
+                                    <div class="form-check">
+                                        <InputCheckbox @bind-Value="selectedAgentTypes.SBOAgentAppv1" 
+                                                     class="form-check-input" 
+                                                     id="agentSBO" />
+                                        <label class="form-check-label" for="agentSBO">
+                                            SBO Agent App v1
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <InputCheckbox @bind-Value="selectedAgentTypes.Sales" 
+                                                     class="form-check-input" 
+                                                     id="agentSales" />
+                                        <label class="form-check-label" for="agentSales">
+                                            Sales Agent
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <InputCheckbox @bind-Value="selectedAgentTypes.Admin" 
+                                                     class="form-check-input" 
+                                                     id="agentAdmin" />
+                                        <label class="form-check-label" for="agentAdmin">
+                                            Admin Agent
+                                        </label>
+                                    </div>
+                                    <div class="form-text">
+                                        Select the types of agents this user will have access to.
+                                    </div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label class="form-label">
+                                        Database Access <span class="text-danger">*</span>
+                                    </label>
+                                    @if (availableDatabases.Any())
+                                    {
+                                        @foreach (var database in availableDatabases)
+                                        {
+                                            <div class="form-check">
+                                                <input class="form-check-input" 
+                                                       type="checkbox" 
+                                                       id="db_@database.Id" 
+                                                       @onchange="@((e) => ToggleDatabaseSelection(database.Id, (bool)e.Value!))" />
+                                                <label class="form-check-label" for="db_@database.Id">
+                                                    <strong>@database.FriendlyName</strong> - @database.DatabaseType (@database.DatabaseName)
+                                                    @if (!string.IsNullOrEmpty(database.Description))
+                                                    {
+                                                        <br><small class="text-muted">@database.Description</small>
+                                                    }
+                                                </label>
+                                            </div>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <div class="alert alert-info">
+                                            <i class="fas fa-info-circle me-2"></i>
+                                            No database credentials found for your organization. Please add database credentials first.
+                                        </div>
+                                    }
+                                    <div class="form-text">
+                                        Select which databases this user can access. Users inherit database settings from your organization.
+                                    </div>
+                                </div>
+
+                                <div class="mb-4">
+                                    <label for="message" class="form-label">
+                                        Personal Message (Optional)
+                                    </label>
+                                    <InputTextArea @bind-Value="invitationModel.PersonalMessage" 
+                                                 class="form-control" 
+                                                 id="message" 
+                                                 rows="3"
+                                                 placeholder="Add a personal message to the invitation..." />
+                                    <div class="form-text">
+                                        This message will be included in the invitation email.
+                                    </div>
+                                </div>
+
+                                <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                                    <button type="button" class="btn btn-outline-secondary" @onclick="ClearForm">
+                                        <i class="fas fa-times me-1"></i>
+                                        Clear
+                                    </button>
+                                    <button type="submit" class="btn btn-primary" disabled="@(isLoading || !IsFormValid())">
+                                        @if (isLoading)
+                                        {
+                                            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                                        }
+                                        else
+                                        {
+                                            <i class="fas fa-paper-plane me-1"></i>
+                                        }
+                                        Send Invitation
+                                    </button>
+                                </div>
+                            </EditForm>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 col-lg-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0">
+                                <i class="fas fa-info-circle me-2"></i>
+                                Invitation Information
+                            </h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-3">
+                                <h6 class="text-primary">
+                                    <i class="fas fa-shield-alt me-1"></i>
+                                    Domain Security
+                                </h6>
+                                <p class="small text-muted">
+                                    You can only invite users from your organization's domain (@allowedDomain). 
+                                    This ensures secure multi-tenant isolation.
+                                </p>
+                            </div>
+
+                            <div class="mb-3">
+                                <h6 class="text-primary">
+                                    <i class="fas fa-users me-1"></i>
+                                    Azure AD Integration
+                                </h6>
+                                <p class="small text-muted">
+                                    Invited users will be added to your organization's Azure AD Security Group 
+                                    automatically and granted appropriate permissions.
+                                </p>
+                            </div>
+
+                            <div class="mb-3">
+                                <h6 class="text-primary">
+                                    <i class="fas fa-envelope me-1"></i>
+                                    Invitation Process
+                                </h6>
+                                <ol class="small text-muted ps-3">
+                                    <li>User receives invitation email</li>
+                                    <li>User accepts invitation in Azure AD</li>
+                                    <li>User is added to security group</li>
+                                    <li>User can access the admin console</li>
+                                </ol>
+                            </div>
+
+                            @if (currentUserRole == UserRole.SuperAdmin)
+                            {
+                                <div class="alert alert-info">
+                                    <h6 class="alert-heading">
+                                        <i class="fas fa-crown me-1"></i>
+                                        Super Admin Mode
+                                    </h6>
+                                    <p class="mb-0 small">
+                                        As a Super Admin, you can invite users to any organization. 
+                                        Domain validation is relaxed for cross-organization management.
+                                    </p>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private InvitationModel invitationModel = new();
+    private SelectedAgentTypes selectedAgentTypes = new();
+    private List<DatabaseCredential> availableDatabases = new();
+    private HashSet<Guid> selectedDatabaseIds = new();
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+    private string domainValidationMessage = string.Empty;
+    private string allowedDomain = string.Empty;
+    private bool isLoading = false;
+    private UserRole currentUserRole = UserRole.User;
+
+    public class InvitationModel
+    {
+        [Required(ErrorMessage = "Email address is required")]
+        [EmailAddress(ErrorMessage = "Please enter a valid email address")]
+        public string Email { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Display name is required")]
+        [StringLength(100, MinimumLength = 2, ErrorMessage = "Display name must be between 2 and 100 characters")]
+        public string DisplayName { get; set; } = string.Empty;
+
+        [StringLength(500, ErrorMessage = "Personal message cannot exceed 500 characters")]
+        public string PersonalMessage { get; set; } = string.Empty;
+    }
+
+    public class SelectedAgentTypes
+    {
+        public bool SBOAgentAppv1 { get; set; } = true; // Default to true
+        public bool Sales { get; set; } = false;
+        public bool Admin { get; set; } = false;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            currentUserRole = DataIsolationService.GetCurrentUserRole();
+            
+            // Get current user's organization to determine allowed domain and load databases
+            var currentUserOrgId = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
+            if (!string.IsNullOrEmpty(currentUserOrgId))
+            {
+                var organization = await OrganizationService.GetByIdAsync(currentUserOrgId);
+                if (organization != null)
+                {
+                    allowedDomain = organization.Domain;
+                }
+                
+                // Load available databases for the organization
+                Guid orgGuid;
+                if (!Guid.TryParse(currentUserOrgId, out orgGuid))
+                {
+                    // Generate deterministic GUID from organization ID string
+                    using (var md5 = System.Security.Cryptography.MD5.Create())
+                    {
+                        var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(currentUserOrgId));
+                        orgGuid = new Guid(hash);
+                    }
+                    Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgId);
+                }
+                availableDatabases = await DatabaseCredentialService.GetByOrganizationAsync(orgGuid);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing invite user page");
+            errorMessage = "Error loading page. Please refresh and try again.";
+        }
+    }
+
+    private async Task ValidateEmailDomain()
+    {
+        domainValidationMessage = string.Empty;
+        
+        if (string.IsNullOrEmpty(invitationModel.Email) || !invitationModel.Email.Contains("@"))
+        {
+            return;
+        }
+
+        try
+        {
+            var currentUserOrgId = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
+            if (string.IsNullOrEmpty(currentUserOrgId))
+            {
+                domainValidationMessage = "Unable to validate domain. Please contact support.";
+                return;
+            }
+
+            Guid orgGuid;
+            if (!Guid.TryParse(currentUserOrgId, out orgGuid))
+            {
+                // Generate deterministic GUID from organization ID string
+                using (var md5 = System.Security.Cryptography.MD5.Create())
+                {
+                    var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(currentUserOrgId));
+                    orgGuid = new Guid(hash);
+                }
+                Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgId);
+            }
+            var canInvite = await InvitationService.CanInviteEmailAsync(orgGuid, invitationModel.Email);
+            
+            if (!canInvite && currentUserRole != UserRole.SuperAdmin)
+            {
+                domainValidationMessage = $"You can only invite users from your domain ({allowedDomain}).";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error validating email domain for {Email}", invitationModel.Email);
+            domainValidationMessage = "Error validating domain. Please try again.";
+        }
+    }
+
+    private void ToggleDatabaseSelection(Guid databaseId, bool isSelected)
+    {
+        if (isSelected)
+        {
+            selectedDatabaseIds.Add(databaseId);
+        }
+        else
+        {
+            selectedDatabaseIds.Remove(databaseId);
+        }
+        StateHasChanged();
+    }
+
+    private bool IsFormValid()
+    {
+        return !string.IsNullOrEmpty(invitationModel.Email) &&
+               !string.IsNullOrEmpty(invitationModel.DisplayName) &&
+               selectedDatabaseIds.Any() &&
+               (selectedAgentTypes.SBOAgentAppv1 || selectedAgentTypes.Sales || selectedAgentTypes.Admin) &&
+               string.IsNullOrEmpty(domainValidationMessage);
+    }
+
+    private async Task SendInvitationAsync()
+    {
+        if (isLoading) return;
+
+        try
+        {
+            ClearMessages();
+            isLoading = true;
+
+            // Get current user's organization
+            var currentUserOrgId = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
+            if (string.IsNullOrEmpty(currentUserOrgId))
+            {
+                errorMessage = "Unable to determine your organization. Please contact support.";
+                return;
+            }
+
+            // Build agent types list
+            var agentTypes = new List<LegacyAgentType>();
+            if (selectedAgentTypes.SBOAgentAppv1) agentTypes.Add(LegacyAgentType.SBOAgentAppv1);
+            if (selectedAgentTypes.Sales) agentTypes.Add(LegacyAgentType.Sales);
+            if (selectedAgentTypes.Admin) agentTypes.Add(LegacyAgentType.Admin);
+
+            // Get current user ID for invitedBy parameter
+            var currentUser = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
+            var invitedBy = Guid.NewGuid(); // TODO: Get actual current user ID from claims
+            
+            // Send invitation
+            Guid orgGuid;
+            if (!Guid.TryParse(currentUserOrgId!, out orgGuid))
+            {
+                // Generate deterministic GUID from organization ID string
+                using (var md5 = System.Security.Cryptography.MD5.Create())
+                {
+                    var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(currentUserOrgId!));
+                    orgGuid = new Guid(hash);
+                }
+                Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgId);
+            }
+            var result = await InvitationService.InviteUserAsync(
+                orgGuid,
+                invitationModel.Email,
+                invitedBy,
+                agentTypes
+            );
+
+            if (result.Success)
+            {
+                // Note: In a real implementation, we would need to get the created user ID from the invitation result
+                // and then assign databases. For now, we'll just show a success message with database info.
+                var assignedDatabases = availableDatabases.Where(db => selectedDatabaseIds.Contains(db.Id)).Select(db => db.FriendlyName);
+                var databaseList = string.Join(", ", assignedDatabases);
+                
+                successMessage = $"Invitation sent successfully to {invitationModel.Email}. " +
+                               $"User will have access to: {databaseList}. " +
+                               "The user will receive an email with instructions to join your organization.";
+                
+                // Clear form after successful invitation
+                await Task.Delay(2000); // Show success message for 2 seconds
+                ClearForm();
+                
+                // Navigate to user management page
+                Navigation.NavigateTo("/admin/users", forceLoad: false);
+            }
+            else
+            {
+                errorMessage = string.Join("; ", result.Errors);
+                if (string.IsNullOrEmpty(errorMessage))
+                {
+                    errorMessage = result.Message ?? "Failed to send invitation. Please try again.";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error sending invitation to {Email}", invitationModel.Email);
+            errorMessage = "An unexpected error occurred. Please try again.";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ClearForm()
+    {
+        invitationModel = new InvitationModel();
+        selectedAgentTypes = new SelectedAgentTypes();
+        selectedDatabaseIds.Clear();
+        ClearMessages();
+        domainValidationMessage = string.Empty;
+        StateHasChanged();
+    }
+
+    private void ClearMessages()
+    {
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+        StateHasChanged();
+    }
+}

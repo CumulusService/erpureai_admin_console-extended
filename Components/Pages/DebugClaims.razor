@@ -1,0 +1,82 @@
+@page "/debug-claims"
+@using System.Security.Claims
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Debug Claims</PageTitle>
+
+<div class="container-fluid mt-4">
+    <div class="card">
+        <div class="card-header">
+            <h3>User Authentication Debug</h3>
+        </div>
+        <div class="card-body">
+            <div class="alert alert-info">
+                <h5>Authentication Status:</h5>
+                <p><strong>Is Authenticated:</strong> @context.User.Identity?.IsAuthenticated</p>
+                <p><strong>Authentication Type:</strong> @context.User.Identity?.AuthenticationType</p>
+                <p><strong>Name:</strong> @context.User.Identity?.Name</p>
+            </div>
+
+            <div class="alert alert-warning">
+                <h5>Email Extraction Test:</h5>
+                <p><strong>Extracted Email:</strong> @extractedEmail</p>
+                <p><strong>Is Erpure User:</strong> @isErpureUser</p>
+            </div>
+
+            <h5>All Claims:</h5>
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Claim Type</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (context.User.Claims.Any())
+                    {
+                        @foreach (var claim in context.User.Claims)
+                        {
+                            <tr>
+                                <td><code>@claim.Type</code></td>
+                                <td>@claim.Value</td>
+                            </tr>
+                        }
+                    }
+                    else
+                    {
+                        <tr>
+                            <td colspan="2" class="text-center text-muted">No claims found</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+
+            <div class="mt-4">
+                <a href="/owner/invite-admin" class="btn btn-primary">Try Invite Admin</a>
+                <a href="/" class="btn btn-secondary">Home</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter]
+    private HttpContext context { get; set; } = default!;
+
+    private string? extractedEmail;
+    private bool isErpureUser;
+
+    protected override void OnInitialized()
+    {
+        if (context?.User != null)
+        {
+            extractedEmail = context.User.FindFirst("email")?.Value ?? 
+                           context.User.FindFirst("preferred_username")?.Value ?? 
+                           context.User.FindFirst("upn")?.Value ?? 
+                           context.User.FindFirst("unique_name")?.Value ??
+                           context.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value;
+            
+            isErpureUser = extractedEmail?.EndsWith("@erpure.ai") == true;
+        }
+    }
+}

@@ -1,0 +1,35 @@
+@page "/signout"
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.OpenIdConnect
+@using Microsoft.AspNetCore.Components.Web
+@inject NavigationManager Navigation
+@inject IJSRuntime JSRuntime
+@attribute [AllowAnonymous]
+
+<PageTitle>Signing Out...</PageTitle>
+
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6">
+            <div class="card shadow">
+                <div class="card-body text-center p-5">
+                    <div class="mb-4">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                    <h4>Signing you out...</h4>
+                    <p class="text-muted">Please wait while we securely sign you out.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        // Redirect to the controller endpoint to handle actual sign out
+        Navigation.NavigateTo("/Account/SignOut", forceLoad: true);
+    }
+}

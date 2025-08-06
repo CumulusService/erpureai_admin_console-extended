@@ -1,0 +1,86 @@
+/* Light Theme (Default) */
+body, body.light-theme {
+    background-color: #ffffff;
+    color: #212529;
+}
+
+body .sidebar, body.light-theme .sidebar {
+    background-color: #f8f9fa;
+    border-right: 1px solid #e9ecef;
+}
+
+body .sidebar .nav-link, body.light-theme .sidebar .nav-link {
+    color: #495057;
+}
+
+body .sidebar .nav-link:hover, body.light-theme .sidebar .nav-link:hover {
+    background-color: #e9ecef;
+    color: #007bff;
+}
+
+body .card, body.light-theme .card {
+    background-color: #ffffff;
+    border: 1px solid #e9ecef;
+}
+
+/* Dark Theme */
+body.dark-theme {
+    background-color: #1a1d23;
+    color: #e9ecef;
+}
+
+body.dark-theme .sidebar {
+    background-color: #2d3339;
+    border-right: 1px solid #495057;
+}
+
+body.dark-theme .sidebar .nav-link {
+    color: #e9ecef;
+}
+
+body.dark-theme .sidebar .nav-link:hover {
+    background-color: #495057;
+    color: #0d6efd;
+}
+
+body.dark-theme .sidebar .nav-link.active {
+    background-color: #0d6efd;
+    color: #ffffff;
+}
+
+body.dark-theme .card {
+    background-color: #2d3339;
+    border: 1px solid #495057;
+    color: #e9ecef;
+}
+
+body.dark-theme .form-control,
+body.dark-theme .form-select {
+    background-color: #2d3339;
+    border-color: #495057;
+    color: #e9ecef;
+}
+
+body.dark-theme .form-control:focus,
+body.dark-theme .form-select:focus {
+    background-color: #2d3339;
+    border-color: #86b7fe;
+    color: #e9ecef;
+}
+
+/* Agent Type Checkboxes */
+body.dark-theme .agent-type-checkbox {
+    background-color: #2d3339;
+    border: 2px solid #6c757d;
+    color: #e9ecef;
+}
+
+body.dark-theme .agent-type-checkbox:hover {
+    border-color: #0d6efd;
+    background-color: rgba(13, 110, 253, 0.1);
+}
+
+body.dark-theme .agent-type-checkbox:has(input:checked) {
+    border-color: #0d6efd;
+    background-color: rgba(13, 110, 253, 0.2);
+}

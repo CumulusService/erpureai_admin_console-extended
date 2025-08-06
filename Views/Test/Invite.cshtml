@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Admin Invitation</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css">
+</head>
+<body>
+    <div class="container mt-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>Test Admin Invitation</h1>
+            <a href="/Account/SignOut" class="btn btn-outline-secondary">Sign Out</a>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <h5>Create Organization & Invite Admin</h5>
+                
+                <form method="post">
+                    <div class="mb-3">
+                        <label>Admin Email:</label>
+                        <input name="adminEmail" class="form-control" placeholder="admin@company.com" value="test@example.com" required />
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label>Admin Name:</label>
+                        <input name="adminName" class="form-control" placeholder="John Admin" value="Test Admin" required />
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label>Organization Name:</label>
+                        <input name="orgName" class="form-control" placeholder="Test Company" value="Test Organization" required />
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label>Organization Domain:</label>
+                        <input name="orgDomain" class="form-control" placeholder="company.com" value="example.com" required />
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary">Send Invitation</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

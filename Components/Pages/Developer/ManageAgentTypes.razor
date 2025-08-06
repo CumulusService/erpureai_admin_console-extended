@@ -1,0 +1,451 @@
+@page "/developer/agent-types"
+@using AdminConsole.Models
+@using AdminConsole.Services
+@inject IAgentTypeService AgentTypeService
+@inject ILogger<ManageAgentTypes> Logger
+@inject IJSRuntime JSRuntime
+@attribute [Authorize(Policy = "DevOnly")]
+@rendermode InteractiveServer
+
+<PageTitle>Manage Agent Types - Developer Portal</PageTitle>
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h2 class="mb-1">Agent Types Management</h2>
+                    <p class="text-muted mb-0">Configure agent types and their global security group assignments</p>
+                </div>
+                <button type="button" class="btn btn-primary" @onclick="ShowCreateModal">
+                    <i class="fas fa-plus me-1"></i>
+                    Create Agent Type
+                </button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <strong>Error:</strong> @errorMessage
+                    <button type="button" class="btn-close" @onclick="ClearMessages"></button>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(successMessage))
+            {
+                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                    <strong>Success:</strong> @successMessage
+                    <button type="button" class="btn-close" @onclick="ClearMessages"></button>
+                </div>
+            }
+
+            @if (isLoading)
+            {
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-muted">Loading agent types...</p>
+                </div>
+            }
+            else
+            {
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-robot me-2"></i>
+                            Agent Types (@agentTypes.Count)
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        @if (agentTypes.Any())
+                        {
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Display Name</th>
+                                            <th>Global Security Group ID</th>
+                                            <th>Teams App ID</th>
+                                            <th>Status</th>
+                                            <th>Order</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var agentType in agentTypes.OrderBy(at => at.DisplayOrder))
+                                        {
+                                            <tr class="@(agentType.IsActive ? "" : "table-secondary")">
+                                                <td>
+                                                    <strong>@agentType.Name</strong>
+                                                    @if (!string.IsNullOrEmpty(agentType.Description))
+                                                    {
+                                                        <br><small class="text-muted">@agentType.Description</small>
+                                                    }
+                                                </td>
+                                                <td>@agentType.DisplayName</td>
+                                                <td>
+                                                    @if (!string.IsNullOrEmpty(agentType.GlobalSecurityGroupId))
+                                                    {
+                                                        <code class="small">@agentType.GlobalSecurityGroupId</code>
+                                                        <button type="button" class="btn btn-sm btn-outline-info ms-1" 
+                                                                @onclick="() => ValidateSecurityGroup(agentType.GlobalSecurityGroupId)"
+                                                                title="Validate Security Group">
+                                                            <i class="fas fa-check-circle"></i>
+                                                        </button>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="text-muted">Not configured</span>
+                                                    }
+                                                </td>
+                                                <td>
+                                                    @if (!string.IsNullOrEmpty(agentType.TeamsAppId))
+                                                    {
+                                                        <code class="small">@agentType.TeamsAppId</code>
+                                                        <div class="small text-muted">Auto-install to Teams</div>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="text-muted">Not configured</span>
+                                                    }
+                                                </td>
+                                                <td>
+                                                    <span class="badge @(agentType.IsActive ? "bg-success" : "bg-secondary")">
+                                                        @(agentType.IsActive ? "Active" : "Inactive")
+                                                    </span>
+                                                </td>
+                                                <td>@agentType.DisplayOrder</td>
+                                                <td>
+                                                    <div class="btn-group btn-group-sm">
+                                                        <button type="button" class="btn btn-sm btn-outline-primary" 
+                                                                @onclick="() => ShowEditModal(agentType)">
+                                                            <i class="fas fa-edit"></i>
+                                                        </button>
+                                                        <button type="button" class="btn btn-sm btn-outline-warning" 
+                                                                @onclick="() => ToggleActiveStatus(agentType)">
+                                                            <i class="fas @(agentType.IsActive ? "fa-pause" : "fa-play")"></i>
+                                                        </button>
+                                                        <button type="button" class="btn btn-sm btn-outline-danger" 
+                                                                @onclick="() => DeleteAgentType(agentType)">
+                                                            <i class="fas fa-trash"></i>
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="text-center py-4">
+                                <i class="fas fa-robot fa-3x text-muted mb-3"></i>
+                                <h5 class="text-muted">No Agent Types Found</h5>
+                                <p class="text-muted">Create your first agent type to get started.</p>
+                                <button type="button" class="btn btn-primary" @onclick="ShowCreateModal">
+                                    <i class="fas fa-plus me-1"></i>
+                                    Create Agent Type
+                                </button>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<!-- Create/Edit Modal -->
+@if (showModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        @(editingAgentType?.Id == Guid.Empty ? "Create Agent Type" : "Edit Agent Type")
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    <EditForm Model="editingAgentType" OnValidSubmit="SaveAgentType">
+                        <DataAnnotationsValidator />
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="name" class="form-label">Name *</label>
+                                <InputText @bind-Value="editingAgentType!.Name" class="form-control" id="name" 
+                                         placeholder="SBOAgentAppv1" />
+                                <ValidationMessage For="@(() => editingAgentType.Name)" class="text-danger" />
+                                <div class="form-text">Internal identifier (no spaces)</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="displayName" class="form-label">Display Name *</label>
+                                <InputText @bind-Value="editingAgentType.DisplayName" class="form-control" id="displayName" 
+                                         placeholder="SBO Agent App v1" />
+                                <ValidationMessage For="@(() => editingAgentType.DisplayName)" class="text-danger" />
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="description" class="form-label">Description</label>
+                            <InputTextArea @bind-Value="editingAgentType.Description" class="form-control" id="description" 
+                                         rows="3" placeholder="Describe what this agent type does..." />
+                            <ValidationMessage For="@(() => editingAgentType.Description)" class="text-danger" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="globalSecurityGroupId" class="form-label">Global Security Group ID</label>
+                            <div class="input-group">
+                                <InputText @bind-Value="editingAgentType.GlobalSecurityGroupId" class="form-control" 
+                                         id="globalSecurityGroupId" placeholder="Azure AD Security Group ID" />
+                                <button type="button" class="btn btn-outline-secondary" 
+                                        @onclick="() => ValidateSecurityGroup(editingAgentType.GlobalSecurityGroupId)">
+                                    <i class="fas fa-check"></i> Validate
+                                </button>
+                            </div>
+                            <ValidationMessage For="@(() => editingAgentType.GlobalSecurityGroupId)" class="text-danger" />
+                            <div class="form-text">Azure AD Security Group ID that users will be added to</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="teamsAppId" class="form-label">Teams App ID <span class="text-muted">(Optional)</span></label>
+                            <InputText @bind-Value="editingAgentType.TeamsAppId" class="form-control" 
+                                     id="teamsAppId" placeholder="Microsoft Teams App ID (GUID format)" />
+                            <ValidationMessage For="@(() => editingAgentType.TeamsAppId)" class="text-danger" />
+                            <div class="form-text">
+                                <i class="fas fa-info-circle text-info me-1"></i>
+                                Teams App ID that will be automatically installed to Teams when this agent type is used. 
+                                Must be a valid GUID format (e.g., 12345678-1234-1234-1234-123456789abc).
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="agentShareUrl" class="form-label">Agent Share URL</label>
+                                <InputText @bind-Value="editingAgentType.AgentShareUrl" class="form-control" id="agentShareUrl" 
+                                         placeholder="https://..." />
+                                <ValidationMessage For="@(() => editingAgentType.AgentShareUrl)" class="text-danger" />
+                            </div>
+                            <div class="col-md-6">
+                                <label for="displayOrder" class="form-label">Display Order</label>
+                                <InputNumber @bind-Value="editingAgentType.DisplayOrder" class="form-control" id="displayOrder" />
+                                <ValidationMessage For="@(() => editingAgentType.DisplayOrder)" class="text-danger" />
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <InputCheckbox @bind-Value="editingAgentType.IsActive" class="form-check-input" id="isActive" />
+                                <label class="form-check-label" for="isActive">
+                                    Active (available for assignment)
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" @onclick="CloseModal">Cancel</button>
+                            <button type="submit" class="btn btn-primary">
+                                @(editingAgentType.Id == Guid.Empty ? "Create" : "Update")
+                            </button>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<AgentTypeEntity> agentTypes = new();
+    private AgentTypeEntity editingAgentType = new();
+    private bool showModal = false;
+    private bool isLoading = true;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAgentTypes();
+    }
+
+    private async Task LoadAgentTypes()
+    {
+        try
+        {
+            isLoading = true;
+            agentTypes = await AgentTypeService.GetAllAgentTypesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading agent types");
+            errorMessage = "Error loading agent types. Please refresh and try again.";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ShowCreateModal()
+    {
+        editingAgentType = new AgentTypeEntity { IsActive = true };
+        showModal = true;
+        ClearMessages();
+    }
+
+    private void ShowEditModal(AgentTypeEntity agentType)
+    {
+        editingAgentType = new AgentTypeEntity
+        {
+            Id = agentType.Id,
+            Name = agentType.Name,
+            DisplayName = agentType.DisplayName,
+            Description = agentType.Description,
+            AgentShareUrl = agentType.AgentShareUrl,
+            GlobalSecurityGroupId = agentType.GlobalSecurityGroupId,
+            TeamsAppId = agentType.TeamsAppId,
+            IsActive = agentType.IsActive,
+            DisplayOrder = agentType.DisplayOrder
+        };
+        showModal = true;
+        ClearMessages();
+    }
+
+    private void CloseModal()
+    {
+        showModal = false;
+        editingAgentType = new();
+        ClearMessages();
+    }
+
+    private async Task SaveAgentType()
+    {
+        try
+        {
+            bool success;
+            if (editingAgentType.Id == Guid.Empty)
+            {
+                await AgentTypeService.CreateAsync(editingAgentType);
+                successMessage = $"Agent type '{editingAgentType.DisplayName}' created successfully.";
+            }
+            else
+            {
+                success = await AgentTypeService.UpdateAsync(editingAgentType);
+                if (success)
+                {
+                    successMessage = $"Agent type '{editingAgentType.DisplayName}' updated successfully.";
+                }
+                else
+                {
+                    errorMessage = "Failed to update agent type. Please try again.";
+                }
+            }
+
+            CloseModal();
+            await LoadAgentTypes();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving agent type");
+            errorMessage = "Error saving agent type. Please try again.";
+        }
+    }
+
+    private async Task ToggleActiveStatus(AgentTypeEntity agentType)
+    {
+        try
+        {
+            var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", 
+                $"Are you sure you want to {(agentType.IsActive ? "deactivate" : "activate")} '{agentType.DisplayName}'?");
+
+            if (confirmed)
+            {
+                agentType.IsActive = !agentType.IsActive;
+                var success = await AgentTypeService.UpdateAsync(agentType);
+                
+                if (success)
+                {
+                    successMessage = $"Agent type '{agentType.DisplayName}' {(agentType.IsActive ? "activated" : "deactivated")} successfully.";
+                    await LoadAgentTypes();
+                }
+                else
+                {
+                    errorMessage = "Failed to update agent type status.";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error toggling agent type status");
+            errorMessage = "Error updating agent type status.";
+        }
+    }
+
+    private async Task DeleteAgentType(AgentTypeEntity agentType)
+    {
+        try
+        {
+            var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", 
+                $"Are you sure you want to delete '{agentType.DisplayName}'? This will soft-delete the agent type.");
+
+            if (confirmed)
+            {
+                var success = await AgentTypeService.DeleteAsync(agentType.Id);
+                
+                if (success)
+                {
+                    successMessage = $"Agent type '{agentType.DisplayName}' deleted successfully.";
+                    await LoadAgentTypes();
+                }
+                else
+                {
+                    errorMessage = "Failed to delete agent type.";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error deleting agent type");
+            errorMessage = "Error deleting agent type.";
+        }
+    }
+
+    private async Task ValidateSecurityGroup(string? groupId)
+    {
+        if (string.IsNullOrEmpty(groupId))
+        {
+            errorMessage = "Please enter a Security Group ID first.";
+            return;
+        }
+
+        try
+        {
+            var isValid = await AgentTypeService.ValidateSecurityGroupAsync(groupId);
+            
+            if (isValid)
+            {
+                successMessage = $"Security Group ID '{groupId}' is valid and accessible.";
+            }
+            else
+            {
+                errorMessage = $"Security Group ID '{groupId}' is invalid or not accessible.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error validating security group {GroupId}", groupId);
+            errorMessage = "Error validating security group. Please try again.";
+        }
+    }
+
+    private void ClearMessages()
+    {
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+    }
+}

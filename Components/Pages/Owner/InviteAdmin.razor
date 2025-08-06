@@ -1,0 +1,781 @@
+@page "/owner/invite-admin"
+@using AdminConsole.Models
+@using AdminConsole.Services
+@inject IGraphService GraphService
+@inject IOrganizationSetupService OrganizationSetupService
+@inject ITeamsGroupService TeamsGroupService
+@inject IAgentTypeService AgentTypeService
+@inject IInvitationService InvitationService
+@inject NavigationManager Navigation
+@inject ILogger<InviteAdmin> Logger
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IUnsavedChangesService UnsavedChangesService
+@inject IJSRuntime JSRuntime
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@rendermode InteractiveServer
+
+<PageTitle>Invite Organization Admin</PageTitle>
+
+
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card shadow">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">
+                        <i class="fas fa-user-plus me-2"></i>
+                        Invite Organization Admin
+                    </h6>
+                </div>
+                <div class="card-body">
+                    @if (!string.IsNullOrEmpty(errorMessage))
+                    {
+                        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                            <strong>Error:</strong> @errorMessage
+                            <button type="button" class="btn-close" @onclick="ClearMessages"></button>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(successMessage))
+                    {
+                        <div class="alert alert-success alert-dismissible fade show" role="alert">
+                            <strong>Success:</strong> @successMessage
+                            <button type="button" class="btn-close" @onclick="ClearMessages"></button>
+                        </div>
+                    }
+
+                    <UnsavedChangesTracker @ref="unsavedChangesTracker" FormId="InviteAdminForm" TrackChanges="@hasUnsavedChanges" />
+                    
+                    <EditForm Model="inviteModel" OnValidSubmit="HandleInviteSubmit" FormName="InviteAdminForm">
+                        <DataAnnotationsValidator />
+                        
+                        <div class="alert alert-info mb-4">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <strong>Organization Admin Invitation:</strong> This will create a new organization and invite an admin to manage it.
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="adminEmail" class="form-label">Admin Email Address *</label>
+                                <InputText @bind-Value="inviteModel.AdminEmail" class="form-control" id="adminEmail" 
+                                         placeholder="admin@company.com" @oninput="HandleAdminEmailInputAndMarkChanged" />
+                                <ValidationMessage For="@(() => inviteModel.AdminEmail)" class="text-danger" />
+                            </div>
+                            <div class="col-md-6">
+                                <label for="adminName" class="form-label">Admin Display Name *</label>
+                                <InputText @bind-Value="inviteModel.AdminName" class="form-control" id="adminName" 
+                                         placeholder="John Administrator" @oninput="@(async (e) => await MarkFormAsChanged())" />
+                                <ValidationMessage For="@(() => inviteModel.AdminName)" class="text-danger" />
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="organizationName" class="form-label">Organization Name *</label>
+                                <InputText @bind-Value="inviteModel.OrganizationName" class="form-control" id="organizationName" 
+                                         placeholder="Tech Solutions Inc" @oninput="@(async (e) => await MarkFormAsChanged())" />
+                                <ValidationMessage For="@(() => inviteModel.OrganizationName)" class="text-danger" />
+                            </div>
+                            <div class="col-md-6">
+                                <label for="organizationDomain" class="form-label">Organization Domain *</label>
+                                <InputText @bind-Value="inviteModel.OrganizationDomain" class="form-control" id="organizationDomain" 
+                                         placeholder="company.com" readonly="@isOrganizationDomainAutoFilled" 
+                                         style="@(isOrganizationDomainAutoFilled ? "background-color: #f8f9fa; color: #6c757d;" : "")" />
+                                <ValidationMessage For="@(() => inviteModel.OrganizationDomain)" class="text-danger" />
+                                <div class="form-text">
+                                    @if (isOrganizationDomainAutoFilled)
+                                    {
+                                        <span class="text-muted">Auto-filled from admin email. <button type="button" class="btn btn-link btn-sm p-0" @onclick="EnableManualDomainEntry" style="text-decoration: underline;">Edit manually</button></span>
+                                    }
+                                    else
+                                    {
+                                        <span>The domain from the admin's email address</span>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="supervisorEmail" class="form-label">Supervisor Email (Optional)</label>
+                            <InputText @bind-Value="inviteModel.SupervisorEmail" class="form-control" id="supervisorEmail" 
+                                     placeholder="supervisor@company.com" @oninput="@(async (e) => await MarkFormAsChanged())" />
+                            <ValidationMessage For="@(() => inviteModel.SupervisorEmail)" class="text-danger" />
+                            <div class="form-text">Email of the person who will supervise this admin</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Agent Types to Assign to Admin</label>
+                            <div class="card">
+                                <div class="card-body">
+                                    @if (isLoadingAgentTypes)
+                                    {
+                                        <div class="text-center text-muted py-3">
+                                            <i class="fas fa-spinner fa-spin fa-2x mb-2"></i>
+                                            <p class="mb-0">Loading agent types...</p>
+                                        </div>
+                                    }
+                                    else if (availableAgentTypes.Any())
+                                    {
+                                        <div class="row">
+                                            @foreach (var agentType in availableAgentTypes)
+                                            {
+                                                <div class="col-md-6 col-lg-4 mb-2">
+                                                    <div class="form-check agent-type-checkbox">
+                                                        <input type="checkbox" class="form-check-input" 
+                                                               id="agent_@agentType.Id" 
+                                                               checked="@inviteModel.SelectedAgentTypeIds.Contains(agentType.Id)"
+                                                               @onchange="@(async (e) => await ToggleAgentType(agentType.Id, (bool)e.Value!))" />
+                                                        <label class="form-check-label" for="agent_@agentType.Id">
+                                                            <strong>@agentType.DisplayName</strong>
+                                                            @if (!string.IsNullOrEmpty(agentType.Description))
+                                                            {
+                                                                <br><small class="text-muted">@agentType.Description</small>
+                                                            }
+                                                            @if (!string.IsNullOrEmpty(agentType.GlobalSecurityGroupId))
+                                                            {
+                                                                <br><small class="text-info">
+                                                                    <i class="fas fa-shield-alt me-1"></i>
+                                                                    Security Group: @agentType.GlobalSecurityGroupId.Substring(0, Math.Min(8, agentType.GlobalSecurityGroupId.Length))...
+                                                                </small>
+                                                            }
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="text-center text-muted py-3">
+                                            <i class="fas fa-robot fa-2x mb-2"></i>
+                                            <p class="mb-0">No agent types available. Please configure agent types in the Developer Portal first.</p>
+                                        </div>
+                                    }
+                                    <div class="form-text mt-2">
+                                        Select which agent types this admin will have access to. Admin will be added to corresponding security groups.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="customMessage" class="form-label">Custom Invitation Message (Optional)</label>
+                            <InputTextArea @bind-Value="inviteModel.CustomMessage" class="form-control" id="customMessage" rows="3" 
+                                         placeholder="Add a personal message to the invitation..." @oninput="@(async (e) => await MarkFormAsChanged())"></InputTextArea>
+                        </div>
+
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <InputCheckbox @bind-Value="inviteModel.SendWelcomeEmail" class="form-check-input" id="sendWelcome" @onchange="@(async (e) => await MarkFormAsChanged())" />
+                                <label class="form-check-label" for="sendWelcome">
+                                    Send welcome email with setup instructions
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="d-flex flex-column flex-sm-row justify-content-between gap-2">
+                            <button type="button" class="btn btn-secondary btn-responsive" @onclick="@(async () => await GoBack())" disabled="@isSubmitting">
+                                <i class="fas fa-arrow-left me-1"></i> 
+                                <span class="d-none d-sm-inline">Back to Admins</span>
+                                <span class="d-sm-none">Back</span>
+                            </button>
+                            <button type="submit" class="btn btn-primary btn-lg btn-responsive" disabled="@isSubmitting">
+                                @if (isSubmitting)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                    <span class="d-none d-md-inline">Sending Invitation</span>
+                                    <span class="d-md-none d-none d-sm-inline">Sending...</span>
+                                    <span class="d-sm-none">Send</span>
+                                }
+                                else
+                                {
+                                    <i class="fas fa-paper-plane me-2"></i>
+                                    <span class="d-none d-md-inline">Send Admin Invitation</span>
+                                    <span class="d-md-none d-none d-sm-inline">Send Invitation</span>
+                                    <span class="d-sm-none">Send</span>
+                                }
+                            </button>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="card shadow">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-info">Invitation Process</h6>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info">
+                        <h6><i class="fas fa-info-circle me-1"></i> What happens next:</h6>
+                        <ol class="mb-0">
+                            <li>Organization is created in the system</li>
+                            <li>Admin receives B2B invitation email</li>
+                            <li>Admin accepts and joins your tenant as guest</li>
+                            <li>Admin gains access to manage their organization</li>
+                            <li>Admin can invite and manage their own users</li>
+                        </ol>
+                    </div>
+
+                    <div class="mt-3">
+                        <h6><i class="fas fa-shield-alt text-success me-1"></i> Security Features</h6>
+                        <ul class="mb-0">
+                            <li>Organization-based data isolation</li>
+                            <li>Role-based access control</li>
+                            <li>Azure AD B2B guest authentication</li>
+                            <li>Secure secret management per org</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+
+            @if (recentInvitations.Any())
+            {
+                <div class="card shadow mt-4">
+                    <div class="card-header py-3">
+                        <h6 class="m-0 font-weight-bold text-success">Recent Admin Invitations</h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="list-group list-group-flush">
+                            @foreach (var invite in recentInvitations.Take(5))
+                            {
+                                <div class="list-group-item px-0">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div>
+                                            <strong>@invite.DisplayName</strong>
+                                            <br />
+                                            <small class="text-muted">@invite.Email</small>
+                                            <br />
+                                            <small class="text-muted">@invite.OrganizationName</small>
+                                        </div>
+                                        <div class="text-end">
+                                            <span class="badge bg-@(invite.InvitationStatus == "Accepted" ? "success" : "warning")">
+                                                @invite.InvitationStatus
+                                            </span>
+                                            <br />
+                                            <small class="text-muted">
+                                                @invite.InvitedDateTime.ToString("MMM dd")
+                                            </small>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<!-- Success Modal -->
+@if (showSuccessModal)
+{
+    <div class="modal-backdrop fade show" style="z-index: 1040;"></div>
+    <div class="modal fade show d-block" tabindex="-1" style="z-index: 1050;" @onclick="HandleBackdropClick">
+        <div class="modal-dialog modal-lg" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header border-0 pb-0">
+                    <h4 class="modal-title text-success">
+                        <i class="fas fa-check-circle me-2"></i> 
+                        Invitation Sent Successfully!
+                    </h4>
+                    <button type="button" class="btn-close btn-close-white" @onclick="CloseModal" @onclick:stopPropagation="true" aria-label="Close"></button>
+                </div>
+                <div class="modal-body pt-0">
+                    <div class="alert alert-success border-0">
+                        <h6><i class="fas fa-check me-2"></i>Invitation Details:</h6>
+                        <div class="row">
+                            <div class="col-sm-6">
+                                <strong>Admin Email:</strong><br>
+                                <span class="text-muted">@inviteModel.AdminEmail</span>
+                            </div>
+                            <div class="col-sm-6">
+                                <strong>Admin Name:</strong><br>
+                                <span class="text-muted">@inviteModel.AdminName</span>
+                            </div>
+                        </div>
+                        <div class="row mt-2">
+                            <div class="col-sm-6">
+                                <strong>Organization:</strong><br>
+                                <span class="text-muted">@inviteModel.OrganizationName</span>
+                            </div>
+                            <div class="col-sm-6">
+                                <strong>Domain:</strong><br>
+                                <span class="text-muted">@inviteModel.OrganizationDomain</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-success border-0">
+                        <h6><i class="fas fa-check-circle me-2"></i>Organization Setup Completed:</h6>
+                        <ul class="mb-0">
+                            <li>✅ Organization created in system</li>
+                            <li>✅ Security group created for user management</li>
+                            <li>✅ Default database connection templates created</li>
+                            <li>✅ API keys and service configurations generated</li>
+                            <li>✅ Tenant isolation policies configured</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="alert alert-info border-0">
+                        <h6><i class="fas fa-info-circle me-2"></i>Next Steps:</h6>
+                        <ol class="mb-0">
+                            <li>The admin will receive a B2B invitation email</li>
+                            <li>They must accept the invitation to join your tenant</li>
+                            <li>Once accepted, they can access the admin console at <code>/Account/SignIn</code></li>
+                            <li>They can then customize their default secrets and invite users</li>
+                        </ol>
+                    </div>
+                </div>
+                <div class="modal-footer border-0 pt-0">
+                    <div class="d-flex flex-column flex-sm-row gap-2 w-100">
+                        <button type="button" class="btn btn-primary btn-responsive" @onclick="@(async () => await InviteAnother())" @onclick:stopPropagation="true">
+                            <i class="fas fa-plus me-2"></i>
+                            <span class="d-none d-sm-inline">Invite Another Admin</span>
+                            <span class="d-sm-none">Invite Another</span>
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-responsive" @onclick="CloseModal" @onclick:stopPropagation="true">
+                            <i class="fas fa-times me-2"></i>Close
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+    
+    [SupplyParameterFromForm]
+    private InviteAdminModel inviteModel { get; set; } = new();
+    private bool isSubmitting = false;
+    private bool showSuccessModal = false;
+    private List<GuestUser> recentInvitations = new();
+    private List<AgentTypeEntity> availableAgentTypes = new();
+    private bool isLoadingAgentTypes = true;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+    private bool isAuthorized = false;
+    private bool isOrganizationDomainAutoFilled = false;
+    private bool hasUnsavedChanges = false;
+    private UnsavedChangesTracker? unsavedChangesTracker;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // Test JavaScript loading
+            try 
+            {
+                await JSRuntime.InvokeVoidAsync("console.log", "Blazor component rendered, unsaved changes ready");
+                await JSRuntime.InvokeVoidAsync("unsavedChanges.debug");
+                
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to call JavaScript from OnAfterRenderAsync");
+            }
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Get authentication state using AuthenticationStateProvider
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        
+        // Debug authentication state
+        Logger.LogError(">>> PAGE: InviteAdmin OnInitializedAsync called");
+        Logger.LogInformation("User is authenticated: {IsAuth}", user.Identity?.IsAuthenticated);
+        Logger.LogInformation("Identity Name: {Name}", user.Identity?.Name);
+        
+        // Check if user is authorized
+        if (user.Identity?.IsAuthenticated == true)
+        {
+            var email = user.FindFirst("email")?.Value ?? 
+                       user.FindFirst("preferred_username")?.Value ?? 
+                       user.FindFirst("upn")?.Value ?? 
+                       user.FindFirst("unique_name")?.Value ??
+                       user.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value;
+            
+            Logger.LogInformation("Found email from claims: {Email}", email);
+            
+            // Debug all claims
+            foreach (var claim in user.Claims)
+            {
+                Logger.LogInformation("Claim: {Type} = {Value}", claim.Type, claim.Value);
+            }
+            
+            isAuthorized = email?.EndsWith("@erpure.ai") == true;
+            Logger.LogInformation("User authorization check - Email: {Email}, Authorized: {Auth}", email, isAuthorized);
+            
+            if (!isAuthorized)
+            {
+                errorMessage = "Access denied. Only erpure.ai domain users can access this page.";
+                return;
+            }
+        }
+        else
+        {
+            Logger.LogWarning("User not authenticated");
+            errorMessage = "Please sign in to access this page.";
+            return;
+        }
+        
+        await LoadRecentInvitations();
+        await LoadAvailableAgentTypes();
+    }
+
+
+    private Task LoadRecentInvitations()
+    {
+        // Load actual invitations from service - no sample data
+        recentInvitations = new List<GuestUser>();
+        
+        // TODO: Replace with actual service call when available
+        // recentInvitations = await _invitationService.GetRecentInvitationsAsync();
+        return Task.CompletedTask;
+    }
+
+
+    private async Task HandleInviteSubmit()
+    {
+        Directory.CreateDirectory("C:\\temp");
+        await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
+            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - FORM: HandleInviteSubmit called - ENTRY POINT\n");
+        await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
+            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - FORM: Selected agent types: {string.Join(", ", inviteModel.SelectedAgentTypeIds)}\n");
+        
+        if (isSubmitting) return;
+        
+        isSubmitting = true;
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+        StateHasChanged(); // Force UI update to show spinner
+        
+        // Small delay to ensure spinner is visible
+        await Task.Delay(100);
+        
+        try
+        {
+            Logger.LogInformation("DEBUG: Starting form validation and submission process...");
+            // Validate input
+            Logger.LogError(">>> FORM: Starting validation - Email: {Email}, Name: {Name}, Org: {Org}, Domain: {Domain}", 
+                inviteModel.AdminEmail, inviteModel.AdminName, inviteModel.OrganizationName, inviteModel.OrganizationDomain);
+                
+            if (string.IsNullOrWhiteSpace(inviteModel.AdminEmail) || 
+                string.IsNullOrWhiteSpace(inviteModel.AdminName) ||
+                string.IsNullOrWhiteSpace(inviteModel.OrganizationName) ||
+                string.IsNullOrWhiteSpace(inviteModel.OrganizationDomain))
+            {
+                Logger.LogError(">>> FORM: VALIDATION FAILED - Required fields missing");
+                errorMessage = "Please fill in all required fields.";
+                return;
+            }
+            
+            Logger.LogError(">>> FORM: Basic validation passed");
+
+            // Validate email format
+            if (!inviteModel.AdminEmail.Contains("@") || !inviteModel.AdminEmail.Contains("."))
+            {
+                errorMessage = "Please enter a valid email address.";
+                return;
+            }
+
+            // Validate domain matches email
+            var emailDomain = inviteModel.AdminEmail.Split('@').LastOrDefault()?.ToLower();
+            if (emailDomain != inviteModel.OrganizationDomain.ToLower())
+            {
+                errorMessage = "The organization domain must match the admin's email domain.";
+                return;
+            }
+
+            Logger.LogInformation("Starting admin invitation for {Email} from organization {Organization}", 
+                inviteModel.AdminEmail, inviteModel.OrganizationName);
+
+            // Create organization without security groups (only database + secrets)
+            Logger.LogInformation("Creating organization setup for {Organization}", inviteModel.OrganizationName);
+            
+            var setupResult = await OrganizationSetupService.SetupNewOrganizationAsync(
+                inviteModel.OrganizationName,
+                inviteModel.OrganizationDomain,
+                inviteModel.AdminEmail,
+                inviteModel.AdminName);
+
+            if (!setupResult.Success)
+            {
+                Logger.LogError("Organization setup failed for {Organization}. Errors: {Errors}", 
+                    inviteModel.OrganizationName, string.Join(", ", setupResult.Errors));
+                    
+                errorMessage = $"Invitation sent successfully, but organization setup encountered issues: {string.Join(", ", setupResult.Errors)}. Please contact support.";
+                return;
+            }
+
+            Logger.LogInformation("Organization setup completed successfully for {Organization}. OrganizationId: {OrganizationId}", 
+                inviteModel.OrganizationName, setupResult.OrganizationId);
+
+            // Parse organization ID for invitation
+            if (!Guid.TryParse(setupResult.OrganizationId, out var organizationId))
+            {
+                Logger.LogError("Invalid organization ID returned from setup: {OrganizationId}", setupResult.OrganizationId);
+                errorMessage = "Organization setup completed but encountered an ID format issue. Please contact support.";
+                return;
+            }
+
+            // Step: Send enhanced B2B invitation with agent-based group assignment
+            Logger.LogInformation("DEBUG: Sending enhanced B2B invitation to {Email} for organization {Organization}", 
+                inviteModel.AdminEmail, inviteModel.OrganizationName);
+            Logger.LogInformation("DEBUG: Selected agent type IDs from UI: {AgentTypeIds}", 
+                string.Join(", ", inviteModel.SelectedAgentTypeIds));
+
+            var invitationResult = await InvitationService.InviteUserAsync(
+                organizationId,
+                inviteModel.AdminEmail,
+                Guid.NewGuid(), // TODO: Get actual inviter ID from claims
+                new List<LegacyAgentType> { LegacyAgentType.Admin }, // Admin user
+                inviteModel.SelectedAgentTypeIds); // Agent types selected in UI
+
+            if (!invitationResult.Success)
+            {
+                Logger.LogError("Enhanced invitation failed for {AdminEmail}. Errors: {Errors}", 
+                    inviteModel.AdminEmail, string.Join(", ", invitationResult.Errors));
+                errorMessage = $"Organization created successfully, but invitation failed: {string.Join(", ", invitationResult.Errors)}. Please try resending the invitation.";
+                return;
+            }
+
+            Logger.LogInformation("Enhanced invitation sent successfully to {Email} with agent-based group assignments and M365 Teams integration", 
+                inviteModel.AdminEmail);
+
+            // Add to recent invitations list for UI
+            recentInvitations.Insert(0, new GuestUser
+            {
+                DisplayName = inviteModel.AdminName,
+                Email = inviteModel.AdminEmail,
+                OrganizationName = inviteModel.OrganizationName,
+                InvitedDateTime = DateTime.UtcNow,
+                InvitationStatus = "PendingAcceptance"
+            });
+
+            Logger.LogInformation("Successfully completed admin invitation setup for {Email} - organization {Organization}", 
+                inviteModel.AdminEmail, inviteModel.OrganizationName);
+            
+            // Mark form as saved after successful submission
+            await MarkFormAsSaved();
+            
+            showSuccessModal = true;
+        }
+        catch (Microsoft.Graph.Models.ODataErrors.ODataError odataEx)
+        {
+            Logger.LogError(odataEx, "Microsoft Graph error during invitation for {Email}", inviteModel.AdminEmail);
+            errorMessage = $"Invitation failed: {odataEx.Error?.Message ?? "Graph API error"}. Please verify the email address and try again.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unexpected error during admin invitation for {Email}", inviteModel.AdminEmail);
+            errorMessage = "An unexpected error occurred while sending the invitation. Please try again in a few moments.";
+        }
+        finally
+        {
+            isSubmitting = false;
+            StateHasChanged(); // Ensure spinner is hidden
+        }
+    }
+
+    private void HandleBackdropClick()
+    {
+        // Close modal when clicking on backdrop
+        CloseModal();
+    }
+
+    private void CloseModal()
+    {
+        showSuccessModal = false;
+        StateHasChanged();
+    }
+
+    private async Task InviteAnother()
+    {
+        showSuccessModal = false;
+        inviteModel = new InviteAdminModel();
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+        isOrganizationDomainAutoFilled = false;
+        
+        // Reset unsaved changes tracking for new form
+        await MarkFormAsSaved();
+        
+        StateHasChanged();
+    }
+
+    private async Task GoBack()
+    {
+        if (hasUnsavedChanges && unsavedChangesTracker != null)
+        {
+            var confirmed = await unsavedChangesTracker.ConfirmNavigation("You have unsaved changes. Are you sure you want to leave without saving your invitation?");
+            if (!confirmed) return;
+        }
+        
+        Navigation.NavigateTo("/owner/admins");
+    }
+
+    private void ClearMessages()
+    {
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+    }
+
+    private async Task LoadAvailableAgentTypes()
+    {
+        try
+        {
+            isLoadingAgentTypes = true;
+            StateHasChanged(); // Show loading state immediately
+            
+            Logger.LogInformation("DEBUG: Starting to load available agent types...");
+            availableAgentTypes = await AgentTypeService.GetAgentTypesWithSecurityGroupsAsync();
+            Logger.LogInformation("DEBUG: Loaded {Count} agent types with security groups", availableAgentTypes.Count);
+            
+            foreach (var agentType in availableAgentTypes)
+            {
+                Logger.LogInformation("DEBUG: Agent Type - ID: {Id}, Name: {Name}, HasSecurityGroup: {HasSecurityGroup}", 
+                    agentType.Id, agentType.Name, !string.IsNullOrEmpty(agentType.GlobalSecurityGroupId));
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "ERROR: Failed to load available agent types");
+            availableAgentTypes = new List<AgentTypeEntity>();
+        }
+        finally
+        {
+            isLoadingAgentTypes = false;
+            StateHasChanged(); // Force UI refresh after loading completes
+        }
+    }
+
+    private async Task ToggleAgentType(Guid agentTypeId, bool isSelected)
+    {
+        if (isSelected)
+        {
+            if (!inviteModel.SelectedAgentTypeIds.Contains(agentTypeId))
+            {
+                inviteModel.SelectedAgentTypeIds.Add(agentTypeId);
+                await MarkFormAsChanged();
+            }
+        }
+        else
+        {
+            inviteModel.SelectedAgentTypeIds.Remove(agentTypeId);
+            await MarkFormAsChanged();
+        }
+    }
+
+    private async Task HandleAdminEmailInputAndMarkChanged(ChangeEventArgs e)
+    {
+        var email = e.Value?.ToString()?.Trim() ?? string.Empty;
+        inviteModel.AdminEmail = email; // Update the model immediately
+        
+        // Handle domain auto-extraction
+        if (!string.IsNullOrEmpty(email) && email.Contains("@"))
+        {
+            var domain = email.Split('@').LastOrDefault()?.ToLower();
+            if (!string.IsNullOrEmpty(domain) && domain.Contains("."))
+            {
+                inviteModel.OrganizationDomain = domain;
+                isOrganizationDomainAutoFilled = true;
+                StateHasChanged();
+            }
+        }
+        else if (isOrganizationDomainAutoFilled)
+        {
+            // Clear domain if email becomes invalid
+            inviteModel.OrganizationDomain = string.Empty;
+            isOrganizationDomainAutoFilled = false;
+            StateHasChanged();
+        }
+        
+        // Mark form as changed
+        await MarkFormAsChanged();
+    }
+
+    private void EnableManualDomainEntry()
+    {
+        isOrganizationDomainAutoFilled = false;
+        StateHasChanged();
+    }
+
+    private async Task MarkFormAsChanged()
+    {
+        hasUnsavedChanges = true;
+        UnsavedChangesService.MarkFormAsChanged("InviteAdminForm");
+        Logger.LogInformation("DEBUG: Form marked as changed - hasUnsavedChanges: {HasChanges}", hasUnsavedChanges);
+        
+        // Directly call JavaScript to enable warning
+        try 
+        {
+            await JSRuntime.InvokeVoidAsync("unsavedChanges.enable", "You have unsaved invitation data. Are you sure you want to leave?");
+            Logger.LogInformation("DEBUG: Successfully called unsavedChanges.enable");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "DEBUG: Failed to call unsavedChanges.enable");
+        }
+        
+        StateHasChanged();
+    }
+
+    private async Task MarkFormAsSaved()
+    {
+        hasUnsavedChanges = false;
+        UnsavedChangesService.MarkFormAsSaved("InviteAdminForm");
+        if (unsavedChangesTracker != null)
+        {
+            await unsavedChangesTracker.MarkAsSaved();
+        }
+        
+        // Disable JavaScript warning
+        try 
+        {
+            await JSRuntime.InvokeVoidAsync("unsavedChanges.disable");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to disable unsaved changes warning");
+        }
+        
+        StateHasChanged();
+    }
+
+
+    public class InviteAdminModel
+    {
+        [Required(ErrorMessage = "Admin email is required")]
+        [EmailAddress(ErrorMessage = "Please enter a valid email address")]
+        public string AdminEmail { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Admin name is required")]
+        public string AdminName { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Organization name is required")]
+        public string OrganizationName { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Organization domain is required")]
+        [RegularExpression(@"^[a-zA-Z0-9][a-zA-Z0-9-]*[a-zA-Z0-9]*\.([a-zA-Z]{2,})+$", 
+            ErrorMessage = "Please enter a valid domain (e.g., company.com)")]
+        public string OrganizationDomain { get; set; } = string.Empty;
+
+        public string? SupervisorEmail { get; set; } = string.Empty;
+
+        public List<Guid> SelectedAgentTypeIds { get; set; } = new();
+
+        public string CustomMessage { get; set; } = string.Empty;
+
+        public bool SendWelcomeEmail { get; set; } = true;
+    }
+}

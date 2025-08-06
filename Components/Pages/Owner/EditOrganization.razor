@@ -1,0 +1,458 @@
+@page "/owner/organizations/{OrganizationId:guid}/edit"
+@using AdminConsole.Models
+@using AdminConsole.Services
+@inject IOrganizationService OrganizationService
+@inject IDataIsolationService DataIsolationService
+@inject NavigationManager Navigation
+@inject ILogger<EditOrganization> Logger
+@attribute [Authorize(Policy = "SuperAdminOnly")]
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <nav aria-label="breadcrumb">
+                        <ol class="breadcrumb mb-2">
+                            <li class="breadcrumb-item"><a href="/owner/organizations" class="text-decoration-none">Organizations</a></li>
+                            <li class="breadcrumb-item active">@(organization?.Name ?? "Edit Organization")</li>
+                        </ol>
+                    </nav>
+                    <h2 class="mb-1">Edit Organization</h2>
+                    <p class="text-muted mb-0">
+                        @if (organization != null)
+                        {
+                            <span class="badge @(organization.StateCode == StateCode.Active ? "bg-success" : "bg-secondary") me-2">
+                                @(organization.StateCode == StateCode.Active ? "Active" : "Inactive")
+                            </span>
+                            <span class="text-muted">@organization.AdminEmail</span>
+                        }
+                    </p>
+                </div>
+                <div>
+                    <button type="button" class="btn btn-outline-secondary me-2" @onclick="CancelEdit">
+                        <i class="fas fa-times me-1"></i>
+                        Cancel
+                    </button>
+                    <button type="button" class="btn btn-primary" @onclick="SaveChanges" disabled="@isSaving">
+                        @if (isSaving)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                        }
+                        else
+                        {
+                            <i class="fas fa-save me-1"></i>
+                        }
+                        Save Changes
+                    </button>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <strong>Error:</strong> @errorMessage
+                    <button type="button" class="btn-close" @onclick="ClearMessages"></button>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(successMessage))
+            {
+                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                    <strong>Success:</strong> @successMessage
+                    <button type="button" class="btn-close" @onclick="ClearMessages"></button>
+                </div>
+            }
+
+            @if (isLoading)
+            {
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-muted">Loading organization details...</p>
+                </div>
+            }
+            else if (organization == null)
+            {
+                <div class="card">
+                    <div class="card-body text-center py-5">
+                        <i class="fas fa-building-slash fa-3x text-muted mb-3"></i>
+                        <h5 class="text-muted">Organization Not Found</h5>
+                        <p class="text-muted mb-3">
+                            The requested organization could not be found or you don't have permission to edit it.
+                        </p>
+                        <a href="/owner/organizations" class="btn btn-primary">
+                            <i class="fas fa-arrow-left me-1"></i>
+                            Back to Organizations
+                        </a>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <EditForm Model="@editModel" OnValidSubmit="SaveChanges">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary class="alert alert-danger" />
+
+                    <div class="row">
+                        <div class="col-lg-8">
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <h5 class="card-title mb-0">
+                                        <i class="fas fa-building me-2"></i>
+                                        Organization Information
+                                    </h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="organizationName" class="form-label">Organization Name *</label>
+                                                <InputText id="organizationName" @bind-Value="editModel.Name" class="form-control" 
+                                                         placeholder="Enter organization name" />
+                                                <ValidationMessage For="@(() => editModel.Name)" />
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="adminEmail" class="form-label">Admin Email *</label>
+                                                <InputText id="adminEmail" @bind-Value="editModel.AdminEmail" class="form-control" 
+                                                         placeholder="admin@domain.com" />
+                                                <ValidationMessage For="@(() => editModel.AdminEmail)" />
+                                                <div class="form-text">Primary administrator's email address</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="databaseType" class="form-label">Database Type</label>
+                                                <InputSelect id="databaseType" @bind-Value="editModel.DatabaseType" class="form-select">
+                                                    <option value="@OrganizationDatabaseType.SQL">SQL Server</option>
+                                                    <option value="@OrganizationDatabaseType.HANA">SAP HANA</option>
+                                                </InputSelect>
+                                                <div class="form-text">Primary database type for this organization</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="stateCode" class="form-label">Organization Status</label>
+                                                <InputSelect id="stateCode" @bind-Value="editModel.StateCode" class="form-select">
+                                                    <option value="@StateCode.Active">Active</option>
+                                                    <option value="@StateCode.Inactive">Inactive</option>
+                                                </InputSelect>
+                                                <div class="form-text">Active organizations can have users and secrets</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <h5 class="card-title mb-0">
+                                        <i class="fas fa-key me-2"></i>
+                                        Key Vault Configuration
+                                    </h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="alert alert-info mb-3">
+                                        <i class="fas fa-info-circle me-2"></i>
+                                        Configure organization-specific Key Vault settings. Leave blank to use shared vault.
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="keyVaultUri" class="form-label">Key Vault URI</label>
+                                                <InputText id="keyVaultUri" @bind-Value="editModel.KeyVaultUri" class="form-control" 
+                                                         placeholder="https://your-vault.vault.azure.net/" />
+                                                <div class="form-text">Optional: Organization-specific Key Vault URI</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="keyVaultSecretPrefix" class="form-label">Secret Prefix</label>
+                                                <InputText id="keyVaultSecretPrefix" @bind-Value="editModel.KeyVaultSecretPrefix" class="form-control" 
+                                                         placeholder="org-prefix" />
+                                                <div class="form-text">Prefix for organization secrets in Key Vault</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="card">
+                                <div class="card-header">
+                                    <h5 class="card-title mb-0">
+                                        <i class="fas fa-cogs me-2"></i>
+                                        SAP Configuration
+                                    </h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="sapServiceLayerHostname" class="form-label">SAP Service Layer Hostname</label>
+                                                <InputText id="sapServiceLayerHostname" @bind-Value="editModel.SAPServiceLayerHostname" class="form-control" 
+                                                         placeholder="sap-service-layer.domain.com" />
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="sapApiGatewayHostname" class="form-label">SAP API Gateway Hostname</label>
+                                                <InputText id="sapApiGatewayHostname" @bind-Value="editModel.SAPAPIGatewayHostname" class="form-control" 
+                                                         placeholder="sap-api-gateway.domain.com" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="sapWebClientHost" class="form-label">SAP Business One Web Client Host</label>
+                                                <InputText id="sapWebClientHost" @bind-Value="editModel.SAPBusinessOneWebClientHost" class="form-control" 
+                                                         placeholder="sap-webclient.domain.com" />
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="mb-3">
+                                                <label for="documentCode" class="form-label">Document Code</label>
+                                                <InputText id="documentCode" @bind-Value="editModel.DocumentCode" class="form-control" 
+                                                         placeholder="DOC001" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-lg-4">
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <h5 class="card-title mb-0">
+                                        <i class="fas fa-info-circle me-2"></i>
+                                        Organization Summary
+                                    </h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label class="form-label text-muted">Organization ID</label>
+                                        <p class="font-monospace small">@organization.OrganizationId</p>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label text-muted">Domain</label>
+                                        <p class="fw-bold">@ExtractDomainFromEmail(editModel.AdminEmail)</p>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label text-muted">Current Status</label>
+                                        <p>
+                                            <span class="badge @(editModel.StateCode == StateCode.Active ? "bg-success" : "bg-secondary") fs-6">
+                                                @(editModel.StateCode == StateCode.Active ? "Active" : "Inactive")
+                                            </span>
+                                        </p>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label text-muted">Effective Key Vault</label>
+                                        <p class="small font-monospace">
+                                            @(string.IsNullOrEmpty(editModel.KeyVaultUri) ? 
+                                              "Shared Vault (default)" : 
+                                              editModel.KeyVaultUri)
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="card">
+                                <div class="card-header">
+                                    <h5 class="card-title mb-0">
+                                        <i class="fas fa-history me-2"></i>
+                                        Audit Information
+                                    </h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label class="form-label text-muted">Created On</label>
+                                        <p class="fw-bold">@organization.CreatedOn.ToString("MMM dd, yyyy 'at' h:mm tt")</p>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label text-muted">Last Modified</label>
+                                        <p class="fw-bold">@organization.ModifiedOn.ToString("MMM dd, yyyy 'at' h:mm tt")</p>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label text-muted">Total Users</label>
+                                        <p class="fw-bold text-info">@organization.Users.Count</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </EditForm>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid OrganizationId { get; set; }
+    
+    private Organization? organization;
+    private OrganizationEditModel editModel = new();
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+    private bool isLoading = true;
+    private bool isSaving = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await LoadOrganization();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing organization edit page for organization {OrganizationId}", OrganizationId);
+            errorMessage = "Error loading page. Please refresh and try again.";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadOrganization()
+    {
+        try
+        {
+            organization = await OrganizationService.GetByIdAsync(OrganizationId.ToString());
+            
+            if (organization != null)
+            {
+                // Map organization to edit model
+                editModel = new OrganizationEditModel
+                {
+                    OrganizationId = organization.OrganizationId,
+                    Name = organization.Name,
+                    AdminEmail = organization.AdminEmail,
+                    DatabaseType = organization.DatabaseType,
+                    StateCode = organization.StateCode,
+                    KeyVaultUri = organization.KeyVaultUri,
+                    KeyVaultSecretPrefix = organization.KeyVaultSecretPrefix,
+                    SAPServiceLayerHostname = organization.SAPServiceLayerHostname,
+                    SAPAPIGatewayHostname = organization.SAPAPIGatewayHostname,
+                    SAPBusinessOneWebClientHost = organization.SAPBusinessOneWebClientHost,
+                    DocumentCode = organization.DocumentCode
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading organization {OrganizationId}", OrganizationId);
+            errorMessage = "Error loading organization details. Please try again.";
+        }
+    }
+
+    private async Task SaveChanges()
+    {
+        if (organization == null) return;
+
+        try
+        {
+            ClearMessages();
+            isSaving = true;
+
+            // Update organization with edit model values
+            organization.Name = editModel.Name;
+            organization.AdminEmail = editModel.AdminEmail;
+            organization.DatabaseType = editModel.DatabaseType;
+            organization.StateCode = editModel.StateCode;
+            organization.StatusCode = editModel.StateCode == StateCode.Active ? StatusCode.Active : StatusCode.Inactive;
+            organization.KeyVaultUri = editModel.KeyVaultUri;
+            organization.KeyVaultSecretPrefix = editModel.KeyVaultSecretPrefix;
+            organization.SAPServiceLayerHostname = editModel.SAPServiceLayerHostname;
+            organization.SAPAPIGatewayHostname = editModel.SAPAPIGatewayHostname;
+            organization.SAPBusinessOneWebClientHost = editModel.SAPBusinessOneWebClientHost;
+            organization.DocumentCode = editModel.DocumentCode;
+            organization.ModifiedOn = DateTime.UtcNow;
+
+            var success = await OrganizationService.UpdateOrganizationAsync(organization);
+            
+            if (success)
+            {
+                successMessage = $"Organization '{organization.Name}' has been updated successfully.";
+                
+                // Sync legacy properties for display
+                organization.SyncLegacyProperties();
+            }
+            else
+            {
+                errorMessage = "Failed to update organization. Please try again.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating organization {OrganizationId}", OrganizationId);
+            errorMessage = "An unexpected error occurred. Please try again.";
+        }
+        finally
+        {
+            isSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    private void CancelEdit()
+    {
+        Navigation.NavigateTo("/owner/organizations");
+    }
+
+    private void ClearMessages()
+    {
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+    }
+
+    private string ExtractDomainFromEmail(string email)
+    {
+        if (string.IsNullOrEmpty(email)) return string.Empty;
+        var atIndex = email.IndexOf('@');
+        return atIndex > 0 ? email.Substring(atIndex + 1) : string.Empty;
+    }
+
+    /// <summary>
+    /// Edit model for organization form binding
+    /// </summary>
+    public class OrganizationEditModel
+    {
+        public Guid OrganizationId { get; set; }
+        
+        [Required(ErrorMessage = "Organization name is required")]
+        [StringLength(100, ErrorMessage = "Organization name cannot exceed 100 characters")]
+        public string Name { get; set; } = string.Empty;
+        
+        [Required(ErrorMessage = "Admin email is required")]
+        [EmailAddress(ErrorMessage = "Please enter a valid email address")]
+        public string AdminEmail { get; set; } = string.Empty;
+        
+        public OrganizationDatabaseType DatabaseType { get; set; } = OrganizationDatabaseType.SQL;
+        public StateCode StateCode { get; set; } = StateCode.Active;
+        
+        [Url(ErrorMessage = "Please enter a valid Key Vault URI")]
+        public string KeyVaultUri { get; set; } = string.Empty;
+        
+        [StringLength(50, ErrorMessage = "Secret prefix cannot exceed 50 characters")]
+        public string KeyVaultSecretPrefix { get; set; } = string.Empty;
+        
+        [StringLength(200, ErrorMessage = "SAP Service Layer hostname cannot exceed 200 characters")]
+        public string SAPServiceLayerHostname { get; set; } = string.Empty;
+        
+        [StringLength(200, ErrorMessage = "SAP API Gateway hostname cannot exceed 200 characters")]
+        public string SAPAPIGatewayHostname { get; set; } = string.Empty;
+        
+        [StringLength(200, ErrorMessage = "SAP Web Client host cannot exceed 200 characters")]
+        public string SAPBusinessOneWebClientHost { get; set; } = string.Empty;
+        
+        [StringLength(50, ErrorMessage = "Document code cannot exceed 50 characters")]
+        public string DocumentCode { get; set; } = string.Empty;
+    }
+}

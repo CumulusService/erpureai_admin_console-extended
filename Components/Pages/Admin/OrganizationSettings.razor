@@ -1,0 +1,462 @@
+@page "/admin/organization-settings"
+@page "/admin/settings"
+@rendermode InteractiveServer
+@using AdminConsole.Models
+@using AdminConsole.Services
+@inject IOrganizationService OrganizationService
+@inject IDataIsolationService DataIsolationService
+@inject IDatabaseCredentialService DatabaseCredentialService
+@inject ITenantIsolationValidator TenantValidator
+@inject NavigationManager Navigation
+@inject ILogger<OrganizationSettings> Logger
+@attribute [Authorize(Policy = "OrgAdminOrHigher")]
+
+<PageTitle>Organization Settings - ERPURE.AI Admin Console</PageTitle>
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="mb-4">
+                <h2 class="mb-1">Organization Settings</h2>
+                <p class="text-muted mb-0">Configure database properties and SAP integration settings for your organization</p>
+            </div>
+
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <strong>Error:</strong> @errorMessage
+                    <button type="button" class="btn-close" @onclick="ClearMessages"></button>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(successMessage))
+            {
+                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                    <strong>Success:</strong> @successMessage
+                    <button type="button" class="btn-close" @onclick="ClearMessages"></button>
+                </div>
+            }
+
+            @if (isLoading)
+            {
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-muted">Loading organization settings...</p>
+                </div>
+            }
+            else if (organization == null)
+            {
+                <div class="alert alert-warning">
+                    <h6 class="alert-heading">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Organization Not Found
+                    </h6>
+                    <p class="mb-0">
+                        Unable to load your organization settings. Please contact support if this issue persists.
+                    </p>
+                </div>
+            }
+            else
+            {
+                <EditForm Model="settingsModel" OnValidSubmit="SaveSettings">
+                    <DataAnnotationsValidator />
+                    
+                    <div class="row">
+                        <!-- Basic Organization Information -->
+                        <div class="col-lg-6 mb-4">
+                            <div class="card h-100">
+                                <div class="card-header">
+                                    <h5 class="card-title mb-0">
+                                        <i class="fas fa-building text-primary me-2"></i>
+                                        Organization Information
+                                    </h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label for="orgName" class="form-label"><strong>Organization Name:</strong></label>
+                                        <div class="form-control bg-light">@organization.Name</div>
+                                        <div class="form-text">Organization name cannot be changed by admins.</div>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label for="adminEmail" class="form-label"><strong>Admin Email:</strong></label>
+                                        <div class="form-control bg-light">@organization.AdminEmail</div>
+                                        <div class="form-text">Primary admin contact email.</div>
+                                    </div>
+                                    
+                                    <div class="row">
+                                        <div class="col-6">
+                                            <label class="form-label"><strong>Created:</strong></label>
+                                            <div class="form-control-plaintext">@organization.CreatedOn.ToString("MMM dd, yyyy")</div>
+                                        </div>
+                                        <div class="col-6">
+                                            <label class="form-label"><strong>Status:</strong></label>
+                                            <div>
+                                                <span class="badge @(organization.StateCode == StateCode.Active ? "bg-success" : "bg-secondary")">
+                                                    @(organization.StateCode == StateCode.Active ? "Active" : "Inactive")
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Database Connections -->
+                        <div class="col-lg-6 mb-4">
+                            <div class="card h-100">
+                                <div class="card-header">
+                                    <h5 class="card-title mb-0">
+                                        <i class="fas fa-database text-info me-2"></i>
+                                        Database Connections
+                                    </h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label class="form-label"><strong>Active Database Connections:</strong></label>
+                                        @if (databaseCredentials == null || !databaseCredentials.Any())
+                                        {
+                                            <div class="alert alert-info border-0 mb-0">
+                                                <small>
+                                                    <i class="fas fa-info-circle me-1"></i>
+                                                    No database connections configured. 
+                                                    <a href="/admin/database-credentials" class="alert-link">Add your first database connection</a>.
+                                                </small>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="list-group">
+                                                @foreach (var credential in databaseCredentials.Where(c => c.IsActive).Take(3))
+                                                {
+                                                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                                                        <div>
+                                                            <div class="fw-bold">@credential.FriendlyName</div>
+                                                            <small class="text-muted">@credential.DatabaseType - @credential.DatabaseName</small>
+                                                        </div>
+                                                        <span class="badge bg-success">Active</span>
+                                                    </div>
+                                                }
+                                                @if (databaseCredentials.Count(c => c.IsActive) > 3)
+                                                {
+                                                    <div class="list-group-item text-center">
+                                                        <small class="text-muted">
+                                                            +@(databaseCredentials.Count(c => c.IsActive) - 3) more connections
+                                                        </small>
+                                                    </div>
+                                                }
+                                            </div>
+                                            <div class="mt-2">
+                                                <a href="/admin/database-credentials" class="btn btn-sm btn-outline-primary">
+                                                    <i class="fas fa-cog me-1"></i>
+                                                    Manage Connections
+                                                </a>
+                                            </div>
+                                        }
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label for="documentCode" class="form-label"><strong>Document Code:</strong></label>
+                                        <InputText @bind-Value="settingsModel.DocumentCode" class="form-control" id="documentCode" 
+                                                 placeholder="e.g., INV, SO, PO" />
+                                        <ValidationMessage For="@(() => settingsModel.DocumentCode)" class="text-danger" />
+                                        <div class="form-text">Default document code prefix for your organization.</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SAP Service Layer Configuration -->
+                        <div class="col-lg-6 mb-4">
+                            <div class="card h-100">
+                                <div class="card-header">
+                                    <h5 class="card-title mb-0">
+                                        <i class="fas fa-server text-warning me-2"></i>
+                                        SAP Service Layer
+                                    </h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="alert alert-info border-0 mb-3">
+                                        <small>
+                                            <i class="fas fa-info-circle me-1"></i>
+                                            Configure your SAP Business One Service Layer endpoints for API integration.
+                                        </small>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label for="sapServiceLayer" class="form-label"><strong>Service Layer Hostname:</strong></label>
+                                        <InputText @bind-Value="settingsModel.SAPServiceLayerHostname" class="form-control" id="sapServiceLayer" 
+                                                 placeholder="e.g., sap-server.company.com" />
+                                        <ValidationMessage For="@(() => settingsModel.SAPServiceLayerHostname)" class="text-danger" />
+                                        <div class="form-text">Hostname or IP address of your SAP Service Layer.</div>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label for="sapAPIGateway" class="form-label"><strong>API Gateway Hostname:</strong></label>
+                                        <InputText @bind-Value="settingsModel.SAPAPIGatewayHostname" class="form-control" id="sapAPIGateway" 
+                                                 placeholder="e.g., api-gateway.company.com" />
+                                        <ValidationMessage For="@(() => settingsModel.SAPAPIGatewayHostname)" class="text-danger" />
+                                        <div class="form-text">Hostname for your SAP API Gateway (if different from Service Layer).</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SAP Business One Web Client -->
+                        <div class="col-lg-6 mb-4">
+                            <div class="card h-100">
+                                <div class="card-header">
+                                    <h5 class="card-title mb-0">
+                                        <i class="fas fa-globe text-success me-2"></i>
+                                        SAP Business One Web Client
+                                    </h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="alert alert-info border-0 mb-3">
+                                        <small>
+                                            <i class="fas fa-info-circle me-1"></i>
+                                            Configure your SAP Business One Web Client for browser-based access.
+                                        </small>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label for="sapWebClient" class="form-label"><strong>Web Client Host:</strong></label>
+                                        <InputText @bind-Value="settingsModel.SAPBusinessOneWebClientHost" class="form-control" id="sapWebClient" 
+                                                 placeholder="e.g., sap-webclient.company.com" />
+                                        <ValidationMessage For="@(() => settingsModel.SAPBusinessOneWebClientHost)" class="text-danger" />
+                                        <div class="form-text">Hostname for your SAP Business One Web Client.</div>
+                                    </div>
+                                    
+                                    <div class="alert alert-warning border-0">
+                                        <small>
+                                            <i class="fas fa-exclamation-triangle me-1"></i>
+                                            <strong>Security Note:</strong> Ensure all SAP endpoints use HTTPS in production environments.
+                                        </small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Key Vault Configuration (Super Admin Only) -->
+                        @if (DataIsolationService.IsCurrentUserSuperAdmin())
+                        {
+                            <div class="col-lg-12 mb-4">
+                                <div class="card">
+                                    <div class="card-header">
+                                        <h5 class="card-title mb-0">
+                                            <i class="fas fa-key text-secondary me-2"></i>
+                                            Key Vault Configuration
+                                        </h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="alert alert-info border-0 mb-3">
+                                            <h6><i class="fas fa-info-circle me-2"></i>Azure Key Vault Integration</h6>
+                                            <p class="mb-0 small">
+                                                Your organization's secrets are stored in Azure Key Vault with organization-specific prefixes. 
+                                                Advanced Key Vault settings are managed by Super Admins for security reasons.
+                                            </p>
+                                        </div>
+                                        
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <label class="form-label"><strong>Key Vault URI:</strong></label>
+                                                <div class="form-control bg-light">@organization.GetEffectiveKeyVaultUri()</div>
+                                                <div class="form-text">Azure Key Vault endpoint for your organization's secrets.</div>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label"><strong>Secret Prefix:</strong></label>
+                                                <div class="form-control bg-light">@organization.GetEffectiveSecretPrefix()</div>
+                                                <div class="form-text">Prefix used for your organization's secrets in Key Vault.</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    <!-- Save Button (repeated for better UX) -->
+                    <div class="d-flex justify-content-between align-items-center mt-4">
+                        <div class="text-muted">
+                            <i class="fas fa-clock me-1"></i>
+                            Last modified: @organization.ModifiedOn.ToString("MMM dd, yyyy 'at' h:mm tt")
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-lg btn-responsive" disabled="@isSaving">
+                            @if (isSaving)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                                <span class="d-none d-sm-inline">Saving Changes...</span>
+                                <span class="d-sm-none">Saving...</span>
+                            }
+                            else
+                            {
+                                <i class="fas fa-save me-2"></i>
+                                <span class="d-none d-md-inline">Save Organization Settings</span>
+                                <span class="d-md-none d-none d-sm-inline">Save Settings</span>
+                                <span class="d-sm-none">Save</span>
+                            }
+                        </button>
+                    </div>
+                </EditForm>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private Organization? organization;
+    private OrganizationSettingsModel settingsModel = new();
+    private List<DatabaseCredential> databaseCredentials = new();
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private string currentUserOrgId = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Get current user's organization ID with tenant validation
+            currentUserOrgId = await TenantValidator.GetValidatedOrganizationIdAsync();
+            
+            // Load organization data
+            organization = await OrganizationService.GetByIdAsync(currentUserOrgId);
+            
+            if (organization == null)
+            {
+                errorMessage = "Unable to load your organization settings. Please contact support.";
+                Logger.LogWarning("Organization not found for ID {OrganizationId}", currentUserOrgId);
+                return;
+            }
+
+            // Populate the settings model
+            settingsModel = new OrganizationSettingsModel
+            {
+                DatabaseType = organization.DatabaseType,
+                SAPServiceLayerHostname = organization.SAPServiceLayerHostname,
+                SAPAPIGatewayHostname = organization.SAPAPIGatewayHostname,
+                SAPBusinessOneWebClientHost = organization.SAPBusinessOneWebClientHost,
+                DocumentCode = organization.DocumentCode
+            };
+
+            // Load database credentials
+            try
+            {
+                // Convert string organization ID to GUID using the same method as ManageDatabaseCredentials
+                Guid organizationGuid;
+                if (Guid.TryParse(currentUserOrgId, out organizationGuid))
+                {
+                    // If it's already a valid GUID, use it directly
+                    Logger.LogInformation("Using GUID organization ID: {OrganizationId}", organizationGuid);
+                }
+                else
+                {
+                    // For domain-based organization IDs, generate a deterministic GUID
+                    var orgIdBytes = System.Text.Encoding.UTF8.GetBytes(currentUserOrgId);
+                    var hash = System.Security.Cryptography.MD5.HashData(orgIdBytes);
+                    organizationGuid = new Guid(hash);
+                    
+                    Logger.LogInformation("Generated GUID {GeneratedGuid} from organization ID string {OrgIdString}", 
+                        organizationGuid, currentUserOrgId);
+                }
+                
+                databaseCredentials = await DatabaseCredentialService.GetByOrganizationAsync(organizationGuid);
+                Logger.LogInformation("Loaded {Count} database credentials for organization {OrganizationId}", 
+                    databaseCredentials.Count, organizationGuid);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to load database credentials for organization {OrganizationId}", currentUserOrgId);
+                databaseCredentials = new List<DatabaseCredential>();
+            }
+
+            Logger.LogInformation("Loaded organization settings for {OrganizationName} ({OrganizationId})", 
+                organization.Name, currentUserOrgId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing organization settings page");
+            errorMessage = "Error loading organization settings. Please refresh and try again.";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveSettings()
+    {
+        if (isSaving || organization == null) return;
+
+        try
+        {
+            ClearMessages();
+            isSaving = true;
+
+            // Validate tenant access before saving
+            await TenantValidator.ValidateOrganizationAccessAsync(currentUserOrgId, "update-settings");
+
+            // Update organization properties (Note: DatabaseType kept for backward compatibility)
+            organization.DatabaseType = settingsModel.DatabaseType;
+            organization.SAPServiceLayerHostname = settingsModel.SAPServiceLayerHostname ?? string.Empty;
+            organization.SAPAPIGatewayHostname = settingsModel.SAPAPIGatewayHostname ?? string.Empty;
+            organization.SAPBusinessOneWebClientHost = settingsModel.SAPBusinessOneWebClientHost ?? string.Empty;
+            organization.DocumentCode = settingsModel.DocumentCode ?? string.Empty;
+            organization.ModifiedOn = DateTime.UtcNow;
+
+            // Save changes
+            var success = await OrganizationService.UpdateOrganizationAsync(organization);
+            
+            if (success)
+            {
+                successMessage = "Organization settings saved successfully.";
+                Logger.LogInformation("Organization settings updated for {OrganizationName} ({OrganizationId})", 
+                    organization.Name, currentUserOrgId);
+            }
+            else
+            {
+                errorMessage = "Failed to save organization settings. Please try again.";
+                Logger.LogWarning("Failed to update organization settings for {OrganizationId}", currentUserOrgId);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving organization settings for {OrganizationId}", currentUserOrgId);
+            errorMessage = "An unexpected error occurred while saving settings. Please try again.";
+        }
+        finally
+        {
+            isSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ClearMessages()
+    {
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+    }
+
+    // Model for the settings form
+    public class OrganizationSettingsModel
+    {
+        [Required(ErrorMessage = "Database type is required")]
+        public OrganizationDatabaseType DatabaseType { get; set; } = OrganizationDatabaseType.SQL;
+
+        [StringLength(255, ErrorMessage = "SAP Service Layer hostname cannot exceed 255 characters")]
+        public string? SAPServiceLayerHostname { get; set; }
+
+        [StringLength(255, ErrorMessage = "SAP API Gateway hostname cannot exceed 255 characters")]  
+        public string? SAPAPIGatewayHostname { get; set; }
+
+        [StringLength(255, ErrorMessage = "SAP Business One Web Client host cannot exceed 255 characters")]
+        public string? SAPBusinessOneWebClientHost { get; set; }
+
+        [StringLength(50, ErrorMessage = "Document code cannot exceed 50 characters")]
+        public string? DocumentCode { get; set; }
+    }
+}

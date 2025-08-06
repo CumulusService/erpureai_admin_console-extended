@@ -1,0 +1,48 @@
+@page "/Account/SignIn"
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.OpenIdConnect
+@inject NavigationManager Navigation
+@inject ILogger<SignIn> Logger
+@attribute [AllowAnonymous]
+
+<PageTitle>Sign In - ERPURE.AI Admin Console</PageTitle>
+
+<div class="container-fluid d-flex justify-content-center align-items-center" style="min-height: 100vh; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+    <div class="card shadow-lg border-0" style="max-width: 420px; width: 100%; border-radius: 20px; backdrop-filter: blur(10px);">
+        <div class="card-body text-center p-5">
+            <div class="mb-5">
+                <div class="d-flex justify-content-center mb-4">
+                    <img src="company-logo.png" alt="ERPURE.AI Logo" class="img-fluid" style="max-height: 50px; max-width: 200px;" />
+                </div>
+                <h2 class="fw-bold text-dark mb-2">Admin Console</h2>
+                <p class="text-muted fs-6">Enterprise B2B Partner Platform</p>
+            </div>
+            
+            <div class="mb-4">
+                <div class="spinner-border" role="status" style="width: 3rem; height: 3rem; color: #667eea;">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+            
+            <h4 class="fw-normal mb-3 text-dark">Signing you in...</h4>
+            <p class="text-muted mb-4">Redirecting to secure authentication</p>
+            
+            <div class="mt-4 pt-3">
+                <small class="text-muted">
+                    <i class="fas fa-lock me-1"></i>
+                    Secure authentication powered by Microsoft
+                </small>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        Logger.LogInformation("User accessing sign-in page, redirecting to Azure AD");
+        
+        // Use the standard authentication challenge URL
+        Navigation.NavigateTo("/Account/Challenge", forceLoad: true);
+    }
+}

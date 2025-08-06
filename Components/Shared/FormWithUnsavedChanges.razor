@@ -1,0 +1,63 @@
+@* 
+    Simple wrapper component that provides unsaved changes detection to any form.
+    Usage: Wrap your EditForm with this component and it will automatically track changes.
+*@
+@using AdminConsole.Services
+@implements IDisposable
+@inject IUnsavedChangesService UnsavedChangesService
+@inject IJSRuntime JSRuntime
+
+<UnsavedChangesTracker @ref="tracker" FormId="@FormId" TrackChanges="@hasUnsavedChanges" />
+
+<div @onchange="HandleFormChange" @oninput="HandleFormChange">
+    @ChildContent
+</div>
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string FormId { get; set; } = Guid.NewGuid().ToString();
+    [Parameter] public string WarningMessage { get; set; } = "You have unsaved changes. Are you sure you want to leave without saving?";
+    [Parameter] public EventCallback OnFormSaved { get; set; }
+
+    private UnsavedChangesTracker? tracker;
+    private bool hasUnsavedChanges = false;
+
+    private void HandleFormChange()
+    {
+        if (!hasUnsavedChanges)
+        {
+            hasUnsavedChanges = true;
+            UnsavedChangesService.MarkFormAsChanged(FormId);
+            StateHasChanged();
+        }
+    }
+
+    public async Task MarkAsSaved()
+    {
+        hasUnsavedChanges = false;
+        UnsavedChangesService.MarkFormAsSaved(FormId);
+        if (tracker != null)
+        {
+            await tracker.MarkAsSaved();
+        }
+        await OnFormSaved.InvokeAsync();
+        StateHasChanged();
+    }
+
+    public async Task<bool> ConfirmNavigation(string? customMessage = null)
+    {
+        if (tracker != null)
+        {
+            return await tracker.ConfirmNavigation(customMessage ?? WarningMessage);
+        }
+        return true;
+    }
+
+    public void Dispose()
+    {
+        if (!string.IsNullOrEmpty(FormId))
+        {
+            UnsavedChangesService.MarkFormAsSaved(FormId);
+        }
+    }
+}

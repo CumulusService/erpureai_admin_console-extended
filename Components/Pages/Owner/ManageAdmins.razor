@@ -1,0 +1,558 @@
+@page "/owner/admins"
+@using AdminConsole.Models
+@using AdminConsole.Services
+@using System.Security.Claims
+@inject IOrganizationService OrganizationService
+@inject IGraphService GraphService
+@inject NavigationManager Navigation
+@inject IHttpContextAccessor HttpContextAccessor
+@inject ILogger<ManageAdmins> Logger
+@using System.Web
+@rendermode InteractiveServer
+
+<PageTitle>Manage Organization Admins</PageTitle>
+
+<div class="container-fluid">
+    <div class="d-sm-flex align-items-center justify-content-between mb-4">
+        <h1 class="h3 mb-0 text-gray-800">
+            <i class="fas fa-user-shield text-warning me-2"></i>
+            Manage Organization Admins
+        </h1>
+        <div class="d-flex gap-2">
+            <a href="/owner/invite-admin" class="btn btn-primary btn-sm">
+                <i class="fas fa-plus"></i> Invite Admin
+            </a>
+            <button class="btn btn-info btn-sm" @onclick="TestClick">
+                <i class="fas fa-bug"></i> Test Click
+            </button>
+        </div>
+    </div>
+
+    <!-- Filter and Search -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <div class="row align-items-center">
+                <div class="col-md-4">
+                    <h6 class="m-0 font-weight-bold text-primary">Admins (@filteredAdmins.Count())</h6>
+                </div>
+                <div class="col-md-4">
+                    <select class="form-select form-select-sm" @bind="statusFilter" @bind:after="FilterAdmins">
+                        <option value="">All Statuses</option>
+                        <option value="Accepted">Active</option>
+                        <option value="PendingAcceptance">Pending</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <div class="input-group">
+                        <input type="text" class="form-control form-control-sm" placeholder="Search admins..." 
+                               @bind="searchTerm" @oninput="FilterAdmins" />
+                        <span class="input-group-text"><i class="fas fa-search"></i></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admins Table -->
+    <div class="card shadow">
+        <div class="card-body">
+            @if (filteredAdmins.Any())
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Admin</th>
+                                <th>Organization</th>
+                                <th>Role</th>
+                                <th>Status</th>
+                                <th>Users Managed</th>
+                                <th>Invited</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var admin in filteredAdmins.OrderBy(a => a.OrganizationName).ThenBy(a => a.DisplayName))
+                            {
+                                <tr>
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <div class="avatar-sm me-3">
+                                                <div class="avatar-title bg-warning rounded-circle">
+                                                    @admin.DisplayName.FirstOrDefault()
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <h6 class="mb-0">@admin.DisplayName</h6>
+                                                <small class="text-muted">@admin.Email</small>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div>
+                                            <strong>@admin.OrganizationName</strong>
+                                            <br />
+                                            <small class="text-muted">@admin.OrganizationId.Replace("_", ".")</small>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="badge @admin.Role.GetBadgeClass()">
+                                            <i class="@admin.Role.GetIcon() me-1"></i>
+                                            @admin.Role.GetDisplayName()
+                                        </span>
+                                    </td>
+                                    <td>
+                                        @switch (admin.InvitationStatus)
+                                        {
+                                            case "Accepted":
+                                                <span class="badge bg-success">
+                                                    <i class="fas fa-check me-1"></i> Active
+                                                </span>
+                                                break;
+                                            case "PendingAcceptance":
+                                                <span class="badge bg-warning">
+                                                    <i class="fas fa-clock me-1"></i> Pending
+                                                </span>
+                                                break;
+                                            default:
+                                                <span class="badge bg-secondary">
+                                                    @admin.InvitationStatus
+                                                </span>
+                                                break;
+                                        }
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-info">
+                                            @GetUserCountForOrg(admin.OrganizationId) users
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <small class="text-muted">
+                                            @admin.InvitedDateTime.ToString("MMM dd, yyyy")
+                                        </small>
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-sm btn-primary me-1" @onclick="@(() => ViewAdminDetails(admin))">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-info me-1" @onclick="@(() => ViewOrganization(admin.OrganizationId))">
+                                            <i class="fas fa-building"></i>
+                                        </button>
+                                        @if (admin.InvitationStatus == "PendingAcceptance")
+                                        {
+                                            <button class="btn btn-sm btn-warning me-1" @onclick="@(() => ResendInvitation(admin))">
+                                                <i class="fas fa-paper-plane"></i>
+                                            </button>
+                                        }
+                                        @if (admin.Role != UserRole.SuperAdmin)
+                                        {
+                                            <button class="btn btn-sm btn-danger" @onclick="@(() => ShowRevokeConfirmation(admin))">
+                                                <i class="fas fa-user-times"></i>
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5">
+                    <i class="fas fa-user-shield fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">No admins found</h5>
+                    <p class="text-muted mb-4">
+                        @if (string.IsNullOrEmpty(searchTerm) && string.IsNullOrEmpty(statusFilter))
+                        {
+                            <text>Start by inviting your first organization admin.</text>
+                        }
+                        else
+                        {
+                            <text>No admins match your search criteria.</text>
+                        }
+                    </p>
+                    @if (string.IsNullOrEmpty(searchTerm) && string.IsNullOrEmpty(statusFilter))
+                    {
+                        <a href="/owner/invite-admin" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> Invite First Admin
+                        </a>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<!-- Admin Details Modal -->
+@if (selectedAdmin != null && showAdminModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-user-shield me-2"></i> Admin Details
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseAdminModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Display Name</label>
+                                <p class="form-control-plaintext">@selectedAdmin.DisplayName</p>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Email</label>
+                                <p class="form-control-plaintext">@selectedAdmin.Email</p>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">User Principal Name</label>
+                                <p class="form-control-plaintext">@selectedAdmin.UserPrincipalName</p>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Organization</label>
+                                <p class="form-control-plaintext">
+                                    <strong>@selectedAdmin.OrganizationName</strong>
+                                    <br />
+                                    <small class="text-muted">@selectedAdmin.OrganizationId.Replace("_", ".")</small>
+                                </p>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Role</label>
+                                <p class="form-control-plaintext">
+                                    <span class="badge @selectedAdmin.Role.GetBadgeClass()">
+                                        <i class="@selectedAdmin.Role.GetIcon() me-1"></i>
+                                        @selectedAdmin.Role.GetDisplayName()
+                                    </span>
+                                </p>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Status</label>
+                                <p class="form-control-plaintext">
+                                    <span class="badge bg-@(selectedAdmin.InvitationStatus == "Accepted" ? "success" : "warning")">
+                                        @selectedAdmin.InvitationStatus
+                                    </span>
+                                </p>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Invited Date</label>
+                                <p class="form-control-plaintext">@selectedAdmin.InvitedDateTime.ToString("MMMM dd, yyyy 'at' hh:mm tt")</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-12">
+                            <div class="alert alert-info">
+                                <i class="fas fa-info-circle me-2"></i>
+                                <strong>Users Managed:</strong> @GetUserCountForOrg(selectedAdmin.OrganizationId) users in their organization
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" @onclick="() => ViewOrganization(selectedAdmin.OrganizationId)">
+                        <i class="fas fa-building me-1"></i> View Organization
+                    </button>
+                    <button type="button" class="btn btn-secondary" @onclick="CloseAdminModal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Revoke Confirmation Modal -->
+@if (adminToRevoke != null && showRevokeModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title text-danger">
+                        <i class="fas fa-exclamation-triangle me-2"></i> Revoke Admin Access
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseRevokeModal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to revoke admin access for <strong>@adminToRevoke.DisplayName</strong>?</p>
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        This action will:
+                        <ul class="mb-0 mt-2">
+                            <li>Remove admin privileges for <strong>@adminToRevoke.OrganizationName</strong></li>
+                            <li>Revoke access to organization's users and secrets</li>
+                            <li>Remove the user from your Azure tenant</li>
+                            <li><strong>Cannot be undone</strong> - you'll need to re-invite them</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseRevokeModal">Cancel</button>
+                    <button type="button" class="btn btn-danger" @onclick="ConfirmRevokeAccess" disabled="@isRevokingAccess">
+                        @if (isRevokingAccess)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                        }
+                        <i class="fas fa-user-times me-1"></i> Revoke Access
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<GuestUser> allAdmins = new();
+    private List<GuestUser> filteredAdmins = new();
+    private string searchTerm = string.Empty;
+    private string statusFilter = string.Empty;
+
+    // Modal states
+    private bool showAdminModal = false;
+    private bool showRevokeModal = false;
+    private GuestUser? selectedAdmin;
+    private GuestUser? adminToRevoke;
+    private bool isRevokingAccess = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Load organizations first
+        try
+        {
+            var orgs = await OrganizationService.GetAllOrganizationsAsync();
+            organizations = orgs.ToList();
+        }
+        catch { }
+        
+        await LoadAdmins();
+        
+        // Check for organization filter in query parameters
+        var uri = new Uri(Navigation.Uri);
+        var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        var orgFilter = query["org"];
+        if (!string.IsNullOrEmpty(orgFilter))
+        {
+            searchTerm = orgFilter;
+            FilterAdmins();
+        }
+    }
+
+    private async Task LoadAdmins()
+    {
+        try
+        {
+            // Load all guest users from Azure AD
+            var allGuestUsers = await GraphService.GetAllGuestUsersAsync();
+            
+            // Load organizations to match admins
+            var organizations = (await OrganizationService.GetAllOrganizationsAsync()).ToList();
+            
+            // Filter users who are organization admins or have admin roles
+            allAdmins = new List<GuestUser>();
+            
+            foreach (var user in allGuestUsers)
+            {
+                // Find matching organization by email domain
+                var userDomain = user.Email.Split('@').LastOrDefault();
+                var matchingOrg = organizations.FirstOrDefault(o => o.Domain.Equals(userDomain, StringComparison.OrdinalIgnoreCase));
+                
+                if (matchingOrg != null)
+                {
+                    user.OrganizationId = matchingOrg.Id;
+                    user.OrganizationName = matchingOrg.Name;
+                    
+                    // Determine role based on authentication policies logic
+                    user.Role = DetermineUserRole(user.Email);
+                    
+                    allAdmins.Add(user);
+                }
+            }
+            
+            // Add test data if no real data found to test UI functionality
+            if (!allAdmins.Any())
+            {
+                allAdmins.Add(new GuestUser
+                {
+                    Id = "test-super-admin",
+                    DisplayName = "Test Super Admin",
+                    Email = "admin@erpure.ai",
+                    UserPrincipalName = "admin_erpure.ai#EXT#@tenant.onmicrosoft.com",
+                    Role = UserRole.SuperAdmin,
+                    OrganizationId = "erpure_ai",
+                    OrganizationName = "ERPURE.AI",
+                    InvitedDateTime = DateTime.UtcNow.AddDays(-30),
+                    InvitationStatus = "Accepted"
+                });
+                
+                allAdmins.Add(new GuestUser
+                {
+                    Id = "test-org-admin",
+                    DisplayName = "Test Org Admin",
+                    Email = "admin@testcompany.com",
+                    UserPrincipalName = "admin_testcompany.com#EXT#@tenant.onmicrosoft.com",
+                    Role = UserRole.OrgAdmin,
+                    OrganizationId = "testcompany_com",
+                    OrganizationName = "Test Company",
+                    InvitedDateTime = DateTime.UtcNow.AddDays(-15),
+                    InvitationStatus = "Accepted"
+                });
+            }
+
+            filteredAdmins = allAdmins;
+        }
+        catch (Exception ex)
+        {
+            // Log error and show empty state
+            Logger.LogError(ex, "Error loading admin users");
+            allAdmins = new List<GuestUser>();
+            filteredAdmins = new List<GuestUser>();
+        }
+    }
+
+    private void FilterAdmins()
+    {
+        filteredAdmins = allAdmins.Where(admin =>
+            (string.IsNullOrEmpty(searchTerm) || 
+             admin.DisplayName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+             admin.Email.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+             admin.OrganizationName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrEmpty(statusFilter) || admin.InvitationStatus == statusFilter)
+        ).ToList();
+    }
+
+    private int GetUserCountForOrg(string orgId)
+    {
+        try
+        {
+            // Get organization and return actual user count
+            var org = organizations?.FirstOrDefault(o => o.Id == orgId);
+            return org?.UserCount ?? 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+    
+    private List<Organization> organizations = new();
+    
+    private UserRole DetermineUserRole(string email)
+    {
+        // Use same logic as authorization policies
+        if (email.EndsWith("@erpure.ai", StringComparison.OrdinalIgnoreCase))
+        {
+            return UserRole.SuperAdmin;
+        }
+        
+        // Check if user has OrgAdmin role in current context
+        var currentUser = HttpContextAccessor.HttpContext?.User;
+        if (currentUser != null && currentUser.IsInRole("OrgAdmin"))
+        {
+            return UserRole.OrgAdmin;
+        }
+        
+        // Default for guest users from organizations
+        return UserRole.OrgAdmin;
+    }
+    
+    private void TestClick()
+    {
+        // Simple test to verify Blazor interactivity is working
+        searchTerm = "TEST CLICKED - " + DateTime.Now.ToString("HH:mm:ss");
+        StateHasChanged();
+    }
+
+    private void ViewAdminDetails(GuestUser admin)
+    {
+        selectedAdmin = admin;
+        showAdminModal = true;
+        StateHasChanged();
+    }
+
+    private void CloseAdminModal()
+    {
+        selectedAdmin = null;
+        showAdminModal = false;
+    }
+
+    private void ViewOrganization(string orgId)
+    {
+        if (!string.IsNullOrEmpty(orgId))
+        {
+            Navigation.NavigateTo($"/owner/organizations");
+        }
+    }
+
+    private async Task ResendInvitation(GuestUser admin)
+    {
+        try
+        {
+            // Create a new invitation since resend is not directly supported
+            var domain = admin.Email.Split('@').LastOrDefault();
+            var org = organizations?.FirstOrDefault(o => o.Domain.Equals(domain, StringComparison.OrdinalIgnoreCase));
+            
+            if (org != null)
+            {
+                var result = await GraphService.InviteGuestUserAsync(admin.Email, org.Name);
+                if (result.Success)
+                {
+                    // Update invitation status
+                    admin.InvitationStatus = "PendingAcceptance";
+                    StateHasChanged();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Handle error silently for now
+            Logger.LogError(ex, "Error resending invitation to admin");
+        }
+    }
+
+    private void ShowRevokeConfirmation(GuestUser admin)
+    {
+        adminToRevoke = admin;
+        showRevokeModal = true;
+        StateHasChanged();
+    }
+
+    private void CloseRevokeModal()
+    {
+        adminToRevoke = null;
+        showRevokeModal = false;
+        isRevokingAccess = false;
+    }
+
+    private async Task ConfirmRevokeAccess()
+    {
+        if (adminToRevoke == null || isRevokingAccess) return;
+
+        isRevokingAccess = true;
+        try
+        {
+            // Revoke user access using GraphService
+            var success = await GraphService.RevokeUserAccessAsync(adminToRevoke.Id);
+            
+            if (success)
+            {
+                // Remove from local list and refresh
+                allAdmins.Remove(adminToRevoke);
+                FilterAdmins();
+                CloseRevokeModal();
+            }
+        }
+        catch (Exception ex)
+        {
+            // Handle error - could show toast notification
+            Logger.LogError(ex, "Error removing admin");
+        }
+        finally
+        {
+            isRevokingAccess = false;
+        }
+    }
+}

@@ -1,0 +1,470 @@
+@page "/owner/organizations"
+@using AdminConsole.Models
+@using AdminConsole.Services
+@inject NavigationManager Navigation
+@inject IOrganizationService OrganizationService
+@inject IGraphService GraphService
+@inject ILogger<ManageOrganizations> Logger
+@rendermode InteractiveServer
+
+<PageTitle>Manage Organizations</PageTitle>
+
+<div class="container-fluid">
+    <div class="d-sm-flex align-items-center justify-content-between mb-4">
+        <h1 class="h3 mb-0 text-gray-800">
+            <i class="fas fa-building text-primary me-2"></i>
+            Manage Organizations
+        </h1>
+        <a href="/owner/invite-admin" class="btn btn-primary btn-sm">
+            <i class="fas fa-plus"></i> Add Organization
+        </a>
+    </div>
+
+    <!-- Filter and Search -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <div class="row align-items-center">
+                <div class="col-md-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Organizations (@filteredOrganizations.Count())</h6>
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select form-select-sm" @bind="statusFilter" @bind:after="FilterOrganizations">
+                        <option value="">All Statuses</option>
+                        <option value="Active">Active</option>
+                        <option value="Inactive">Inactive</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <select class="form-select form-select-sm" @bind="sortBy" @bind:after="SortOrganizations">
+                        <option value="Name">Sort by Name</option>
+                        <option value="Created">Sort by Created Date</option>
+                        <option value="Users">Sort by User Count</option>
+                        <option value="Secrets">Sort by Secret Count</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <div class="input-group">
+                        <input type="text" class="form-control form-control-sm" placeholder="Search organizations..." 
+                               @bind="searchTerm" @oninput="FilterOrganizations" />
+                        <span class="input-group-text"><i class="fas fa-search"></i></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Organizations Cards -->
+    <div class="row">
+        @if (filteredOrganizations.Any())
+        {
+            @foreach (var org in filteredOrganizations)
+            {
+                <div class="col-lg-6 col-xl-4 mb-4">
+                    <div class="card shadow h-100 @(org.IsActive ? "" : "opacity-75")">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="mb-0 font-weight-bold text-primary">
+                                    <i class="fas fa-building me-1"></i>
+                                    @org.Name
+                                </h6>
+                                <small class="text-muted">@org.Domain</small>
+                            </div>
+                            <div class="d-flex flex-column gap-1">
+                                <button class="btn btn-sm btn-primary" @onclick="@(() => ViewOrganizationDetails(org))">
+                                    <i class="fas fa-eye me-1"></i> Details
+                                </button>
+                                <button class="btn btn-sm btn-info" @onclick="@(() => ViewAdminsForOrg(org))">
+                                    <i class="fas fa-user-shield me-1"></i> Admins
+                                </button>
+                                <button class="btn btn-sm btn-secondary" @onclick="@(() => EditOrganization(org))">
+                                    <i class="fas fa-edit me-1"></i> Edit
+                                </button>
+                                <button class="btn btn-sm @(org.IsActive ? "btn-warning" : "btn-success")" @onclick="@(() => ToggleOrganizationStatus(org))">
+                                    <i class="fas fa-@(org.IsActive ? "pause" : "play") me-1"></i> @(org.IsActive ? "Deactivate" : "Activate")
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <!-- Admin Info -->
+                            <div class="mb-3">
+                                <div class="d-flex align-items-center mb-2">
+                                    <div class="avatar-sm me-2">
+                                        <div class="avatar-title bg-warning rounded-circle">
+                                            @org.AdminUserName.FirstOrDefault()
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <strong>@org.AdminUserName</strong>
+                                        <br />
+                                        <small class="text-muted">@org.AdminUserEmail</small>
+                                    </div>
+                                </div>
+                                <span class="badge bg-warning">
+                                    <i class="fas fa-user-shield me-1"></i> Admin
+                                </span>
+                            </div>
+
+                            <!-- Stats -->
+                            <div class="row text-center mb-3">
+                                <div class="col-4">
+                                    <div class="border-end">
+                                        <div class="h5 mb-0 text-info">@org.UserCount</div>
+                                        <small class="text-muted">Users</small>
+                                    </div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="border-end">
+                                        <div class="h5 mb-0 text-success">@org.SecretCount</div>
+                                        <small class="text-muted">Secrets</small>
+                                    </div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="h5 mb-0 text-@(org.IsActive ? "success" : "secondary")">
+                                        <i class="fas fa-@(org.IsActive ? "check-circle" : "pause-circle")"></i>
+                                    </div>
+                                    <small class="text-muted">Status</small>
+                                </div>
+                            </div>
+
+                            <!-- Status Badge -->
+                            <div class="text-center">
+                                <span class="badge bg-@(org.IsActive ? "success" : "secondary") px-3 py-2">
+                                    @(org.IsActive ? "Active" : "Inactive")
+                                </span>
+                            </div>
+                        </div>
+                        <div class="card-footer">
+                            <small class="text-muted">
+                                <i class="fas fa-calendar me-1"></i>
+                                Created: @org.CreatedDate.ToString("MMM dd, yyyy")
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+        else
+        {
+            <div class="col-12">
+                <div class="text-center py-5">
+                    <i class="fas fa-building fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">No organizations found</h5>
+                    <p class="text-muted mb-4">
+                        @if (string.IsNullOrEmpty(searchTerm) && string.IsNullOrEmpty(statusFilter))
+                        {
+                            <text>Start by inviting your first organization admin.</text>
+                        }
+                        else
+                        {
+                            <text>No organizations match your search criteria.</text>
+                        }
+                    </p>
+                    @if (string.IsNullOrEmpty(searchTerm) && string.IsNullOrEmpty(statusFilter))
+                    {
+                        <a href="/owner/invite-admin" class="btn btn-primary">
+                            <i class="fas fa-plus"></i> Add First Organization
+                        </a>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+<!-- Organization Details Modal -->
+@if (selectedOrganization != null && showDetailsModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-building me-2"></i> 
+                        @selectedOrganization.Name
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseDetailsModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h6 class="mb-0">Organization Information</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">Organization Name</label>
+                                        <p class="form-control-plaintext">@selectedOrganization.Name</p>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">Domain</label>
+                                        <p class="form-control-plaintext">@selectedOrganization.Domain</p>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">Organization ID</label>
+                                        <p class="form-control-plaintext">
+                                            <code>@selectedOrganization.Id</code>
+                                        </p>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">Status</label>
+                                        <p class="form-control-plaintext">
+                                            <span class="badge bg-@(selectedOrganization.IsActive ? "success" : "secondary") px-3 py-2">
+                                                @(selectedOrganization.IsActive ? "Active" : "Inactive")
+                                            </span>
+                                        </p>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">Created Date</label>
+                                        <p class="form-control-plaintext">
+                                            @selectedOrganization.CreatedDate.ToString("MMMM dd, yyyy 'at' hh:mm tt")
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h6 class="mb-0">Administrator Information</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="d-flex align-items-center mb-3">
+                                        <div class="avatar-sm me-3">
+                                            <div class="avatar-title bg-warning rounded-circle">
+                                                @selectedOrganization.AdminUserName.FirstOrDefault()
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <h6 class="mb-0">@selectedOrganization.AdminUserName</h6>
+                                            <small class="text-muted">Organization Administrator</small>
+                                        </div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">Email</label>
+                                        <p class="form-control-plaintext">@selectedOrganization.AdminUserEmail</p>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">User ID</label>
+                                        <p class="form-control-plaintext">
+                                            <code>@selectedOrganization.AdminUserId</code>
+                                        </p>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-bold">Role</label>
+                                        <p class="form-control-plaintext">
+                                            <span class="badge bg-warning">
+                                                <i class="fas fa-user-shield me-1"></i> Organization Admin
+                                            </span>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row mt-4">
+                        <div class="col-12">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h6 class="mb-0">Organization Statistics</h6>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row text-center">
+                                        <div class="col-md-3">
+                                            <div class="border-end">
+                                                <div class="h3 mb-0 text-info">@selectedOrganization.UserCount</div>
+                                                <small class="text-muted">Total Users</small>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="border-end">
+                                                <div class="h3 mb-0 text-success">@selectedOrganization.SecretCount</div>
+                                                <small class="text-muted">Active Secrets</small>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="border-end">
+                                                <div class="h3 mb-0 text-warning">1</div>
+                                                <small class="text-muted">Administrators</small>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-3">
+                                            <div class="h3 mb-0 text-@(selectedOrganization.IsActive ? "success" : "secondary")">
+                                                <i class="fas fa-@(selectedOrganization.IsActive ? "check-circle" : "pause-circle")"></i>
+                                            </div>
+                                            <small class="text-muted">Status</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-info" @onclick="() => ViewAdminsForOrg(selectedOrganization)">
+                        <i class="fas fa-user-shield me-1"></i> View Admins
+                    </button>
+                    <button type="button" class="btn btn-primary" @onclick="() => EditOrganization(selectedOrganization)">
+                        <i class="fas fa-edit me-1"></i> Edit
+                    </button>
+                    <button type="button" class="btn btn-secondary" @onclick="CloseDetailsModal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<Organization> allOrganizations = new();
+    private List<Organization> filteredOrganizations = new();
+    private string searchTerm = string.Empty;
+    private string statusFilter = string.Empty;
+    private string sortBy = "Name";
+
+    // Modal states
+    private bool showDetailsModal = false;
+    private Organization? selectedOrganization;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadOrganizations();
+    }
+
+    private async Task LoadOrganizations()
+    {
+        try
+        {
+            // Load organizations from database
+            var orgsFromDb = await OrganizationService.GetAllOrganizationsAsync();
+            allOrganizations = orgsFromDb.ToList();
+
+            // Load guest users to get user counts and admin info
+            var allGuestUsers = await GraphService.GetAllGuestUsersAsync();
+
+            // Update organization info with real data
+            foreach (var org in allOrganizations)
+            {
+                // Count users for this organization
+                var orgUsers = allGuestUsers.Where(u => 
+                    u.Email.EndsWith($"@{org.Domain}", StringComparison.OrdinalIgnoreCase) ||
+                    u.OrganizationId == org.Id).ToList();
+                
+                org.UserCount = orgUsers.Count;
+                
+                // Find admin user
+                var admin = orgUsers.FirstOrDefault(u => 
+                    u.Role == UserRole.OrgAdmin || 
+                    u.Email.EndsWith($"@{org.Domain}", StringComparison.OrdinalIgnoreCase));
+                
+                if (admin != null)
+                {
+                    org.AdminUserName = admin.DisplayName;
+                    org.AdminUserEmail = admin.Email;
+                    org.AdminUserId = admin.Id;
+                }
+                
+                // For now, set secret count to 0 - would need KeyVault service integration
+                org.SecretCount = 0;
+            }
+
+            filteredOrganizations = allOrganizations;
+            SortOrganizations();
+        }
+        catch (Exception ex)
+        {
+            // Log error and show empty state
+            Logger.LogError(ex, "Error loading organizations");
+            allOrganizations = new List<Organization>();
+            filteredOrganizations = new List<Organization>();
+        }
+    }
+
+    private void FilterOrganizations()
+    {
+        filteredOrganizations = allOrganizations.Where(org =>
+            (string.IsNullOrEmpty(searchTerm) || 
+             org.Name.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+             org.Domain.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+             org.AdminUserName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+             org.AdminUserEmail.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrEmpty(statusFilter) || 
+             (statusFilter == "Active" && org.IsActive) || 
+             (statusFilter == "Inactive" && !org.IsActive))
+        ).ToList();
+
+        SortOrganizations();
+    }
+
+    private void SortOrganizations()
+    {
+        filteredOrganizations = sortBy switch
+        {
+            "Name" => filteredOrganizations.OrderBy(o => o.Name).ToList(),
+            "Created" => filteredOrganizations.OrderByDescending(o => o.CreatedDate).ToList(),
+            "Users" => filteredOrganizations.OrderByDescending(o => o.UserCount).ToList(),
+            "Secrets" => filteredOrganizations.OrderByDescending(o => o.SecretCount).ToList(),
+            _ => filteredOrganizations.OrderBy(o => o.Name).ToList()
+        };
+    }
+
+    private void ViewOrganizationDetails(Organization org)
+    {
+        selectedOrganization = org;
+        showDetailsModal = true;
+    }
+
+    private void CloseDetailsModal()
+    {
+        selectedOrganization = null;
+        showDetailsModal = false;
+    }
+
+    private void ViewOrganizationUsers(string orgId)
+    {
+        // For now, navigate to organization details since user management is handled elsewhere
+        Navigation.NavigateTo($"/owner/organizations/{orgId}");
+    }
+
+    private void ViewOrganizationSecrets(string orgId)
+    {
+        // Navigate to admin secrets page filtered by organization
+        Navigation.NavigateTo($"/admin/secrets?org={orgId}");
+    }
+
+    private void EditOrganization(Organization org)
+    {
+        Navigation.NavigateTo($"/owner/organizations/{org.OrganizationId}/edit");
+    }
+
+    private async Task ToggleOrganizationStatus(Organization org)
+    {
+        try
+        {
+            org.IsActive = !org.IsActive;
+            org.StateCode = org.IsActive ? StateCode.Active : StateCode.Inactive;
+            
+            var success = await OrganizationService.UpdateOrganizationAsync(org);
+            if (!success)
+            {
+                // Revert on failure
+                org.IsActive = !org.IsActive;
+                org.StateCode = org.IsActive ? StateCode.Active : StateCode.Inactive;
+            }
+            
+            StateHasChanged();
+        }
+        catch (Exception)
+        {
+            // Revert on error
+            org.IsActive = !org.IsActive;
+            org.StateCode = org.IsActive ? StateCode.Active : StateCode.Inactive;
+            StateHasChanged();
+        }
+    }
+    
+    private void ViewAdminsForOrg(Organization org)
+    {
+        Navigation.NavigateTo($"/owner/admins?org={org.Domain}");
+    }
+}

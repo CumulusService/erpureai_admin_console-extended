@@ -1,0 +1,410 @@
+Using launch settings from C:\Users\mn\AdminConsole\Properties\launchSettings.json...
+Building...
+info: Microsoft.Hosting.Lifetime[14]
+      Now listening on: http://localhost:5242
+info: Microsoft.Hosting.Lifetime[0]
+      Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+      Hosting environment: Development
+info: Microsoft.Hosting.Lifetime[0]
+      Content root path: C:\Users\mn\AdminConsole
+warn: Microsoft.AspNetCore.HttpsPolicy.HttpsRedirectionMiddleware[3]
+      Failed to determine the https port for redirect.
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      === InviteAdmin OnInitializedAsync Debug ===
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      User is authenticated: True
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Identity Name: m.nachman@erpure.ai
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Found email from claims: m.nachman@erpure.ai
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: aio = AaQAW/8ZAAAA/onh/j4C3kFaLbdEhlCXpmhHBP0X5IISZFINPsp+l2CXfkLrCj0Az7TeF1qYx8jbFChrFfbEkRAOaxsZx1KhyhIZK5douxLQnmlRJP5nlHw8lR4Jl6DcCn0uGOOGrfAGZmCYUHfs/ykMjvm5z/JIZ3zmTSh/sc1OcZiIWZgXA5sahgkbwfcKmIwPXUzISo2hsR4bsAGQmAm/y9/Efpjgyw==
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: name = Moshe Nachman
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: http://schemas.microsoft.com/identity/claims/objectidentifier = 123eeb9b-2d09-48f7-a8bb-baa215fb8592
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: preferred_username = m.nachman@erpure.ai
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: rh = 1.AUsA34eqb7Pob0CkB7biyXVdR0i2GlWsOGxDiMIclSfFLj1GAf1LAA.
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: sid = 007ab629-1533-8fb7-95e9-7b6f4fb1ae61
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier = vcQC9Q5DjAR7i1epwfyQ3QpcM4AtNjxZxOR3xss0ylY
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: http://schemas.microsoft.com/identity/claims/tenantid = 6faa87df-e8b3-406f-a407-b6e2c9755d47
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: uti = myvv7Nlw30qAOfafec1DAA
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: utid = 6faa87df-e8b3-406f-a407-b6e2c9755d47
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: uid = 123eeb9b-2d09-48f7-a8bb-baa215fb8592
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      User authorization check - Email: m.nachman@erpure.ai, Authorized: True
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      === InviteAdmin OnInitializedAsync Debug ===
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      User is authenticated: True
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Identity Name: m.nachman@erpure.ai
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Found email from claims: m.nachman@erpure.ai
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: aio = AaQAW/8ZAAAA/onh/j4C3kFaLbdEhlCXpmhHBP0X5IISZFINPsp+l2CXfkLrCj0Az7TeF1qYx8jbFChrFfbEkRAOaxsZx1KhyhIZK5douxLQnmlRJP5nlHw8lR4Jl6DcCn0uGOOGrfAGZmCYUHfs/ykMjvm5z/JIZ3zmTSh/sc1OcZiIWZgXA5sahgkbwfcKmIwPXUzISo2hsR4bsAGQmAm/y9/Efpjgyw==
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: name = Moshe Nachman
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: http://schemas.microsoft.com/identity/claims/objectidentifier = 123eeb9b-2d09-48f7-a8bb-baa215fb8592
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: preferred_username = m.nachman@erpure.ai
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: rh = 1.AUsA34eqb7Pob0CkB7biyXVdR0i2GlWsOGxDiMIclSfFLj1GAf1LAA.
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: sid = 007ab629-1533-8fb7-95e9-7b6f4fb1ae61
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier = vcQC9Q5DjAR7i1epwfyQ3QpcM4AtNjxZxOR3xss0ylY
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: http://schemas.microsoft.com/identity/claims/tenantid = 6faa87df-e8b3-406f-a407-b6e2c9755d47
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: uti = myvv7Nlw30qAOfafec1DAA
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: utid = 6faa87df-e8b3-406f-a407-b6e2c9755d47
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: uid = 123eeb9b-2d09-48f7-a8bb-baa215fb8592
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      User authorization check - Email: m.nachman@erpure.ai, Authorized: True
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      === InviteAdmin OnInitializedAsync Debug ===
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      User is authenticated: True
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Identity Name: m.nachman@erpure.ai
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Found email from claims: m.nachman@erpure.ai
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: aio = AaQAW/8ZAAAA/onh/j4C3kFaLbdEhlCXpmhHBP0X5IISZFINPsp+l2CXfkLrCj0Az7TeF1qYx8jbFChrFfbEkRAOaxsZx1KhyhIZK5douxLQnmlRJP5nlHw8lR4Jl6DcCn0uGOOGrfAGZmCYUHfs/ykMjvm5z/JIZ3zmTSh/sc1OcZiIWZgXA5sahgkbwfcKmIwPXUzISo2hsR4bsAGQmAm/y9/Efpjgyw==
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: name = Moshe Nachman
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: http://schemas.microsoft.com/identity/claims/objectidentifier = 123eeb9b-2d09-48f7-a8bb-baa215fb8592
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: preferred_username = m.nachman@erpure.ai
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: rh = 1.AUsA34eqb7Pob0CkB7biyXVdR0i2GlWsOGxDiMIclSfFLj1GAf1LAA.
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: sid = 007ab629-1533-8fb7-95e9-7b6f4fb1ae61
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier = vcQC9Q5DjAR7i1epwfyQ3QpcM4AtNjxZxOR3xss0ylY
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: http://schemas.microsoft.com/identity/claims/tenantid = 6faa87df-e8b3-406f-a407-b6e2c9755d47
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: uti = myvv7Nlw30qAOfafec1DAA
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: utid = 6faa87df-e8b3-406f-a407-b6e2c9755d47
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: uid = 123eeb9b-2d09-48f7-a8bb-baa215fb8592
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      User authorization check - Email: m.nachman@erpure.ai, Authorized: True
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      === InviteAdmin OnInitializedAsync Debug ===
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      User is authenticated: True
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Identity Name: m.nachman@erpure.ai
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Found email from claims: m.nachman@erpure.ai
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: aio = AaQAW/8ZAAAA/onh/j4C3kFaLbdEhlCXpmhHBP0X5IISZFINPsp+l2CXfkLrCj0Az7TeF1qYx8jbFChrFfbEkRAOaxsZx1KhyhIZK5douxLQnmlRJP5nlHw8lR4Jl6DcCn0uGOOGrfAGZmCYUHfs/ykMjvm5z/JIZ3zmTSh/sc1OcZiIWZgXA5sahgkbwfcKmIwPXUzISo2hsR4bsAGQmAm/y9/Efpjgyw==
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: name = Moshe Nachman
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: http://schemas.microsoft.com/identity/claims/objectidentifier = 123eeb9b-2d09-48f7-a8bb-baa215fb8592
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: preferred_username = m.nachman@erpure.ai
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: rh = 1.AUsA34eqb7Pob0CkB7biyXVdR0i2GlWsOGxDiMIclSfFLj1GAf1LAA.
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: sid = 007ab629-1533-8fb7-95e9-7b6f4fb1ae61
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier = vcQC9Q5DjAR7i1epwfyQ3QpcM4AtNjxZxOR3xss0ylY
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: http://schemas.microsoft.com/identity/claims/tenantid = 6faa87df-e8b3-406f-a407-b6e2c9755d47
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: uti = myvv7Nlw30qAOfafec1DAA
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: utid = 6faa87df-e8b3-406f-a407-b6e2c9755d47
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Claim: uid = 123eeb9b-2d09-48f7-a8bb-baa215fb8592
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      User authorization check - Email: m.nachman@erpure.ai, Authorized: True
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Starting admin invitation for m.nachman@cumulus-service.com from organization cumulus
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Sending B2B invitation to m.nachman@cumulus-service.com for organization cumulus
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      B2B invitation sent successfully. Creating organization setup for cumulus
+info: AdminConsole.Services.OrganizationSetupService[0]
+      Starting organization setup for cumulus with admin m.nachman@cumulus-service.com
+info: AdminConsole.Services.OrganizationService[0]
+      Creating organization with deterministic GUID ac2987b9-d357-738f-a737-92733866ce54 from domain cumulus-service.com (normalized: cumulus-service_com)
+warn: Microsoft.EntityFrameworkCore.Model.Validation[10620]
+      The property 'OnboardedUser.AgentTypes' is a collection or enumeration type with a value converter but with no value comparer. Set a value comparer to ensure the collection/enumeration elements are compared correctly.
+warn: Microsoft.EntityFrameworkCore.Model.Validation[10620]
+      The property 'OnboardedUser.AssignedDatabaseIds' is a collection or enumeration type with a value converter but with no value comparer. Set a value comparer to ensure the collection/enumeration elements are compared correctly.
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (42ms) [Parameters=[@__organizationId_0='?' (DbType = Guid)], CommandType='Text', CommandTimeout='30']
+      SELECT TOP(1) [o].[OrganizationId], [o].[AdminEmail], [o].[AdminUserEmail], [o].[AdminUserId], [o].[AdminUserName], [o].[CreatedBy], [o].[CreatedDate], [o].[CreatedOn], [o].[CreatedOnBehalfBy], [o].[DatabaseType], [o].[DocumentCode], [o].[Domain], [o].[Id], [o].[ImportSequenceNumber], [o].[IsActive], [o].[KeyVaultSecretPrefix], [o].[KeyVaultUri], [o].[ModifiedBy], [o].[ModifiedOn], [o].[ModifiedOnBehalfBy], [o].[Name], [o].[OverriddenCreatedOn], [o].[OwnerId], [o].[OwningBusinessUnit], [o].[OwningTeam], [o].[OwningUser], [o].[SAPAPIGatewayHostname], [o].[SAPBusinessOneWebClientHost], [o].[SAPServiceLayerHostname], [o].[SecretCount], [o].[StateCode], [o].[StatusCode], [o].[TimeZoneRuleVersionNumber], [o].[UTCConversionTimeZoneCode], [o].[UserCount]
+      FROM [Organizations] AS [o]
+      WHERE [o].[OrganizationId] = @__organizationId_0
+info: AdminConsole.Services.OrganizationService[0]
+      Organization ac2987b9-d357-738f-a737-92733866ce54 already exists for domain cumulus-service.com. Returning existing organization.
+info: AdminConsole.Services.OrganizationSetupService[0]
+      Organization created in Dataverse: ac2987b9-d357-738f-a737-92733866ce54
+info: AdminConsole.Services.OrganizationSetupService[0]
+      Organization setup proceeding for cumulus with ID ac2987b9-d357-738f-a737-92733866ce54
+info: AdminConsole.Services.GraphService[0]
+      Created security group cumulus-Users with ID 406d8cc0-0d8a-489b-9fa5-e21ebc5ae208
+info: AdminConsole.Services.OrganizationSetupService[0]
+      Created security group cumulus-Users with ID 406d8cc0-0d8a-489b-9fa5-e21ebc5ae208
+info: AdminConsole.Services.OrganizationSetupService[0]
+      Creating default secrets for organization ac2987b9-d357-738f-a737-92733866ce54
+info: AdminConsole.Services.KeyVaultService[0]
+      === Key Vault SetSecretAsync Debug ===
+info: AdminConsole.Services.KeyVaultService[0]
+        SecretName: Default-SQL-Connection
+info: AdminConsole.Services.KeyVaultService[0]
+        OrganizationId: ac2987b9-d357-738f-a737-92733866ce54
+info: AdminConsole.Services.KeyVaultService[0]
+        SecretClient null?: False
+info: AdminConsole.Services.KeyVaultService[0]
+        Step 1: Validating tenant access...
+info: AdminConsole.Services.TenantIsolationValidator[0]
+      Super admin m.nachman@erpure.ai accessing database credential secret Default-SQL-Connection in organization ac2987b9-d357-738f-a737-92733866ce54 for operation write
+info: AdminConsole.Services.DataIsolationService[0]
+      === DataIsolationService.GetCurrentUserOrganizationIdAsync ===
+info: AdminConsole.Services.DataIsolationService[0]
+        User email: m.nachman@erpure.ai
+info: AdminConsole.Services.DataIsolationService[0]
+        GraphService.GetCurrentUserAsync returned: False
+info: AdminConsole.Services.DataIsolationService[0]
+        Extracted domain from email: erpure.ai
+info: AdminConsole.Services.DataIsolationService[0]
+      Using domain-based organization ID erpure_ai for user m.nachman@erpure.ai
+warn: AdminConsole.Services.DataIsolationService[0]
+      User from organization erpure_ai attempted to access organization ac2987b9-d357-738f-a737-92733866ce54
+warn: AdminConsole.Services.TenantIsolationValidator[0]
+      SECURITY VIOLATION: User m.nachman@erpure.ai from organization erpure_ai attempted write on organization ac2987b9-d357-738f-a737-92733866ce54
+fail: AdminConsole.Services.KeyVaultService[0]
+      Failed to set secret Default-SQL-Connection for organization ac2987b9-d357-738f-a737-92733866ce54
+      AdminConsole.Services.TenantIsolationValidationException: Access denied. You cannot write resources from organization ac2987b9-d357-738f-a737-92733866ce54
+         at AdminConsole.Services.TenantIsolationValidator.ValidateOrganizationAccessAsync(String organizationId, String operation) in C:\Users\mn\AdminConsole\Services\TenantIsolationValidator.cs:line 57
+         at AdminConsole.Services.TenantIsolationValidator.ValidateSecretAccessAsync(String secretName, String organizationId, String operation) in C:\Users\mn\AdminConsole\Services\TenantIsolationValidator.cs:line 213
+         at AdminConsole.Services.KeyVaultService.SetSecretAsync(String secretName, String secretValue, String organizationId) in C:\Users\mn\AdminConsole\Services\KeyVaultService.cs:line 237
+warn: AdminConsole.Services.OrganizationSetupService[0]
+      Failed to create secret Default-SQL-Connection for organization ac2987b9-d357-738f-a737-92733866ce54
+info: AdminConsole.Services.KeyVaultService[0]
+      === Key Vault SetSecretAsync Debug ===
+info: AdminConsole.Services.KeyVaultService[0]
+        SecretName: Default-HANA-Connection
+info: AdminConsole.Services.KeyVaultService[0]
+        OrganizationId: ac2987b9-d357-738f-a737-92733866ce54
+info: AdminConsole.Services.KeyVaultService[0]
+        SecretClient null?: False
+info: AdminConsole.Services.KeyVaultService[0]
+        Step 1: Validating tenant access...
+info: AdminConsole.Services.TenantIsolationValidator[0]
+      Super admin m.nachman@erpure.ai accessing database credential secret Default-HANA-Connection in organization ac2987b9-d357-738f-a737-92733866ce54 for operation write
+warn: AdminConsole.Services.DataIsolationService[0]
+      User from organization erpure_ai attempted to access organization ac2987b9-d357-738f-a737-92733866ce54
+warn: AdminConsole.Services.TenantIsolationValidator[0]
+      SECURITY VIOLATION: User m.nachman@erpure.ai from organization erpure_ai attempted write on organization ac2987b9-d357-738f-a737-92733866ce54
+fail: AdminConsole.Services.KeyVaultService[0]
+      Failed to set secret Default-HANA-Connection for organization ac2987b9-d357-738f-a737-92733866ce54
+      AdminConsole.Services.TenantIsolationValidationException: Access denied. You cannot write resources from organization ac2987b9-d357-738f-a737-92733866ce54
+         at AdminConsole.Services.TenantIsolationValidator.ValidateOrganizationAccessAsync(String organizationId, String operation) in C:\Users\mn\AdminConsole\Services\TenantIsolationValidator.cs:line 57
+         at AdminConsole.Services.TenantIsolationValidator.ValidateSecretAccessAsync(String secretName, String organizationId, String operation) in C:\Users\mn\AdminConsole\Services\TenantIsolationValidator.cs:line 213
+         at AdminConsole.Services.KeyVaultService.SetSecretAsync(String secretName, String secretValue, String organizationId) in C:\Users\mn\AdminConsole\Services\KeyVaultService.cs:line 237
+warn: AdminConsole.Services.OrganizationSetupService[0]
+      Failed to create secret Default-HANA-Connection for organization ac2987b9-d357-738f-a737-92733866ce54
+info: AdminConsole.Services.KeyVaultService[0]
+      === Key Vault SetSecretAsync Debug ===
+info: AdminConsole.Services.KeyVaultService[0]
+        SecretName: API-Key
+info: AdminConsole.Services.KeyVaultService[0]
+        OrganizationId: ac2987b9-d357-738f-a737-92733866ce54
+info: AdminConsole.Services.KeyVaultService[0]
+        SecretClient null?: False
+info: AdminConsole.Services.KeyVaultService[0]
+        Step 1: Validating tenant access...
+info: AdminConsole.Services.TenantIsolationValidator[0]
+      Super admin m.nachman@erpure.ai accessing database credential secret API-Key in organization ac2987b9-d357-738f-a737-92733866ce54 for operation write
+warn: AdminConsole.Services.DataIsolationService[0]
+      User from organization erpure_ai attempted to access organization ac2987b9-d357-738f-a737-92733866ce54
+warn: AdminConsole.Services.TenantIsolationValidator[0]
+      SECURITY VIOLATION: User m.nachman@erpure.ai from organization erpure_ai attempted write on organization ac2987b9-d357-738f-a737-92733866ce54
+fail: AdminConsole.Services.KeyVaultService[0]
+      Failed to set secret API-Key for organization ac2987b9-d357-738f-a737-92733866ce54
+      AdminConsole.Services.TenantIsolationValidationException: Access denied. You cannot write resources from organization ac2987b9-d357-738f-a737-92733866ce54
+         at AdminConsole.Services.TenantIsolationValidator.ValidateOrganizationAccessAsync(String organizationId, String operation) in C:\Users\mn\AdminConsole\Services\TenantIsolationValidator.cs:line 57
+         at AdminConsole.Services.TenantIsolationValidator.ValidateSecretAccessAsync(String secretName, String organizationId, String operation) in C:\Users\mn\AdminConsole\Services\TenantIsolationValidator.cs:line 213
+         at AdminConsole.Services.KeyVaultService.SetSecretAsync(String secretName, String secretValue, String organizationId) in C:\Users\mn\AdminConsole\Services\KeyVaultService.cs:line 237
+warn: AdminConsole.Services.OrganizationSetupService[0]
+      Failed to create secret API-Key for organization ac2987b9-d357-738f-a737-92733866ce54
+info: AdminConsole.Services.KeyVaultService[0]
+      === Key Vault SetSecretAsync Debug ===
+info: AdminConsole.Services.KeyVaultService[0]
+        SecretName: SAP-Service-Config
+info: AdminConsole.Services.KeyVaultService[0]
+        OrganizationId: ac2987b9-d357-738f-a737-92733866ce54
+info: AdminConsole.Services.KeyVaultService[0]
+        SecretClient null?: False
+info: AdminConsole.Services.KeyVaultService[0]
+        Step 1: Validating tenant access...
+info: AdminConsole.Services.TenantIsolationValidator[0]
+      Super admin m.nachman@erpure.ai accessing database credential secret SAP-Service-Config in organization ac2987b9-d357-738f-a737-92733866ce54 for operation write
+warn: AdminConsole.Services.DataIsolationService[0]
+      User from organization erpure_ai attempted to access organization ac2987b9-d357-738f-a737-92733866ce54
+warn: AdminConsole.Services.TenantIsolationValidator[0]
+      SECURITY VIOLATION: User m.nachman@erpure.ai from organization erpure_ai attempted write on organization ac2987b9-d357-738f-a737-92733866ce54
+fail: AdminConsole.Services.KeyVaultService[0]
+      Failed to set secret SAP-Service-Config for organization ac2987b9-d357-738f-a737-92733866ce54
+      AdminConsole.Services.TenantIsolationValidationException: Access denied. You cannot write resources from organization ac2987b9-d357-738f-a737-92733866ce54
+         at AdminConsole.Services.TenantIsolationValidator.ValidateOrganizationAccessAsync(String organizationId, String operation) in C:\Users\mn\AdminConsole\Services\TenantIsolationValidator.cs:line 57
+         at AdminConsole.Services.TenantIsolationValidator.ValidateSecretAccessAsync(String secretName, String organizationId, String operation) in C:\Users\mn\AdminConsole\Services\TenantIsolationValidator.cs:line 213
+         at AdminConsole.Services.KeyVaultService.SetSecretAsync(String secretName, String secretValue, String organizationId) in C:\Users\mn\AdminConsole\Services\KeyVaultService.cs:line 237
+warn: AdminConsole.Services.OrganizationSetupService[0]
+      Failed to create secret SAP-Service-Config for organization ac2987b9-d357-738f-a737-92733866ce54
+info: AdminConsole.Services.KeyVaultService[0]
+      === Key Vault SetSecretAsync Debug ===
+info: AdminConsole.Services.KeyVaultService[0]
+        SecretName: Email-Service-Config
+info: AdminConsole.Services.KeyVaultService[0]
+        OrganizationId: ac2987b9-d357-738f-a737-92733866ce54
+info: AdminConsole.Services.KeyVaultService[0]
+        SecretClient null?: False
+info: AdminConsole.Services.KeyVaultService[0]
+        Step 1: Validating tenant access...
+info: AdminConsole.Services.TenantIsolationValidator[0]
+      Super admin m.nachman@erpure.ai accessing database credential secret Email-Service-Config in organization ac2987b9-d357-738f-a737-92733866ce54 for operation write
+warn: AdminConsole.Services.DataIsolationService[0]
+      User from organization erpure_ai attempted to access organization ac2987b9-d357-738f-a737-92733866ce54
+warn: AdminConsole.Services.TenantIsolationValidator[0]
+      SECURITY VIOLATION: User m.nachman@erpure.ai from organization erpure_ai attempted write on organization ac2987b9-d357-738f-a737-92733866ce54
+fail: AdminConsole.Services.KeyVaultService[0]
+      Failed to set secret Email-Service-Config for organization ac2987b9-d357-738f-a737-92733866ce54
+      AdminConsole.Services.TenantIsolationValidationException: Access denied. You cannot write resources from organization ac2987b9-d357-738f-a737-92733866ce54
+         at AdminConsole.Services.TenantIsolationValidator.ValidateOrganizationAccessAsync(String organizationId, String operation) in C:\Users\mn\AdminConsole\Services\TenantIsolationValidator.cs:line 57
+         at AdminConsole.Services.TenantIsolationValidator.ValidateSecretAccessAsync(String secretName, String organizationId, String operation) in C:\Users\mn\AdminConsole\Services\TenantIsolationValidator.cs:line 213
+         at AdminConsole.Services.KeyVaultService.SetSecretAsync(String secretName, String secretValue, String organizationId) in C:\Users\mn\AdminConsole\Services\KeyVaultService.cs:line 237
+warn: AdminConsole.Services.OrganizationSetupService[0]
+      Failed to create secret Email-Service-Config for organization ac2987b9-d357-738f-a737-92733866ce54
+info: AdminConsole.Services.OrganizationSetupService[0]
+      Created 0/5 default secrets for organization ac2987b9-d357-738f-a737-92733866ce54
+warn: AdminConsole.Services.OrganizationSetupService[0]
+      Failed to create default secrets for organization cumulus
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Organization setup completed successfully for cumulus. OrganizationId: ac2987b9-d357-738f-a737-92733866ce54, SecurityGroupId: 406d8cc0-0d8a-489b-9fa5-e21ebc5ae208
+info: AdminConsole.Components.Pages.Owner.InviteAdmin[0]
+      Successfully completed admin invitation setup for m.nachman@cumulus-service.com - organization cumulus
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:02:27Z - bb65f2ed-52c2-41f1-ac57-96231fb96714] ==== GetAccounts started - GetAccountById ====
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:02:27Z - bb65f2ed-52c2-41f1-ac57-96231fb96714] Account id filter: True
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:02:27Z] [Internal cache] Total number of cache partitions found while getting refresh tokens: 0. PartitionKey  True
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:02:27Z] [Internal cache] Total number of cache partitions found while getting accounts: 0. PartitionKey  True
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:02:27Z - bb65f2ed-52c2-41f1-ac57-96231fb96714] [Region discovery] Not using a regional authority. 
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:02:27Z] Found 0 cache accounts and 0 broker accounts
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:02:27Z] Returning 0 accounts
+info: AdminConsole.Components.Pages.Home[0]
+      SignIn button clicked - navigating to challenge
+info: AdminConsole.Components.Pages.Home[0]
+      Navigation.NavigateTo called successfully
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:49Z - b5075e73-e082-4726-8e03-82c6e3578dd9] MSAL MSAL.NetCore with assembly version '4.73.1.0'. CorrelationId(b5075e73-e082-4726-8e03-82c6e3578dd9)
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:49Z - b5075e73-e082-4726-8e03-82c6e3578dd9] 
+      === Request Data ===
+      Authority Provided? - True
+      Scopes - 
+      Extra Query Params Keys (space separated) - 
+      ApiId - AcquireTokenByAuthorizationCode
+      IsConfidentialClient - True
+      SendX5C - False
+      LoginHint ? False
+      IsBrokerConfigured - False
+      HomeAccountId - False
+      CorrelationId - b5075e73-e082-4726-8e03-82c6e3578dd9
+      UserAssertion set: False
+      LongRunningOboCacheKey set: False
+      Region configured: 
+      FMI Path: 
+      Credential FMI Path: 
+      
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:49Z - b5075e73-e082-4726-8e03-82c6e3578dd9] === Token Acquisition (ConfidentialAuthCodeRequest) started:
+	 Scopes: 
+	Authority Host: login.microsoftonline.com
+warn: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:49Z - b5075e73-e082-4726-8e03-82c6e3578dd9] Only in-memory caching is used. The cache is not persisted and will be lost if the machine is restarted. It also does not scale for a web app or web API, where the number of users can grow large. In production, web apps and web APIs should use distributed caching like Redis. See https://aka.ms/msal-net-cca-token-cache-serialization
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:49Z - b5075e73-e082-4726-8e03-82c6e3578dd9] [Instance Discovery] Instance discovery is enabled and will be performed
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:49Z - b5075e73-e082-4726-8e03-82c6e3578dd9] [Region discovery] Not using a regional authority. 
+info: System.Net.Http.HttpClient.Default.LogicalHandler[100]
+      Start processing HTTP request POST https://login.microsoftonline.com/6faa87df-e8b3-406f-a407-b6e2c9755d47/oauth2/v2.0/token
+info: System.Net.Http.HttpClient.Default.ClientHandler[100]
+      Sending HTTP request POST https://login.microsoftonline.com/6faa87df-e8b3-406f-a407-b6e2c9755d47/oauth2/v2.0/token
+info: System.Net.Http.HttpClient.Default.ClientHandler[101]
+      Received HTTP response headers after 504.4709ms - 200
+info: System.Net.Http.HttpClient.Default.LogicalHandler[101]
+      End processing HTTP request after 520.1107ms - 200
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:50Z - b5075e73-e082-4726-8e03-82c6e3578dd9] Checking client info returned from the server..
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:50Z - b5075e73-e082-4726-8e03-82c6e3578dd9] Saving token response to cache..
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:50Z - b5075e73-e082-4726-8e03-82c6e3578dd9] [Region discovery] Not using a regional authority. 
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:50Z - b5075e73-e082-4726-8e03-82c6e3578dd9] [SaveTokenResponseAsync] Saving AT in cache and removing overlapping ATs...
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:50Z - b5075e73-e082-4726-8e03-82c6e3578dd9] Looking for scopes for the authority in the cache which intersect with 
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:50Z] [Internal cache] Total number of cache partitions found while getting access tokens: 0
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:50Z - b5075e73-e082-4726-8e03-82c6e3578dd9] Intersecting scope entries count - 0
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:50Z - b5075e73-e082-4726-8e03-82c6e3578dd9] Matching entries after filtering by user - 0
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:50Z - b5075e73-e082-4726-8e03-82c6e3578dd9] [SaveTokenResponseAsync] Saving Id Token and Account in cache ...
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:50Z - b5075e73-e082-4726-8e03-82c6e3578dd9] [SaveTokenResponseAsync] Saving RT in cache...
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:50Z - b5075e73-e082-4726-8e03-82c6e3578dd9] 
+	=== Token Acquisition finished successfully:
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:50Z - b5075e73-e082-4726-8e03-82c6e3578dd9]  AT expiration time: 8/5/2025 1:17:54 AM +00:00, scopes: email openid profile User.Read. source: IdentityProvider
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:50Z - b5075e73-e082-4726-8e03-82c6e3578dd9] Fetched access token from host login.microsoftonline.com. 
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:50Z - b5075e73-e082-4726-8e03-82c6e3578dd9] 
+      [LogMetricsFromAuthResult] Cache Refresh Reason: NotApplicable
+      [LogMetricsFromAuthResult] DurationInCacheInMs: 0
+      [LogMetricsFromAuthResult] DurationTotalInMs: 540
+      [LogMetricsFromAuthResult] DurationInHttpInMs: 522
+info: Microsoft.Identity.Web.TokenAcquisition[0]
+      False MSAL 4.73.1.0 MSAL.NetCore .NET 9.0.4 Microsoft Windows 10.0.20348 [2025-08-05 00:03:50Z - b5075e73-e082-4726-8e03-82c6e3578dd9] TokenEndpoint: ****
+info: Microsoft.IdentityModel.LoggingExtensions.IdentityLoggerAdapter[0]
+      Microsoft.IdentityModel Version: 8.0.1.0. Date 08/05/2025 00:03:50. PII logging is OFF. See https://aka.ms/IdentityModel/PII for details. 
+      IDX10242: Security token: '[PII of type 'Microsoft.IdentityModel.JsonWebTokens.JsonWebToken' is hidden. For more details, see https://aka.ms/IdentityModel/PII.]' has a valid signature.
+info: Microsoft.IdentityModel.LoggingExtensions.IdentityLoggerAdapter[0]
+      IDX10239: Lifetime of the token is valid.
+info: Microsoft.IdentityModel.LoggingExtensions.IdentityLoggerAdapter[0]
+      IDX10234: Audience Validated.Audience: '551ab648-38ac-436c-88c2-1c9527c52e3d'
+info: Microsoft.IdentityModel.LoggingExtensions.IdentityLoggerAdapter[0]
+      IDX10245: Creating claims identity from the validated token: '[PII of type 'Microsoft.IdentityModel.JsonWebTokens.JsonWebToken' is hidden. For more details, see https://aka.ms/IdentityModel/PII.]'.

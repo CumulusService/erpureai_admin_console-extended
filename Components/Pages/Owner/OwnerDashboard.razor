@@ -1,0 +1,337 @@
+@page "/owner/dashboard"
+@using AdminConsole.Models
+@using AdminConsole.Services
+@inject IOrganizationService OrganizationService
+@inject IGraphService GraphService
+@inject ILogger<OwnerDashboard> Logger
+
+<PageTitle>Super Admin Dashboard</PageTitle>
+
+<div class="container-fluid">
+    <div class="row mb-4">
+        <div class="col">
+            <h1 class="h3 mb-0 text-gray-800">
+                <i class="fas fa-crown text-warning me-2"></i>
+                Super Admin Dashboard
+            </h1>
+            <p class="text-muted">Global management across all organizations</p>
+        </div>
+    </div>
+
+    <!-- Global Stats Cards -->
+    <div class="row mb-4">
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-primary shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-primary text-uppercase mb-1">Total Organizations</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">@organizations.Count</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-building fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-success shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-success text-uppercase mb-1">Total Admins</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">@adminUsers.Count</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-user-shield fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-info shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-info text-uppercase mb-1">Total Users</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">@allUsers.Count</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-users fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-3 col-md-6 mb-4">
+            <div class="card border-left-warning shadow h-100 py-2">
+                <div class="card-body">
+                    <div class="row no-gutters align-items-center">
+                        <div class="col mr-2">
+                            <div class="text-xs font-weight-bold text-warning text-uppercase mb-1">Total Secrets</div>
+                            <div class="h5 mb-0 font-weight-bold text-gray-800">@organizations.Sum(o => o.SecretCount)</div>
+                        </div>
+                        <div class="col-auto">
+                            <i class="fas fa-key fa-2x text-gray-300"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="row mb-4">
+        <div class="col-lg-6">
+            <div class="card shadow">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Quick Actions</h6>
+                </div>
+                <div class="card-body">
+                    <div class="d-grid gap-2">
+                        <a href="/owner/invite-admin" class="btn btn-primary">
+                            <i class="fas fa-user-plus"></i> Invite New Organization Admin
+                        </a>
+                        <a href="/owner/organizations" class="btn btn-success">
+                            <i class="fas fa-building"></i> Manage Organizations
+                        </a>
+                        <a href="/owner/admins" class="btn btn-info">
+                            <i class="fas fa-user-shield"></i> View All Admins
+                        </a>
+                        <a href="/owner/reports" class="btn btn-warning">
+                            <i class="fas fa-chart-bar"></i> View Reports
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <div class="card shadow">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Recent Organizations</h6>
+                </div>
+                <div class="card-body">
+                    @if (organizations.Any())
+                    {
+                        <div class="list-group list-group-flush">
+                            @foreach (var org in organizations.OrderByDescending(o => o.CreatedDate).Take(5))
+                            {
+                                <div class="list-group-item d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <strong>@org.Name</strong>
+                                        <br />
+                                        <small class="text-muted">@org.Domain</small>
+                                        <br />
+                                        <small class="text-muted">Admin: @org.AdminUserName (@org.AdminUserEmail)</small>
+                                    </div>
+                                    <div class="text-end">
+                                        <div class="mb-1">
+                                            <span class="badge bg-@(org.IsActive ? "success" : "secondary")">
+                                                @(org.IsActive ? "Active" : "Inactive")
+                                            </span>
+                                        </div>
+                                        <small class="text-muted">
+                                            @org.UserCount users | @org.SecretCount secrets
+                                        </small>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="text-muted">No organizations found.</p>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Organizations Overview -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card shadow">
+                <div class="card-header py-3">
+                    <h6 class="m-0 font-weight-bold text-primary">Organizations Overview</h6>
+                </div>
+                <div class="card-body">
+                    @if (organizations.Any())
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Organization</th>
+                                        <th>Admin</th>
+                                        <th>Users</th>
+                                        <th>Secrets</th>
+                                        <th>Status</th>
+                                        <th>Created</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var org in organizations.OrderBy(o => o.Name))
+                                    {
+                                        <tr>
+                                            <td>
+                                                <div>
+                                                    <strong>@org.Name</strong>
+                                                    <br />
+                                                    <small class="text-muted">@org.Domain</small>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div>
+                                                    <strong>@org.AdminUserName</strong>
+                                                    <br />
+                                                    <small class="text-muted">@org.AdminUserEmail</small>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-info">@org.UserCount users</span>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-success">@org.SecretCount secrets</span>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-@(org.IsActive ? "success" : "secondary")">
+                                                    @(org.IsActive ? "Active" : "Inactive")
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <small class="text-muted">
+                                                    @org.CreatedDate.ToString("MMM dd, yyyy")
+                                                </small>
+                                            </td>
+                                            <td>
+                                                <div class="btn-group btn-group-sm" role="group">
+                                                    <button class="btn btn-outline-primary" @onclick="() => ViewOrganization(org.Id)">
+                                                        <i class="fas fa-eye"></i>
+                                                    </button>
+                                                    <button class="btn btn-outline-secondary" @onclick="() => EditOrganization(org.Id)">
+                                                        <i class="fas fa-edit"></i>
+                                                    </button>
+                                                    <button class="btn btn-outline-danger" @onclick="() => ToggleOrganizationStatus(org)">
+                                                        <i class="fas fa-@(org.IsActive ? "pause" : "play")"></i>
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="text-center py-5">
+                            <i class="fas fa-building fa-3x text-muted mb-3"></i>
+                            <h5 class="text-muted">No organizations found</h5>
+                            <p class="text-muted mb-4">Start by inviting your first organization admin.</p>
+                            <a href="/owner/invite-admin" class="btn btn-primary">
+                                <i class="fas fa-plus"></i> Invite First Admin
+                            </a>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<Organization> organizations = new();
+    private List<GuestUser> adminUsers = new();
+    private List<GuestUser> allUsers = new();
+    
+    @inject NavigationManager Navigation
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        try
+        {
+            // Load organizations from database
+            var orgsFromDb = await OrganizationService.GetAllOrganizationsAsync();
+            organizations = orgsFromDb.ToList();
+
+            // Load all guest users from Azure AD
+            allUsers = (await GraphService.GetAllGuestUsersAsync()).ToList();
+            
+            // Filter admin users (those with OrgAdmin role or email matching organization domains)
+            adminUsers = allUsers.Where(u => 
+                u.Role == UserRole.OrgAdmin || 
+                organizations.Any(o => u.Email.EndsWith($"@{o.Domain}"))
+            ).ToList();
+
+            // Update organization user counts and admin info from real data
+            foreach (var org in organizations)
+            {
+                var orgUsers = allUsers.Where(u => u.OrganizationId == org.Id || 
+                    u.Email.EndsWith($"@{org.Domain}")).ToList();
+                
+                org.UserCount = orgUsers.Count;
+                
+                // Find admin for this organization
+                var admin = adminUsers.FirstOrDefault(a => 
+                    a.OrganizationId == org.Id || 
+                    a.Email.EndsWith($"@{org.Domain}"));
+                
+                if (admin != null)
+                {
+                    org.AdminUserName = admin.DisplayName;
+                    org.AdminUserEmail = admin.Email;
+                    org.AdminUserId = admin.Id;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Log error but don't crash - show empty state
+            Logger.LogError(ex, "Error loading dashboard data");
+            organizations = new List<Organization>();
+            adminUsers = new List<GuestUser>();
+            allUsers = new List<GuestUser>();
+        }
+    }
+
+    private void ViewOrganization(string orgId)
+    {
+        Navigation.NavigateTo($"/owner/organizations/{orgId}");
+    }
+
+    private void EditOrganization(string orgId)
+    {
+        Navigation.NavigateTo($"/owner/organizations/{orgId}/edit");
+    }
+
+    private async Task ToggleOrganizationStatus(Organization org)
+    {
+        try
+        {
+            org.IsActive = !org.IsActive;
+            org.StateCode = org.IsActive ? StateCode.Active : StateCode.Inactive;
+            
+            await OrganizationService.UpdateOrganizationAsync(org);
+            StateHasChanged();
+        }
+        catch (Exception)
+        {
+            // Revert on error
+            org.IsActive = !org.IsActive;
+            org.StateCode = org.IsActive ? StateCode.Active : StateCode.Inactive;
+            StateHasChanged();
+        }
+    }
+}

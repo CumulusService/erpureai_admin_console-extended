@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Invitation Result</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css">
+</head>
+<body>
+    <div class="container mt-4">
+        <h1>Invitation Result</h1>
+
+        @if (ViewBag.Error != null)
+        {
+            <div class="alert alert-danger">
+                <h4>❌ Error</h4>
+                <p>@ViewBag.Error</p>
+            </div>
+        }
+
+        @if (ViewBag.Success != null)
+        {
+            <div class="alert alert-success">
+                <h4>✅ @ViewBag.Success</h4>
+            </div>
+
+            <div class="card">
+                <div class="card-body">
+                    <h5>Process Steps:</h5>
+                    
+                    @if (ViewBag.Step1 != null)
+                    {
+                        <p>@ViewBag.Step1</p>
+                    }
+                    
+                    @if (ViewBag.Step2 != null)
+                    {
+                        <p>@ViewBag.Step2</p>
+                    }
+                    
+                    @if (ViewBag.Step3 != null)
+                    {
+                        <p>@ViewBag.Step3</p>
+                    }
+                    
+                    @if (ViewBag.Step4 != null)
+                    {
+                        <p>@ViewBag.Step4</p>
+                    }
+                </div>
+            </div>
+        }
+
+        <a href="/Test/Invite" class="btn btn-primary mt-3">Test Another</a>
+    </div>
+</body>
+</html>

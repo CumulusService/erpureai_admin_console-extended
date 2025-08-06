@@ -1,0 +1,157 @@
+@using AdminConsole.Services
+@implements IDisposable
+@inject IJSRuntime JSRuntime
+@inject IUnsavedChangesService UnsavedChangesService
+@inject NavigationManager Navigation
+
+@code {
+    [Parameter] public string FormId { get; set; } = string.Empty;
+    [Parameter] public string WarningMessage { get; set; } = "You have unsaved changes. Are you sure you want to leave without saving?";
+    [Parameter] public bool TrackChanges { get; set; } = false;
+    [Parameter] public EventCallback<bool> OnUnsavedChangesChanged { get; set; }
+
+    private bool _isInitialized = false;
+    private bool _isDisposed = false;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_isInitialized)
+        {
+            _isInitialized = true;
+            
+            // Subscribe to navigation changes
+            Navigation.LocationChanged += HandleLocationChanged;
+            
+            // Subscribe to unsaved changes service events
+            UnsavedChangesService.UnsavedChangesChanged += HandleUnsavedChangesChanged;
+            
+            await UpdateJavaScriptState();
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_isInitialized && !_isDisposed)
+        {
+            await UpdateJavaScriptState();
+        }
+    }
+
+    private async Task UpdateJavaScriptState()
+    {
+        try
+        {
+            var shouldTrack = TrackChanges && UnsavedChangesService.HasUnsavedChanges();
+            System.Diagnostics.Debug.WriteLine($"UpdateJavaScriptState: TrackChanges={TrackChanges}, HasUnsavedChanges={UnsavedChangesService.HasUnsavedChanges()}, ShouldTrack={shouldTrack}");
+            
+            if (shouldTrack)
+            {
+                await JSRuntime.InvokeVoidAsync("unsavedChanges.enable", WarningMessage);
+                System.Diagnostics.Debug.WriteLine("Called unsavedChanges.enable");
+            }
+            else
+            {
+                await JSRuntime.InvokeVoidAsync("unsavedChanges.disable");
+                System.Diagnostics.Debug.WriteLine("Called unsavedChanges.disable");
+            }
+        }
+        catch (Exception ex)
+        {
+            // Handle JavaScript interop errors gracefully
+            System.Diagnostics.Debug.WriteLine($"JavaScript interop error in UnsavedChangesTracker: {ex.Message}");
+        }
+    }
+
+    public async Task MarkAsChanged()
+    {
+        if (!string.IsNullOrEmpty(FormId))
+        {
+            UnsavedChangesService.MarkFormAsChanged(FormId);
+            await UpdateJavaScriptState();
+            await OnUnsavedChangesChanged.InvokeAsync(true);
+        }
+    }
+
+    public async Task MarkAsSaved()
+    {
+        if (!string.IsNullOrEmpty(FormId))
+        {
+            UnsavedChangesService.MarkFormAsSaved(FormId);
+            await UpdateJavaScriptState();
+            await OnUnsavedChangesChanged.InvokeAsync(false);
+        }
+    }
+
+    public async Task<bool> ConfirmNavigation(string? customMessage = null)
+    {
+        if (!UnsavedChangesService.HasUnsavedChanges())
+        {
+            return true;
+        }
+
+        try
+        {
+            var message = customMessage ?? WarningMessage;
+            return await JSRuntime.InvokeAsync<bool>("unsavedChanges.confirmNavigation", message);
+        }
+        catch
+        {
+            // Fallback for JavaScript interop issues
+            return true;
+        }
+    }
+
+    private async void HandleLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        if (_isDisposed) return;
+
+        // Clear unsaved changes when successfully navigating away
+        // Note: This only fires after navigation is confirmed/completed
+        if (!string.IsNullOrEmpty(FormId))
+        {
+            UnsavedChangesService.MarkFormAsSaved(FormId);
+        }
+        
+        await UpdateJavaScriptState();
+    }
+
+    private async void HandleUnsavedChangesChanged(object? sender, UnsavedChangesEventArgs e)
+    {
+        if (_isDisposed) return;
+
+        await InvokeAsync(async () =>
+        {
+            await UpdateJavaScriptState();
+            await OnUnsavedChangesChanged.InvokeAsync(UnsavedChangesService.HasUnsavedChanges());
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        if (!_isDisposed)
+        {
+            _isDisposed = true;
+            
+            // Unsubscribe from events
+            Navigation.LocationChanged -= HandleLocationChanged;
+            UnsavedChangesService.UnsavedChangesChanged -= HandleUnsavedChangesChanged;
+            
+            // Clean up this form's unsaved changes
+            if (!string.IsNullOrEmpty(FormId))
+            {
+                UnsavedChangesService.MarkFormAsSaved(FormId);
+            }
+
+            // Update JavaScript state
+            try
+            {
+                _ = JSRuntime.InvokeVoidAsync("unsavedChanges.disable");
+            }
+            catch
+            {
+                // Ignore errors during dispose
+            }
+        }
+    }
+}

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GraphService Test Result</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css">
+</head>
+<body>
+    <div class="container mt-4">
+        <h1>GraphService Test Result</h1>
+
+        @if (ViewBag.Error != null)
+        {
+            <div class="alert alert-danger">
+                <h4>❌ Error</h4>
+                <p><strong>@ViewBag.Error</strong></p>
+                
+                @if (ViewBag.Details != null)
+                {
+                    <hr>
+                    <h6>Technical Details:</h6>
+                    <pre style="font-size: 12px; background: #f8f9fa; padding: 10px;">@ViewBag.Details</pre>
+                }
+            </div>
+        }
+
+        @if (ViewBag.Success != null)
+        {
+            <div class="alert alert-success">
+                <h4>@ViewBag.Success</h4>
+                
+                @if (ViewBag.UserDetails != null)
+                {
+                    <p><strong>User Details:</strong> @ViewBag.UserDetails</p>
+                }
+                
+                @if (ViewBag.Email != null)
+                {
+                    <p><strong>Email:</strong> @ViewBag.Email</p>
+                }
+                
+                @if (ViewBag.Status != null)
+                {
+                    <p><strong>Status:</strong> @ViewBag.Status</p>
+                }
+            </div>
+        }
+
+        <div class="mt-3">
+            <a href="/GraphTest/Test" class="btn btn-primary">Test Again</a>
+            <a href="/Debug/Test" class="btn btn-secondary">Direct Graph Test</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,15 @@
+@page "/simple-test"
+
+<h1>Simple Test Page</h1>
+<p>If you can see this, Blazor routing is working!</p>
+<p>Current time: @DateTime.Now</p>
+
+<div class="alert alert-info">
+    <p>Authentication status: @(context?.User?.Identity?.IsAuthenticated ?? false)</p>
+    <p>User name: @(context?.User?.Identity?.Name ?? "Not available")</p>
+</div>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? context { get; set; }
+}

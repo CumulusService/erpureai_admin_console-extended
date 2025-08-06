@@ -1,0 +1,479 @@
+@page "/owner/organizations/{OrganizationId:guid}"
+@using AdminConsole.Models
+@using AdminConsole.Services
+@inject IOrganizationService OrganizationService
+@inject IOnboardedUserService OnboardedUserService
+@inject IKeyVaultService KeyVaultService
+@inject NavigationManager Navigation
+@inject ILogger<OrganizationDetails> Logger
+@attribute [Authorize(Policy = "SuperAdminOnly")]
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <nav aria-label="breadcrumb">
+                        <ol class="breadcrumb mb-2">
+                            <li class="breadcrumb-item"><a href="/owner/organizations" class="text-decoration-none">Organizations</a></li>
+                            <li class="breadcrumb-item active">@(organization?.Name ?? "Organization Details")</li>
+                        </ol>
+                    </nav>
+                    <h2 class="mb-1">@(organization?.Name ?? "Loading...")</h2>
+                    <p class="text-muted mb-0">
+                        @if (organization != null)
+                        {
+                            <span class="badge @(organization.StateCode == StateCode.Active ? "bg-success" : "bg-secondary") me-2">
+                                @(organization.StateCode == StateCode.Active ? "Active" : "Inactive")
+                            </span>
+                            <span class="text-muted">@ExtractDomainFromEmail(organization.AdminEmail)</span>
+                        }
+                    </p>
+                </div>
+                <div>
+                    @if (organization != null)
+                    {
+                        <button type="button" class="btn btn-outline-primary me-2" @onclick="EditOrganization">
+                            <i class="fas fa-edit me-1"></i>
+                            Edit Organization
+                        </button>
+                        @if (organization.StateCode == StateCode.Active)
+                        {
+                            <button type="button" class="btn btn-outline-warning" @onclick="() => ToggleOrganizationStatus(false)">
+                                <i class="fas fa-pause me-1"></i>
+                                Deactivate
+                            </button>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn btn-outline-success" @onclick="() => ToggleOrganizationStatus(true)">
+                                <i class="fas fa-play me-1"></i>
+                                Activate
+                            </button>
+                        }
+                    }
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                    <strong>Error:</strong> @errorMessage
+                    <button type="button" class="btn-close" @onclick="ClearMessages"></button>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(successMessage))
+            {
+                <div class="alert alert-success alert-dismissible fade show" role="alert">
+                    <strong>Success:</strong> @successMessage
+                    <button type="button" class="btn-close" @onclick="ClearMessages"></button>
+                </div>
+            }
+
+            @if (isLoading)
+            {
+                <div class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2 text-muted">Loading organization details...</p>
+                </div>
+            }
+            else if (organization == null)
+            {
+                <div class="card">
+                    <div class="card-body text-center py-5">
+                        <i class="fas fa-building-slash fa-3x text-muted mb-3"></i>
+                        <h5 class="text-muted">Organization Not Found</h5>
+                        <p class="text-muted mb-3">
+                            The requested organization could not be found or you don't have permission to view it.
+                        </p>
+                        <a href="/owner/organizations" class="btn btn-primary">
+                            <i class="fas fa-arrow-left me-1"></i>
+                            Back to Organizations
+                        </a>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="row">
+                    <div class="col-lg-8">
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-building me-2"></i>
+                                    Organization Information
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label text-muted">Organization Name</label>
+                                            <p class="fw-bold">@organization.Name</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label text-muted">Admin Email</label>
+                                            <p class="fw-bold">@organization.AdminEmail</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label text-muted">Domain</label>
+                                            <p class="fw-bold">@ExtractDomainFromEmail(organization.AdminEmail)</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label text-muted">Database Type</label>
+                                            <p class="fw-bold">
+                                                <span class="badge bg-info">@organization.DatabaseType</span>
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label text-muted">Organization ID</label>
+                                            <p class="font-monospace small">@organization.OrganizationId</p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label text-muted">Status</label>
+                                            <p>
+                                                <span class="badge @(organization.StateCode == StateCode.Active ? "bg-success" : "bg-secondary") fs-6">
+                                                    @(organization.StateCode == StateCode.Active ? "Active" : "Inactive")
+                                                </span>
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-key me-2"></i>
+                                    Key Vault Configuration
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label text-muted">Key Vault URI</label>
+                                            <p class="fw-bold font-monospace small">
+                                                @(string.IsNullOrEmpty(organization.KeyVaultUri) ? "Using Shared Vault" : organization.KeyVaultUri)
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label text-muted">Secret Prefix</label>
+                                            <p class="fw-bold">
+                                                @(string.IsNullOrEmpty(organization.KeyVaultSecretPrefix) ? 
+                                                  organization.GetEffectiveSecretPrefix() : 
+                                                  organization.KeyVaultSecretPrefix)
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label text-muted">Effective Key Vault</label>
+                                    <p class="fw-bold font-monospace small">@organization.GetEffectiveKeyVaultUri()</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(organization.SAPServiceLayerHostname) || 
+                             !string.IsNullOrEmpty(organization.SAPAPIGatewayHostname) ||
+                             !string.IsNullOrEmpty(organization.SAPBusinessOneWebClientHost) ||
+                             !string.IsNullOrEmpty(organization.DocumentCode))
+                        {
+                            <div class="card">
+                                <div class="card-header">
+                                    <h5 class="card-title mb-0">
+                                        <i class="fas fa-cogs me-2"></i>
+                                        SAP Configuration
+                                    </h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        @if (!string.IsNullOrEmpty(organization.SAPServiceLayerHostname))
+                                        {
+                                            <div class="col-md-6">
+                                                <div class="mb-3">
+                                                    <label class="form-label text-muted">SAP Service Layer</label>
+                                                    <p class="fw-bold">@organization.SAPServiceLayerHostname</p>
+                                                </div>
+                                            </div>
+                                        }
+                                        @if (!string.IsNullOrEmpty(organization.SAPAPIGatewayHostname))
+                                        {
+                                            <div class="col-md-6">
+                                                <div class="mb-3">
+                                                    <label class="form-label text-muted">SAP API Gateway</label>
+                                                    <p class="fw-bold">@organization.SAPAPIGatewayHostname</p>
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                    <div class="row">
+                                        @if (!string.IsNullOrEmpty(organization.SAPBusinessOneWebClientHost))
+                                        {
+                                            <div class="col-md-6">
+                                                <div class="mb-3">
+                                                    <label class="form-label text-muted">SAP Web Client</label>
+                                                    <p class="fw-bold">@organization.SAPBusinessOneWebClientHost</p>
+                                                </div>
+                                            </div>
+                                        }
+                                        @if (!string.IsNullOrEmpty(organization.DocumentCode))
+                                        {
+                                            <div class="col-md-6">
+                                                <div class="mb-3">
+                                                    <label class="form-label text-muted">Document Code</label>
+                                                    <p class="fw-bold">@organization.DocumentCode</p>
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    <div class="col-lg-4">
+                        <div class="card mb-4">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-chart-bar me-2"></i>
+                                    Organization Statistics
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row text-center">
+                                    <div class="col-6">
+                                        <div class="border-end">
+                                            <div class="h4 mb-0 text-info">@organizationUsers.Count</div>
+                                            <small class="text-muted">Total Users</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="h4 mb-0 text-success">@secretCount</div>
+                                        <small class="text-muted">Secrets</small>
+                                    </div>
+                                </div>
+                                <hr />
+                                <div class="row text-center">
+                                    <div class="col-6">
+                                        <div class="border-end">
+                                            <div class="h5 mb-0 text-warning">@activeUsersCount</div>
+                                            <small class="text-muted">Active Users</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="h5 mb-0 text-secondary">@pendingUsersCount</div>
+                                        <small class="text-muted">Pending</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card mb-4">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-users me-2"></i>
+                                    Recent Users
+                                </h5>
+                                <a href="/owner/organizations/@OrganizationId/users" class="btn btn-sm btn-outline-primary">
+                                    View All
+                                </a>
+                            </div>
+                            <div class="card-body">
+                                @if (organizationUsers.Any())
+                                {
+                                    @foreach (var user in organizationUsers.Take(5))
+                                    {
+                                        <div class="d-flex align-items-center mb-2">
+                                            <div class="avatar-sm me-2">
+                                                <div class="avatar-title bg-info rounded-circle">
+                                                    @user.Name.FirstOrDefault()
+                                                </div>
+                                            </div>
+                                            <div class="flex-grow-1">
+                                                <div class="fw-bold small">@user.Name</div>
+                                                <div class="text-muted small">@user.Email</div>
+                                            </div>
+                                            <span class="badge @(user.StateCode == StateCode.Active ? "bg-success" : "bg-secondary")">
+                                                @(user.StateCode == StateCode.Active ? "Active" : "Inactive")
+                                            </span>
+                                        </div>
+                                    }
+                                }
+                                else
+                                {
+                                    <p class="text-muted mb-0">No users found</p>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-history me-2"></i>
+                                    Audit Information
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="mb-3">
+                                    <label class="form-label text-muted">Created On</label>
+                                    <p class="fw-bold">@organization.CreatedOn.ToString("MMM dd, yyyy 'at' h:mm tt")</p>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label text-muted">Last Modified</label>
+                                    <p class="fw-bold">@organization.ModifiedOn.ToString("MMM dd, yyyy 'at' h:mm tt")</p>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label text-muted">Owner ID</label>
+                                    <p class="font-monospace small">@organization.OwnerId</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid OrganizationId { get; set; }
+    
+    private Organization? organization;
+    private List<OnboardedUser> organizationUsers = new();
+    private int secretCount = 0;
+    private int activeUsersCount = 0;
+    private int pendingUsersCount = 0;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await LoadOrganizationDetails();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing organization details page for organization {OrganizationId}", OrganizationId);
+            errorMessage = "Error loading page. Please refresh and try again.";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadOrganizationDetails()
+    {
+        try
+        {
+            // Load organization
+            organization = await OrganizationService.GetByIdAsync(OrganizationId.ToString());
+            
+            if (organization != null)
+            {
+                // Load users for this organization
+                organizationUsers = await OnboardedUserService.GetByOrganizationAsync(OrganizationId);
+                
+                // Calculate statistics
+                activeUsersCount = organizationUsers.Count(u => u.StateCode == StateCode.Active);
+                pendingUsersCount = organizationUsers.Count(u => u.StateCode == StateCode.Inactive);
+                
+                // Load secret count (this would typically come from Key Vault service)
+                try
+                {
+                    var secretNames = await KeyVaultService.GetSecretNamesAsync(OrganizationId.ToString());
+                    secretCount = secretNames.Count();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Could not load secret count for organization {OrganizationId}", OrganizationId);
+                    secretCount = 0;
+                }
+                
+                // Update organization user count
+                organization.Users = organizationUsers;
+                organization.SyncLegacyProperties();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading organization details for {OrganizationId}", OrganizationId);
+            errorMessage = "Error loading organization details. Please try again.";
+        }
+    }
+
+    private void EditOrganization()
+    {
+        Navigation.NavigateTo($"/owner/organizations/{OrganizationId}/edit");
+    }
+
+    private async Task ToggleOrganizationStatus(bool activate)
+    {
+        if (organization == null) return;
+
+        try
+        {
+            ClearMessages();
+            
+            organization.StateCode = activate ? StateCode.Active : StateCode.Inactive;
+            organization.StatusCode = activate ? StatusCode.Active : StatusCode.Inactive;
+            organization.ModifiedOn = DateTime.UtcNow;
+
+            var success = await OrganizationService.UpdateOrganizationAsync(organization);
+            
+            if (success)
+            {
+                successMessage = $"Organization '{organization.Name}' has been {(activate ? "activated" : "deactivated")} successfully.";
+                organization.SyncLegacyProperties();
+            }
+            else
+            {
+                errorMessage = $"Failed to {(activate ? "activate" : "deactivate")} organization. Please try again.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error toggling organization status for {OrganizationId}", OrganizationId);
+            errorMessage = "An unexpected error occurred. Please try again.";
+        }
+
+        StateHasChanged();
+    }
+
+    private void ClearMessages()
+    {
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+    }
+
+    private string ExtractDomainFromEmail(string email)
+    {
+        if (string.IsNullOrEmpty(email)) return string.Empty;
+        var atIndex = email.IndexOf('@');
+        return atIndex > 0 ? email.Substring(atIndex + 1) : string.Empty;
+    }
+}

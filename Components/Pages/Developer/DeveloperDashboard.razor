@@ -1,0 +1,233 @@
+@page "/developer"
+@page "/developer/dashboard"
+@using AdminConsole.Models
+@using AdminConsole.Services
+@inject IAgentTypeService AgentTypeService
+@inject ILogger<DeveloperDashboard> Logger
+@attribute [Authorize(Policy = "DevOnly")]
+@rendermode InteractiveServer
+
+<PageTitle>Developer Dashboard</PageTitle>
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="mb-4">
+                <h2 class="mb-1">Developer Dashboard</h2>
+                <p class="text-muted mb-0">System configuration and management tools</p>
+            </div>
+
+            <div class="row">
+                <!-- Agent Types Overview -->
+                <div class="col-lg-6 col-xl-4 mb-4">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center mb-3">
+                                <div class="flex-shrink-0">
+                                    <i class="fas fa-robot fa-2x text-primary"></i>
+                                </div>
+                                <div class="flex-grow-1 ms-3">
+                                    <h5 class="card-title mb-0">Agent Types</h5>
+                                    <p class="text-muted mb-0">Configure system agent types</p>
+                                </div>
+                            </div>
+                            <div class="row text-center">
+                                <div class="col-6">
+                                    <div class="border-end">
+                                        <h4 class="mb-0 text-success">@activeCount</h4>
+                                        <small class="text-muted">Active</small>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <h4 class="mb-0 text-secondary">@totalCount</h4>
+                                    <small class="text-muted">Total</small>
+                                </div>
+                            </div>
+                            <div class="mt-3">
+                                <a href="/developer/agent-types" class="btn btn-primary btn-sm w-100">
+                                    <i class="fas fa-cog me-1"></i>
+                                    Manage Agent Types
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Security Groups Overview -->
+                <div class="col-lg-6 col-xl-4 mb-4">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center mb-3">
+                                <div class="flex-shrink-0">
+                                    <i class="fas fa-shield-alt fa-2x text-info"></i>
+                                </div>
+                                <div class="flex-grow-1 ms-3">
+                                    <h5 class="card-title mb-0">Security Groups</h5>
+                                    <p class="text-muted mb-0">Global security group mappings</p>
+                                </div>
+                            </div>
+                            <div class="row text-center">
+                                <div class="col-6">
+                                    <div class="border-end">
+                                        <h4 class="mb-0 text-success">@configuredCount</h4>
+                                        <small class="text-muted">Configured</small>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <h4 class="mb-0 text-warning">@unconfiguredCount</h4>
+                                    <small class="text-muted">Missing</small>
+                                </div>
+                            </div>
+                            <div class="mt-3">
+                                <a href="/developer/agent-types" class="btn btn-info btn-sm w-100">
+                                    <i class="fas fa-link me-1"></i>
+                                    Configure Groups
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Status -->
+                <div class="col-lg-6 col-xl-4 mb-4">
+                    <div class="card h-100">
+                        <div class="card-body">
+                            <div class="d-flex align-items-center mb-3">
+                                <div class="flex-shrink-0">
+                                    <i class="fas fa-heartbeat fa-2x text-success"></i>
+                                </div>
+                                <div class="flex-grow-1 ms-3">
+                                    <h5 class="card-title mb-0">System Status</h5>
+                                    <p class="text-muted mb-0">Overall system health</p>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="small">Agent Types</span>
+                                    <span class="badge bg-success">Operational</span>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="small">Security Groups</span>
+                                    <span class="badge @(configuredCount == totalCount ? "bg-success" : "bg-warning")">
+                                        @(configuredCount == totalCount ? "Complete" : "Partial")
+                                    </span>
+                                </div>
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="small">Database</span>
+                                    <span class="badge bg-success">Connected</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Agent Types -->
+            @if (recentAgentTypes.Any())
+            {
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header">
+                                <h5 class="card-title mb-0">
+                                    <i class="fas fa-clock me-2"></i>
+                                    Recent Agent Types
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Name</th>
+                                                <th>Display Name</th>
+                                                <th>Security Group</th>
+                                                <th>Status</th>
+                                                <th>Modified</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var agentType in recentAgentTypes.Take(5))
+                                            {
+                                                <tr>
+                                                    <td><strong>@agentType.Name</strong></td>
+                                                    <td>@agentType.DisplayName</td>
+                                                    <td>
+                                                        @if (!string.IsNullOrEmpty(agentType.GlobalSecurityGroupId))
+                                                        {
+                                                            <code class="small">@agentType.GlobalSecurityGroupId.Substring(0, Math.Min(8, agentType.GlobalSecurityGroupId.Length))...</code>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="text-muted">Not configured</span>
+                                                        }
+                                                    </td>
+                                                    <td>
+                                                        <span class="badge @(agentType.IsActive ? "bg-success" : "bg-secondary") badge-sm">
+                                                            @(agentType.IsActive ? "Active" : "Inactive")
+                                                        </span>
+                                                    </td>
+                                                    <td>
+                                                        <small class="text-muted">@agentType.ModifiedDate.ToString("MMM dd, HH:mm")</small>
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <div class="text-center mt-3">
+                                    <a href="/developer/agent-types" class="btn btn-outline-primary btn-sm">
+                                        View All Agent Types
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<AgentTypeEntity> recentAgentTypes = new();
+    private int totalCount = 0;
+    private int activeCount = 0;
+    private int configuredCount = 0;
+    private int unconfiguredCount = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await LoadDashboardData();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading developer dashboard data");
+        }
+    }
+
+    private async Task LoadDashboardData()
+    {
+        try
+        {
+            var allAgentTypes = await AgentTypeService.GetAllAgentTypesAsync();
+            
+            totalCount = allAgentTypes.Count;
+            activeCount = allAgentTypes.Count(at => at.IsActive);
+            configuredCount = allAgentTypes.Count(at => !string.IsNullOrEmpty(at.GlobalSecurityGroupId));
+            unconfiguredCount = totalCount - configuredCount;
+            
+            recentAgentTypes = allAgentTypes
+                .OrderByDescending(at => at.ModifiedDate)
+                .ToList();
+                
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading dashboard data");
+        }
+    }
+}

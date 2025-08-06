@@ -1,0 +1,158 @@
+@using Microsoft.AspNetCore.Authorization
+@inject IJSRuntime JSRuntime
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid d-flex justify-content-between align-items-center">
+        <a class="navbar-brand d-flex align-items-center" href="" style="max-width: 50%; min-width: 200px;">
+            <img src="company-logo.png" alt="Company Logo" class="me-2 company-logo" style="height: 32px; width: auto; flex-shrink: 0;" />
+            <span class="d-none d-md-inline text-truncate">ERPURE.AI Admin Console</span>
+            <span class="d-md-none d-sm-inline text-truncate">ERPURE.AI</span>
+        </a>
+        
+        <AuthorizeView>
+            <Authorized>
+                <div class="d-flex align-items-center flex-wrap">
+                    <span class="text-light me-2 me-md-3 text-truncate" style="max-width: 200px;">
+                        <i class="fas fa-user-circle me-1"></i>
+                        <span class="d-none d-md-inline">@context.User.Identity?.Name</span>
+                        <span class="d-md-none">@(context.User.Identity?.Name?.Split('@')[0] ?? "User")</span>
+                    </span>
+                    <button class="btn btn-outline-light btn-sm text-nowrap" @onclick="SignOut" title="Sign Out">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span class="d-none d-lg-inline ms-1">Sign Out</span>
+                    </button>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="nav flex-column">
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <span class="fas fa-home" aria-hidden="true"></span> Home
+            </NavLink>
+        </div>
+
+        <!-- Super Admin / Owner Section -->
+        <AuthorizeView Policy="SuperAdminOnly">
+            <Authorized>
+                <div class="nav-section px-3 py-2">
+                    <div class="nav-section-title">
+                        <i class="fas fa-crown text-warning me-2"></i>
+                        <small class="text-uppercase text-muted fw-bold">Super Admin</small>
+                    </div>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="owner/dashboard">
+                        <span class="fas fa-tachometer-alt text-warning" aria-hidden="true"></span> Owner Dashboard
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="owner/admins">
+                        <span class="fas fa-user-shield text-warning" aria-hidden="true"></span> Manage Admins
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="owner/organizations">
+                        <span class="fas fa-building text-warning" aria-hidden="true"></span> Organizations
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="/owner/invite-admin">
+                        <span class="fas fa-user-plus text-warning" aria-hidden="true"></span> Invite Admin
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+
+        <!-- Developer Section -->
+        <AuthorizeView Policy="DevOnly">
+            <Authorized>
+                <div class="nav-section px-3 py-2 mt-3">
+                    <div class="nav-section-title">
+                        <i class="fas fa-code text-success me-2"></i>
+                        <small class="text-uppercase text-muted fw-bold">Developer</small>
+                    </div>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="developer/dashboard">
+                        <span class="fas fa-tachometer-alt text-success" aria-hidden="true"></span> Developer Dashboard
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="developer/agent-types">
+                        <span class="fas fa-robot text-success" aria-hidden="true"></span> Manage Agent Types
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+
+        <!-- Org Admin Section -->
+        <AuthorizeView Policy="OrgAdminOnly">
+            <Authorized>
+                <div class="nav-section px-3 py-2 mt-3">
+                    <div class="nav-section-title">
+                        <i class="fas fa-user-shield text-info me-2"></i>
+                        <small class="text-uppercase text-muted fw-bold">Organization Admin</small>
+                    </div>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="admin/dashboard">
+                        <span class="fas fa-tachometer-alt text-info" aria-hidden="true"></span> Admin Dashboard
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="admin/users">
+                        <span class="fas fa-users text-info" aria-hidden="true"></span> My Users
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="admin/users/invite">
+                        <span class="fas fa-user-plus text-info" aria-hidden="true"></span> Invite User
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="admin/secrets">
+                        <span class="fas fa-key text-info" aria-hidden="true"></span> My Secrets
+                    </NavLink>
+                </div>
+
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="admin/database-credentials">
+                        <span class="fas fa-database text-info" aria-hidden="true"></span> Database Credentials
+                    </NavLink>
+                </div>
+
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="admin/organization-settings">
+                        <span class="fas fa-cogs text-info" aria-hidden="true"></span> Organization Settings
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+    </nav>
+</div>
+
+@code {
+    private void SignOut()
+    {
+        Navigation.NavigateTo("/Account/SignOut", forceLoad: true);
+    }
+}

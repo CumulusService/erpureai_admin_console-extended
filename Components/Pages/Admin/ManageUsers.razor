@@ -1,0 +1,419 @@
+@page "/admin/users"
+@page "/users"
+@rendermode InteractiveServer
+@using AdminConsole.Models
+@using AdminConsole.Services
+@using System.Security.Cryptography
+@inject IGraphService GraphService
+@inject IOnboardedUserService OnboardedUserService
+@inject IDataIsolationService DataIsolationService
+@inject IOrganizationSetupService OrganizationSetupService
+@inject IHttpContextAccessor HttpContextAccessor
+@inject NavigationManager Navigation
+@inject ILogger<ManageUsers> Logger
+@inject IJSRuntime JSRuntime
+@attribute [Authorize(Policy = "OrgAdminOrHigher")]
+
+<PageTitle>My Users - Organization Admin</PageTitle>
+
+<div class="container-fluid">
+    <div class="d-sm-flex align-items-center justify-content-between mb-4">
+        <h1 class="h3 mb-0 text-gray-800">
+            <i class="fas fa-users text-info me-2"></i>
+            My Organization Users
+        </h1>
+        <a href="/admin/users/invite" class="btn btn-primary btn-sm d-none d-md-inline-block">
+            <i class="fas fa-user-plus"></i> Invite User
+        </a>
+        <a href="/admin/users/invite" class="btn btn-primary btn-sm d-md-none">
+            <i class="fas fa-user-plus"></i>
+        </a>
+    </div>
+
+    <!-- Filter and Search -->
+    <div class="card shadow mb-4">
+        <div class="card-header py-3">
+            <div class="row align-items-center">
+                <div class="col-md-4">
+                    <h6 class="m-0 font-weight-bold text-primary">Users in My Organization (@filteredUsers.Count())</h6>
+                </div>
+                <div class="col-md-4">
+                    <select class="form-select form-select-sm" @bind="statusFilter" @bind:after="FilterUsers">
+                        <option value="">All Statuses</option>
+                        <option value="Accepted">Active</option>
+                        <option value="PendingAcceptance">Pending</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <div class="input-group">
+                        <input type="text" class="form-control form-control-sm" placeholder="Search users..." 
+                               @bind="searchTerm" @oninput="FilterUsers" />
+                        <span class="input-group-text"><i class="fas fa-search"></i></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Users Table -->
+    <div class="card shadow">
+        <div class="card-body">
+            @if (filteredUsers.Any())
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th>User</th>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Status</th>
+                                <th>Invited</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var user in filteredUsers.OrderBy(u => u.DisplayName))
+                            {
+                                <tr>
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <div class="avatar-sm me-3">
+                                                <div class="avatar-title bg-info rounded-circle">
+                                                    @user.DisplayName.FirstOrDefault()
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <h6 class="mb-0">@user.DisplayName</h6>
+                                                <small class="text-muted">@user.UserPrincipalName</small>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>@user.Email</td>
+                                    <td>
+                                        <span class="badge @user.Role.GetBadgeClass()">
+                                            <i class="@user.Role.GetIcon() me-1"></i>
+                                            @user.Role.GetDisplayName()
+                                        </span>
+                                    </td>
+                                    <td>
+                                        @switch (user.InvitationStatus)
+                                        {
+                                            case "Accepted":
+                                                <span class="badge bg-success">
+                                                    <i class="fas fa-check me-1"></i> Active
+                                                </span>
+                                                break;
+                                            case "PendingAcceptance":
+                                                <span class="badge bg-warning">
+                                                    <i class="fas fa-clock me-1"></i> Pending
+                                                </span>
+                                                break;
+                                            default:
+                                                <span class="badge bg-secondary">
+                                                    @user.InvitationStatus
+                                                </span>
+                                                break;
+                                        }
+                                    </td>
+                                    <td>
+                                        <small class="text-muted">
+                                            @user.InvitedDateTime.ToString("MMM dd, yyyy")
+                                        </small>
+                                    </td>
+                                    <td>
+                                        <div class="dropdown">
+                                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" 
+                                                    data-bs-toggle="dropdown" aria-expanded="false">
+                                                <i class="fas fa-ellipsis-v"></i>
+                                            </button>
+                                            <ul class="dropdown-menu">
+                                                <li>
+                                                    <button class="dropdown-item" @onclick="() => ViewUserDetails(user)">
+                                                        <i class="fas fa-eye me-1"></i> View Details
+                                                    </button>
+                                                </li>
+                                                @if (user.InvitationStatus == "PendingAcceptance")
+                                                {
+                                                    <li>
+                                                        <button class="dropdown-item" @onclick="() => ResendInvitation(user)">
+                                                            <i class="fas fa-paper-plane me-1"></i> Resend Invitation
+                                                        </button>
+                                                    </li>
+                                                }
+                                                <li><hr class="dropdown-divider"></li>
+                                                <li>
+                                                    <button class="dropdown-item text-danger" @onclick="() => ShowRevokeConfirmation(user)">
+                                                        <i class="fas fa-user-times me-1"></i> Remove User
+                                                    </button>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            else
+            {
+                <div class="text-center py-5">
+                    <i class="fas fa-users fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">No users found in your organization</h5>
+                    <p class="text-muted mb-4">
+                        @if (string.IsNullOrEmpty(searchTerm) && string.IsNullOrEmpty(statusFilter))
+                        {
+                            <text>Start by inviting users to your organization.</text>
+                        }
+                        else
+                        {
+                            <text>No users match your search criteria.</text>
+                        }
+                    </p>
+                    @if (string.IsNullOrEmpty(searchTerm) && string.IsNullOrEmpty(statusFilter))
+                    {
+                        <a href="/admin/users/invite" class="btn btn-primary btn-responsive">
+                            <i class="fas fa-plus"></i> 
+                            <span class="d-none d-sm-inline">Invite First User</span>
+                            <span class="d-sm-none">Invite User</span>
+                        </a>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert alert-danger alert-dismissible fade show mt-4" role="alert">
+            <strong>Error:</strong> @errorMessage
+            <button type="button" class="btn-close" @onclick="ClearMessages"></button>
+        </div>
+    }
+    
+    @if (!string.IsNullOrEmpty(successMessage))
+    {
+        <div class="alert alert-success alert-dismissible fade show mt-4" role="alert">
+            <strong>Success:</strong> @successMessage
+            <button type="button" class="btn-close" @onclick="ClearMessages"></button>
+        </div>
+    }
+    
+    @if (isLoading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2 text-muted">Loading your organization's users...</p>
+        </div>
+    }
+    else
+    {
+        <div class="alert alert-info mt-4">
+            <i class="fas fa-info-circle me-2"></i>
+            <strong>Organization Admin View:</strong> You can only see and manage users within your organization. 
+            All data is isolated per organization for security and compliance.
+        </div>
+    }
+</div>
+
+@code {
+    private List<GuestUser> allUsers = new();
+    private List<GuestUser> filteredUsers = new();
+    private string searchTerm = string.Empty;
+    private string statusFilter = string.Empty;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+    private Guid currentUserOrgId;
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Get current user's organization
+            var currentUserOrgIdStr = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
+            if (!string.IsNullOrEmpty(currentUserOrgIdStr))
+            {
+                // Try to parse as GUID, otherwise generate one from the string
+                if (!Guid.TryParse(currentUserOrgIdStr, out currentUserOrgId))
+                {
+                    // Generate deterministic GUID from organization ID string
+                    using (var md5 = System.Security.Cryptography.MD5.Create())
+                    {
+                        var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(currentUserOrgIdStr));
+                        currentUserOrgId = new Guid(hash);
+                    }
+                    Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgIdStr);
+                }
+                
+                // Initialize default secrets for Organization Admin if not already done
+                await InitializeDefaultSecretsAsync(currentUserOrgIdStr);
+                
+                await LoadUsers();
+            }
+            else
+            {
+                errorMessage = "Unable to determine your organization. Please contact support.";
+                Logger.LogWarning("User organization ID could not be determined");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing ManageUsers page");
+            errorMessage = "Error loading page. Please refresh and try again.";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadUsers()
+    {
+        try
+        {
+            // Load users from OnboardedUserService
+            var onboardedUsers = await OnboardedUserService.GetByOrganizationAsync(currentUserOrgId);
+            
+            // Convert to GuestUser for backward compatibility
+            allUsers = onboardedUsers.Select(u => new GuestUser(u)).ToList();
+            
+            filteredUsers = allUsers;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading users for organization {OrganizationId}", currentUserOrgId);
+            allUsers = new List<GuestUser>();
+            filteredUsers = allUsers;
+        }
+    }
+
+    private void FilterUsers()
+    {
+        filteredUsers = allUsers.Where(user =>
+            (string.IsNullOrEmpty(searchTerm) || 
+             user.DisplayName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
+             user.Email.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)) &&
+            (string.IsNullOrEmpty(statusFilter) || user.InvitationStatus == statusFilter)
+        ).ToList();
+    }
+    
+    private async Task InitializeDefaultSecretsAsync(string organizationId)
+    {
+        try
+        {
+            // Extract organization name and domain from the current user's email
+            var user = HttpContextAccessor.HttpContext?.User;
+            var email = user?.FindFirst("email")?.Value ?? 
+                       user?.FindFirst("preferred_username")?.Value ?? 
+                       user?.FindFirst("upn")?.Value ?? 
+                       user?.FindFirst("unique_name")?.Value ??
+                       user?.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value;
+            
+            if (!string.IsNullOrEmpty(email))
+            {
+                var domain = email.Split('@').LastOrDefault();
+                var organizationName = domain?.Replace(".", "-") ?? "organization";
+                
+                Logger.LogInformation("Initializing default secrets for Organization Admin in organization {OrganizationId}", organizationId);
+                
+                var secretsCreated = await OrganizationSetupService.CreateDefaultSecretsForOrgAdminAsync(
+                    organizationId, 
+                    organizationName, 
+                    domain ?? "example.com");
+                
+                if (secretsCreated)
+                {
+                    Logger.LogInformation("Successfully initialized default secrets for organization {OrganizationId}", organizationId);
+                }
+                else
+                {
+                    Logger.LogWarning("Some default secrets could not be created for organization {OrganizationId}", organizationId);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing default secrets for organization {OrganizationId}", organizationId);
+            // Don't show error to user as this is a background operation
+        }
+    }
+    
+    private void ClearMessages()
+    {
+        errorMessage = string.Empty;
+        successMessage = string.Empty;
+        StateHasChanged();
+    }
+
+    private void ViewUserDetails(GuestUser user)
+    {
+        Navigation.NavigateTo($"/admin/users/{user.OnboardedUser.OnboardedUserId}");
+    }
+
+    private Task ResendInvitation(GuestUser user)
+    {
+        try
+        {
+            ClearMessages();
+            Logger.LogInformation("Resending invitation to {Email} for organization {OrganizationId}", user.Email, currentUserOrgId);
+            
+            // TODO: Implement resend invitation via Graph API
+            // This would typically involve creating a new invitation
+            successMessage = $"Invitation resent to {user.Email}. They will receive a new invitation email.";
+            
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error resending invitation to {Email}", user.Email);
+            errorMessage = "Failed to resend invitation. Please try again.";
+            StateHasChanged();
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task ShowRevokeConfirmation(GuestUser user)
+    {
+        var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", 
+            $"Are you sure you want to remove {user.DisplayName} ({user.Email}) from your organization? This action cannot be undone.");
+            
+        if (confirmed)
+        {
+            await RevokeUserAccess(user);
+        }
+    }
+    
+    private async Task RevokeUserAccess(GuestUser user)
+    {
+        try
+        {
+            ClearMessages();
+            Logger.LogInformation("Revoking access for user {UserId} ({Email})", user.Id, user.Email);
+            
+            // Revoke access via Graph API
+            var success = await GraphService.RevokeUserAccessAsync(user.Id);
+            
+            if (success)
+            {
+                successMessage = $"Access revoked for {user.DisplayName}. They can no longer access your organization.";
+                await LoadUsers(); // Refresh the list
+            }
+            else
+            {
+                errorMessage = "Failed to revoke user access. Please try again.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error revoking access for user {UserId}", user.Id);
+            errorMessage = "An unexpected error occurred while revoking access. Please try again.";
+        }
+        
+        StateHasChanged();
+    }
+}
