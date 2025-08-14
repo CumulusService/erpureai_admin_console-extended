@@ -29,10 +29,6 @@
     <PackageReference Include="SAPHANAClient" Version="1.0.0" />
   </ItemGroup>
 
-  <!-- Simple approach: Include native SAP HANA libraries directly -->
-  <ItemGroup>
-    <Content Include="LocalNuGetPackages\lib\net9.0\*.dll" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" Condition="Exists('LocalNuGetPackages\lib\net9.0\')" />
-    <Content Include="LocalNuGetPackages\runtimes\win-x64\native\*.dll" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" Condition="Exists('LocalNuGetPackages\runtimes\win-x64\native\')" />
-  </ItemGroup>
+  <!-- SAP HANA native libraries will be handled by NuGet package targets -->
 
 </Project>

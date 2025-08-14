@@ -23,6 +23,9 @@ jobs:
         with:
           dotnet-version: '9.x'
 
+      - name: Extract SAP HANA native libraries
+        run: powershell -ExecutionPolicy Bypass -File extract-hana-libs.ps1
+
       - name: Restore NuGet packages
         run: dotnet restore --verbosity normal
 
@@ -31,6 +34,13 @@ jobs:
 
       - name: dotnet publish
         run: dotnet publish -c Release -o "${{env.DOTNET_ROOT}}/myapp" --no-restore --verbosity normal
+
+      - name: Copy SAP HANA native libraries to publish directory
+        run: |
+          Copy-Item "libadonetHDB.dll" -Destination "${{env.DOTNET_ROOT}}/myapp/" -ErrorAction SilentlyContinue
+          Copy-Item "libSQLDBCHDB.dll" -Destination "${{env.DOTNET_ROOT}}/myapp/" -ErrorAction SilentlyContinue
+          Write-Host "SAP HANA libraries copied to publish directory"
+        shell: powershell
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
