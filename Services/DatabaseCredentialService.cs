@@ -1,5 +1,6 @@
 using AdminConsole.Data;
 using AdminConsole.Models;
+using AdminConsole.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Data.SqlClient;
@@ -973,6 +974,17 @@ public class DatabaseCredentialService : IDatabaseCredentialService
     {
         try
         {
+            // For HANA connections, ensure native libraries are loaded first
+            if (databaseType == DatabaseType.HANA)
+            {
+                _logger.LogInformation("🔧 Ensuring SAP HANA native libraries are loaded...");
+                HanaNativeLibraryLoader.EnsureLibrariesLoaded();
+                
+                // Log diagnostic information
+                var diagnostics = HanaNativeLibraryLoader.GetLibraryDiagnostics();
+                _logger.LogInformation("📋 SAP HANA Library Diagnostics:\n{Diagnostics}", diagnostics);
+            }
+
             var stopwatch = Stopwatch.StartNew();
 
             switch (databaseType)
