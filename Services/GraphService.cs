@@ -3293,7 +3293,7 @@ public class GraphService : IGraphService
     private string GetRedirectUrl()
     {
         return _configuration["ASPNETCORE_ENVIRONMENT"] == "Production" 
-            ? _configuration["Production:BaseUrl"] ?? "https://YOUR_APP_NAME.azurewebsites.net"
+            ? _configuration["Production:BaseUrl"] ?? "https://adminconsole.erpure.ai"
             : "http://localhost:5243";
     }
 }

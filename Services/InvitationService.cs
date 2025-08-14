@@ -23,6 +23,7 @@ public class InvitationService : IInvitationService
     private readonly IStateValidationService _stateValidationService;
     private readonly IOperationStatusService _operationStatusService;
     private readonly IUserDatabaseAccessService _userDatabaseAccessService;
+    private readonly IConfiguration _configuration;
 
     public InvitationService(
         IOrganizationService organizationService,
@@ -36,7 +37,8 @@ public class InvitationService : IInvitationService
         IAgentTypeService agentTypeService,
         IStateValidationService stateValidationService,
         IOperationStatusService operationStatusService,
-        IUserDatabaseAccessService userDatabaseAccessService)
+        IUserDatabaseAccessService userDatabaseAccessService,
+        IConfiguration configuration)
     {
         _organizationService = organizationService;
         _graphService = graphService;
@@ -50,6 +52,7 @@ public class InvitationService : IInvitationService
         _stateValidationService = stateValidationService;
         _operationStatusService = operationStatusService;
         _userDatabaseAccessService = userDatabaseAccessService;
+        _configuration = configuration;
     }
 
     private bool IsDataverseAvailable()
@@ -150,9 +153,10 @@ public class InvitationService : IInvitationService
             
             // Production vs Development redirect logic
             string baseUrl;
+            string redirectUri;
             if (_configuration["ASPNETCORE_ENVIRONMENT"] == "Production")
             {
-                baseUrl = _configuration["Production:BaseUrl"] ?? "https://YOUR_APP_NAME.azurewebsites.net";
+                baseUrl = _configuration["Production:BaseUrl"] ?? "https://adminconsole.erpure.ai";
                 // In production, regular users redirect to external site, admins to admin console
                 redirectUri = isAdminUser ? $"{baseUrl}/admin" : _configuration["Production:UserRedirectUrl"] ?? "https://www.erpure.ai";
             }
