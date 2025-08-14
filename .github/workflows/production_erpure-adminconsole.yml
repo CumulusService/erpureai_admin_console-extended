@@ -24,7 +24,11 @@ jobs:
           dotnet-version: '9.x'
 
       - name: Extract SAP HANA native libraries
-        run: powershell -ExecutionPolicy Bypass -File extract-hana-libs.ps1
+        run: |
+          powershell -ExecutionPolicy Bypass -File extract-hana-libs.ps1
+          Write-Host "Listing current directory after extraction:"
+          Get-ChildItem -Path "." -Filter "*.dll" | Select-Object Name, Length
+        shell: powershell
 
       - name: Restore NuGet packages
         run: dotnet restore --verbosity normal
@@ -37,9 +41,25 @@ jobs:
 
       - name: Copy SAP HANA native libraries to publish directory
         run: |
-          Copy-Item "libadonetHDB.dll" -Destination "${{env.DOTNET_ROOT}}/myapp/" -ErrorAction SilentlyContinue
-          Copy-Item "libSQLDBCHDB.dll" -Destination "${{env.DOTNET_ROOT}}/myapp/" -ErrorAction SilentlyContinue
-          Write-Host "SAP HANA libraries copied to publish directory"
+          Write-Host "Checking for SAP HANA libraries before copy:"
+          if (Test-Path "libadonetHDB.dll") {
+              Copy-Item "libadonetHDB.dll" -Destination "${{env.DOTNET_ROOT}}/myapp/" -Force
+              Write-Host "✅ Copied libadonetHDB.dll"
+          } else {
+              Write-Host "❌ libadonetHDB.dll not found in current directory"
+          }
+          
+          if (Test-Path "libSQLDBCHDB.dll") {
+              Copy-Item "libSQLDBCHDB.dll" -Destination "${{env.DOTNET_ROOT}}/myapp/" -Force  
+              Write-Host "✅ Copied libSQLDBCHDB.dll"
+          } else {
+              Write-Host "❌ libSQLDBCHDB.dll not found in current directory"
+          }
+          
+          Write-Host "Verifying publish directory contents:"
+          Get-ChildItem -Path "${{env.DOTNET_ROOT}}/myapp/" -Filter "*HANA*.dll" | Select-Object Name, Length
+          Get-ChildItem -Path "${{env.DOTNET_ROOT}}/myapp/" -Filter "*adonet*.dll" | Select-Object Name, Length  
+          Get-ChildItem -Path "${{env.DOTNET_ROOT}}/myapp/" -Filter "*SQLDB*.dll" | Select-Object Name, Length
         shell: powershell
 
       - name: Upload artifact for deployment job
