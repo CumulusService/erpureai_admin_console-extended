@@ -99,7 +99,7 @@ public class GraphService : IGraphService
             {
                 InvitedUserEmailAddress = email,
                 InvitedUserDisplayName = displayName,
-                InviteRedirectUrl = "http://localhost:5243",
+                InviteRedirectUrl = GetRedirectUrl(),
                 SendInvitationMessage = true,
                 InvitedUserMessageInfo = new InvitedUserMessageInfo
                 {
@@ -146,7 +146,7 @@ public class GraphService : IGraphService
             {
                 InvitedUserEmailAddress = email,
                 InvitedUserDisplayName = displayName,
-                InviteRedirectUrl = "http://localhost:5243",
+                InviteRedirectUrl = GetRedirectUrl(),
                 SendInvitationMessage = true,
                 InvitedUserMessageInfo = new InvitedUserMessageInfo
                 {
@@ -825,7 +825,7 @@ public class GraphService : IGraphService
     public async Task<GraphInvitationResult> InviteGuestUserAsync(string email, string organizationName)
     {
         // Call the enhanced method with default values for backward compatibility
-        return await InviteGuestUserAsync(email, organizationName, "https://localhost:5243", new List<string>(), false);
+        return await InviteGuestUserAsync(email, organizationName, GetRedirectUrl(), new List<string>(), false);
     }
 
     /// <summary>
@@ -3285,5 +3285,15 @@ public class GraphService : IGraphService
             _logger.LogError(ex, "Error creating Teams app setup policy {PolicyName}", policyName);
             return Task.FromResult(false);
         }
+    }
+
+    /// <summary>
+    /// Gets the appropriate redirect URL based on the current environment
+    /// </summary>
+    private string GetRedirectUrl()
+    {
+        return _configuration["ASPNETCORE_ENVIRONMENT"] == "Production" 
+            ? _configuration["Production:BaseUrl"] ?? "https://YOUR_APP_NAME.azurewebsites.net"
+            : "http://localhost:5243";
     }
 }

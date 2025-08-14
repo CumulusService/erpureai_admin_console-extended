@@ -3,6 +3,7 @@
 @inject NavigationManager Navigation
 @inject IDataIsolationService DataIsolationService
 @inject ILogger<UserRedirect> Logger
+@inject IConfiguration Configuration
 @rendermode InteractiveServer
 
 <PageTitle>Redirecting...</PageTitle>
@@ -26,12 +27,22 @@
             var userRole = DataIsolationService.GetCurrentUserRole();
             Logger.LogInformation("User redirect - User role: {Role}", userRole);
             
-            // Check if user has admin access
+            // Check if user has admin access - in production, redirect regular users to external site
             if (userRole == UserRole.User)
             {
-                Logger.LogWarning("Regular user attempted to access admin console");
-                Navigation.NavigateTo("/Account/AccessDenied?reason=Regular users do not have access to the admin console", replace: true);
-                return;
+                if (Configuration["ASPNETCORE_ENVIRONMENT"] == "Production")
+                {
+                    var externalUrl = Configuration["Production:UserRedirectUrl"] ?? "https://www.erpure.ai";
+                    Logger.LogInformation("Regular user in production - redirecting to external site: {Url}", externalUrl);
+                    Navigation.NavigateTo(externalUrl, replace: true, forceLoad: true);
+                    return;
+                }
+                else
+                {
+                    Logger.LogWarning("Regular user attempted to access admin console in development");
+                    Navigation.NavigateTo("/Account/AccessDenied?reason=Regular users do not have access to the admin console", replace: true);
+                    return;
+                }
             }
             
             string redirectUrl = userRole switch

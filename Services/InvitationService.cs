@@ -147,7 +147,21 @@ public class InvitationService : IInvitationService
             // Step 2: Determine redirect URI and collect agent share URLs
             await _operationStatusService.UpdateStatusAsync(operationId, "Configuring user access settings...");
             var isAdminUser = agentTypes.Contains(LegacyAgentType.Admin);
-            var redirectUri = isAdminUser ? "http://localhost:5243/admin" : "http://localhost:5243/user";
+            
+            // Production vs Development redirect logic
+            string baseUrl;
+            if (_configuration["ASPNETCORE_ENVIRONMENT"] == "Production")
+            {
+                baseUrl = _configuration["Production:BaseUrl"] ?? "https://YOUR_APP_NAME.azurewebsites.net";
+                // In production, regular users redirect to external site, admins to admin console
+                redirectUri = isAdminUser ? $"{baseUrl}/admin" : _configuration["Production:UserRedirectUrl"] ?? "https://www.erpure.ai";
+            }
+            else
+            {
+                // Development - all users redirect to localhost admin console
+                baseUrl = "http://localhost:5243";
+                redirectUri = isAdminUser ? $"{baseUrl}/admin" : $"{baseUrl}/user";
+            }
             
             // Collect agent share URLs from database-driven agent types
             var agentShareUrls = new List<string>();
