@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <PackageId>SAPHANAClient</PackageId>
+    <PackageVersion>1.0.0</PackageVersion>
+    <Description>SAP HANA client libraries for .NET Core applications. Includes the official SAP HANA .NET Core driver and required native libraries for Windows x64.</Description>
+    <PackageProjectUrl>https://developers.sap.com/tutorials/hana-clients-install.html</PackageProjectUrl>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <Copyright>Copyright (c) SAP SE</Copyright>
+    <PackageTags>SAP HANA Database Client .NET Core ADO.NET</PackageTags>
+    <PackageReleaseNotes>Version 1.0.0: Initial package containing SAP HANA .NET Core driver with native libraries for Windows x64 runtime. Compatible with .NET 9.0 and later.</PackageReleaseNotes>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+  </PropertyGroup>
+
+  <!-- Include the SAP HANA .NET Core library -->
+  <ItemGroup>
+    <Content Include="lib\net9.0\Sap.Data.Hana.Core.v2.1.dll">
+      <PackagePath>lib\net9.0\Sap.Data.Hana.Core.v2.1.dll</PackagePath>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Include native libraries -->
+  <ItemGroup>
+    <Content Include="runtimes\win-x64\native\libadonetHDB.dll">
+      <PackagePath>runtimes\win-x64\native\libadonetHDB.dll</PackagePath>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+    <Content Include="runtimes\win-x64\native\libSQLDBCHDB.dll">
+      <PackagePath>runtimes\win-x64\native\libSQLDBCHDB.dll</PackagePath>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- Include the targets file -->
+  <ItemGroup>
+    <Content Include="build\SAPHANAClient.targets">
+      <PackagePath>build\SAPHANAClient.targets</PackagePath>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

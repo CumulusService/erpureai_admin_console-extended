@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net9.0' Or '$(TargetFramework)' == 'net8.0' Or '$(TargetFramework)' == 'net6.0'">
+    <!-- Copy native libraries to output directory on Windows -->
+    <None Include="$(MSBuildThisFileDirectory)\..\runtimes\win-x64\native\libadonetHDB.dll" Condition="$([MSBuild]::IsOsPlatform('Windows'))">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+    <None Include="$(MSBuildThisFileDirectory)\..\runtimes\win-x64\native\libSQLDBCHDB.dll" Condition="$([MSBuild]::IsOsPlatform('Windows'))">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <Visible>false</Visible>
+    </None>
+  </ItemGroup>
+  
+  <!-- Ensure native libraries are available for runtime -->
+  <Target Name="CopyHANANativeLibraries" BeforeTargets="Build" Condition="$([MSBuild]::IsOsPlatform('Windows'))">
+    <ItemGroup>
+      <HANANativeFiles Include="$(MSBuildThisFileDirectory)\..\runtimes\win-x64\native\*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(HANANativeFiles)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

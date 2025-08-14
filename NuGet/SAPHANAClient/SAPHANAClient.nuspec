@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
+  <metadata>
+    <id>SAPHANAClient</id>
+    <version>1.0.0</version>
+    <title>SAP HANA Client for .NET Core</title>
+    <authors>SAP SE</authors>
+    <owners>AdminConsole</owners>
+    <description>SAP HANA client libraries for .NET Core applications. Includes the official SAP HANA .NET Core driver and required native libraries for Windows x64.</description>
+    <projectUrl>https://developers.sap.com/tutorials/hana-clients-install.html</projectUrl>
+    <requireLicenseAcceptance>true</requireLicenseAcceptance>
+    <license type="expression">LicenseRef-SAP-HANA-Client</license>
+    <copyright>Copyright (c) SAP SE</copyright>
+    <tags>SAP HANA Database Client .NET Core ADO.NET</tags>
+    <summary>Official SAP HANA client libraries packaged for .NET Core deployment</summary>
+    <releaseNotes>
+      Version 1.0.0:
+      - Initial package containing SAP HANA .NET Core driver
+      - Includes native libraries for Windows x64 runtime
+      - Compatible with .NET 9.0 and later
+    </releaseNotes>
+    <dependencies>
+      <group targetFramework=".NETCoreApp9.0" />
+    </dependencies>
+  </metadata>
+  <files>
+    <!-- .NET Core library -->
+    <file src="lib\net9.0\Sap.Data.Hana.Core.v2.1.dll" target="lib\net9.0\Sap.Data.Hana.Core.v2.1.dll" />
+    
+    <!-- Native libraries for Windows x64 -->
+    <file src="runtimes\win-x64\native\libadonetHDB.dll" target="runtimes\win-x64\native\libadonetHDB.dll" />
+    <file src="runtimes\win-x64\native\libSQLDBCHDB.dll" target="runtimes\win-x64\native\libSQLDBCHDB.dll" />
+    
+    <!-- Targets file for automatic native library copying -->
+    <file src="build\SAPHANAClient.targets" target="build\SAPHANAClient.targets" />
+  </files>
+</package>
