@@ -1,44 +1,104 @@
 @page "/Account/AccessDenied"
 @using Microsoft.AspNetCore.Authorization
 @attribute [AllowAnonymous]
+@inject IJSRuntime JSRuntime
+@inject NavigationManager Navigation
 
-<PageTitle>Access Denied</PageTitle>
+<PageTitle>Access Denied - ERPURE.AI Admin Console</PageTitle>
 
-<div class="container mt-5">
-    <div class="row justify-content-center">
-        <div class="col-md-8">
-            <div class="card shadow">
-                <div class="card-body text-center p-5">
-                    <div class="mb-4">
-                        <i class="fas fa-shield-alt text-danger" style="font-size: 4rem;"></i>
-                    </div>
-                    
-                    <h2 class="text-danger mb-3">Access Denied</h2>
-                    
-                    <div class="alert alert-warning">
-                        <h5><i class="fas fa-exclamation-triangle me-2"></i>Authorization Required</h5>
-                        <p class="mb-0">You don't have permission to access this resource.</p>
-                    </div>
-                    
-                    <div class="mt-4">
-                        <h6>Possible reasons:</h6>
-                        <ul class="list-unstyled text-start">
-                            <li><i class="fas fa-user-shield text-primary me-2"></i>You need <strong>SuperAdmin</strong> role to access admin functions</li>
-                            <li><i class="fas fa-building text-info me-2"></i>You may only have <strong>OrgAdmin</strong> access to your organization</li>
-                            <li><i class="fas fa-clock text-warning me-2"></i>Your session may have expired</li>
-                        </ul>
-                    </div>
-                    
-                    <div class="mt-4">
-                        <a href="/" class="btn btn-primary me-2">
-                            <i class="fas fa-home me-1"></i>Go to Dashboard
-                        </a>
-                        <a href="/Account/SignOut" class="btn btn-outline-secondary">
-                            <i class="fas fa-sign-out-alt me-1"></i>Sign Out
-                        </a>
+<div class="container-fluid d-flex justify-content-center align-items-center" style="min-height: 100vh; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+    <div class="card shadow-lg border-0" style="max-width: 480px; width: 100%; border-radius: 20px; backdrop-filter: blur(10px); background-color: rgba(255, 255, 255, 0.95);">
+        <div class="card-body text-center p-5">
+            <!-- Logo and Header Section -->
+            <div class="mb-5">
+                <div class="d-flex justify-content-center mb-4">
+                    <!-- Logo with fallback -->
+                    <img src="company-logo.png" alt="ERPURE.AI Logo" class="img-fluid company-logo" style="max-height: 80px; max-width: 280px;" 
+                         onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+                    <div class="d-none align-items-center justify-content-center" style="min-height: 80px;">
+                        <div class="text-center">
+                            <div class="d-flex align-items-center justify-content-center mb-1">
+                                <div class="rounded-circle bg-primary d-flex align-items-center justify-content-center me-2" style="width: 40px; height: 40px;">
+                                    <i class="fas fa-cube text-white fs-5"></i>
+                                </div>
+                                <span class="fw-bold fs-2 text-primary">ERPURE.AI</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
+                <h2 class="fw-bold text-dark mb-2" style="font-size: 1.8rem;">Admin Console</h2>
+                <p class="text-muted mb-0" style="font-size: 0.9rem; font-weight: 500;">Enterprise B2B Partner Platform</p>
+            </div>
+            
+            <!-- Error Icon -->
+            <div class="mb-4">
+                <div class="rounded-circle bg-danger bg-opacity-15 d-inline-flex align-items-center justify-content-center shadow-sm" style="width: 80px; height: 80px;">
+                    <i class="fas fa-shield-alt text-danger" style="font-size: 2.5rem;"></i>
+                </div>
+            </div>
+            
+            <!-- Access Denied Title -->
+            <h3 class="fw-bold mb-4 text-danger" style="font-size: 1.5rem;">Access Denied</h3>
+            
+            <!-- Error Message Box -->
+            <div class="alert alert-danger border-0 shadow-sm mb-5" style="background-color: #fff5f5; border-left: 4px solid #dc3545 !important;">
+                <div class="d-flex align-items-start mb-2">
+                    <i class="fas fa-exclamation-triangle me-3 mt-1 text-danger"></i>
+                    <div class="text-start flex-grow-1">
+                        <div class="fw-bold text-danger mb-2">Access Revoked</div>
+                        @if (!string.IsNullOrEmpty(reason))
+                        {
+                            <div class="text-muted" style="font-size: 0.9rem;"><strong>Reason:</strong> @reason</div>
+                            @if (reason.Contains("Regular users"))
+                            {
+                                <div class="text-info mt-3" style="font-size: 0.9rem;">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    <strong>This application is for administrators only.</strong><br/>
+                                    Contact your System Administrator if you need admin access.
+                                </div>
+                            }
+                        }
+                        else
+                        {
+                            <div class="text-muted" style="font-size: 0.9rem;">User not found in system</div>
+                        }
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="d-flex flex-column gap-3 mb-5">
+                <a href="/Account/SignOut" class="btn btn-danger btn-lg shadow-sm" style="border-radius: 12px; font-weight: 600;">
+                    <i class="fas fa-sign-out-alt me-2"></i>Sign Out
+                </a>
+                <a href="mailto:support@erpure.ai" class="btn btn-outline-primary btn-lg shadow-sm" style="border-radius: 12px; font-weight: 600;">
+                    <i class="fas fa-envelope me-2"></i>Contact Support
+                </a>
+            </div>
+            
+            <!-- Footer -->
+            <div class="mt-4 pt-4 border-top" style="border-color: #e9ecef !important;">
+                <small class="text-muted d-flex align-items-center justify-content-center">
+                    <i class="fas fa-lock me-2"></i>
+                    Secure authentication powered by Microsoft
+                </small>
             </div>
         </div>
     </div>
 </div>
+
+@code {
+    private string? reason;
+    private string? returnUrl;
+
+    protected override Task OnInitializedAsync()
+    {
+        var uri = new Uri(Navigation.Uri);
+        var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+        
+        reason = query["reason"];
+        returnUrl = query["returnUrl"];
+        
+        return Task.CompletedTask;
+    }
+}

@@ -1,6 +1,7 @@
 @page "/developer/agent-types"
 @using AdminConsole.Models
 @using AdminConsole.Services
+@using AdminConsole.Components.Shared
 @inject IAgentTypeService AgentTypeService
 @inject ILogger<ManageAgentTypes> Logger
 @inject IJSRuntime JSRuntime
@@ -14,13 +15,17 @@
         <div class="col-12">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <div>
-                    <h2 class="mb-1">Agent Types Management</h2>
-                    <p class="text-muted mb-0">Configure agent types and their global security group assignments</p>
+                    <h2 class="mb-1 text-white">Agent Types Management</h2>
+                    <p class="text-light mb-0">Configure agent types and their global security group assignments</p>
                 </div>
-                <button type="button" class="btn btn-primary" @onclick="ShowCreateModal">
-                    <i class="fas fa-plus me-1"></i>
-                    Create Agent Type
-                </button>
+                <ActionButton Text="Create Agent Type"
+                            IconClass="fas fa-plus"
+                            Type="ActionType.Primary"
+                            Size="ButtonSize.Normal"
+                            OnClick="@(async () => { ShowCreateModal(); await Task.CompletedTask; })"
+                            FullDescription="Create a new agent type with security group mapping"
+                            ConsequenceText="Open creation modal"
+                            ShowConsequence="false" />
             </div>
 
             @if (!string.IsNullOrEmpty(errorMessage))
@@ -89,11 +94,15 @@
                                                     @if (!string.IsNullOrEmpty(agentType.GlobalSecurityGroupId))
                                                     {
                                                         <code class="small">@agentType.GlobalSecurityGroupId</code>
-                                                        <button type="button" class="btn btn-sm btn-outline-info ms-1" 
-                                                                @onclick="() => ValidateSecurityGroup(agentType.GlobalSecurityGroupId)"
-                                                                title="Validate Security Group">
-                                                            <i class="fas fa-check-circle"></i>
-                                                        </button>
+                                                        <ActionButton Text=""
+                                                                    IconClass="fas fa-check-circle"
+                                                                    Type="ActionType.Info"
+                                                                    Size="ButtonSize.Small"
+                                                                    OnClick="@(async () => { ValidateSecurityGroup(agentType.GlobalSecurityGroupId); await Task.CompletedTask; })"
+                                                                    FullDescription="Validate that this security group exists in Azure AD"
+                                                                    ConsequenceText="Check group accessibility"
+                                                                    ShowConsequence="true"
+                                                                    AdditionalClasses="ms-1" />
                                                     }
                                                     else
                                                     {
@@ -118,19 +127,33 @@
                                                 </td>
                                                 <td>@agentType.DisplayOrder</td>
                                                 <td>
-                                                    <div class="btn-group btn-group-sm">
-                                                        <button type="button" class="btn btn-sm btn-outline-primary" 
-                                                                @onclick="() => ShowEditModal(agentType)">
-                                                            <i class="fas fa-edit"></i>
-                                                        </button>
-                                                        <button type="button" class="btn btn-sm btn-outline-warning" 
-                                                                @onclick="() => ToggleActiveStatus(agentType)">
-                                                            <i class="fas @(agentType.IsActive ? "fa-pause" : "fa-play")"></i>
-                                                        </button>
-                                                        <button type="button" class="btn btn-sm btn-outline-danger" 
-                                                                @onclick="() => DeleteAgentType(agentType)">
-                                                            <i class="fas fa-trash"></i>
-                                                        </button>
+                                                    <div class="d-flex gap-1">
+                                                        <ActionButton Text=""
+                                                                    IconClass="fas fa-edit"
+                                                                    Type="ActionType.Edit"
+                                                                    Size="ButtonSize.Small"
+                                                                    OnClick="@(async () => { ShowEditModal(agentType); await Task.CompletedTask; })"
+                                                                    FullDescription="Edit this agent type's configuration"
+                                                                    ConsequenceText="Open edit modal"
+                                                                    ShowConsequence="false" />
+                                                        
+                                                        <ActionButton Text=""
+                                                                    IconClass="@(agentType.IsActive ? "fas fa-pause" : "fas fa-play")"
+                                                                    Type="@(agentType.IsActive ? ActionType.Warning : ActionType.Success)"
+                                                                    Size="ButtonSize.Small"
+                                                                    OnClick="@(async () => { ToggleActiveStatus(agentType); await Task.CompletedTask; })"
+                                                                    FullDescription="@(agentType.IsActive ? "Deactivate this agent type" : "Activate this agent type")"
+                                                                    ConsequenceText="@(agentType.IsActive ? "Agent type will be disabled" : "Agent type will be enabled")"
+                                                                    ShowConsequence="true" />
+                                                        
+                                                        <ActionButton Text=""
+                                                                    IconClass="fas fa-trash"
+                                                                    Type="ActionType.Delete"
+                                                                    Size="ButtonSize.Small"
+                                                                    OnClick="@(async () => { DeleteAgentType(agentType); await Task.CompletedTask; })"
+                                                                    FullDescription="Permanently delete this agent type"
+                                                                    ConsequenceText="This action cannot be undone"
+                                                                    ShowConsequence="true" />
                                                     </div>
                                                 </td>
                                             </tr>
@@ -145,10 +168,14 @@
                                 <i class="fas fa-robot fa-3x text-muted mb-3"></i>
                                 <h5 class="text-muted">No Agent Types Found</h5>
                                 <p class="text-muted">Create your first agent type to get started.</p>
-                                <button type="button" class="btn btn-primary" @onclick="ShowCreateModal">
-                                    <i class="fas fa-plus me-1"></i>
-                                    Create Agent Type
-                                </button>
+                                <ActionButton Text="Create Agent Type"
+                                            IconClass="fas fa-plus"
+                                            Type="ActionType.Primary"
+                                            Size="ButtonSize.Normal"
+                                            OnClick="@(async () => { ShowCreateModal(); await Task.CompletedTask; })"
+                                            FullDescription="Create your first agent type with security group mapping"
+                                            ConsequenceText="Open creation modal"
+                                            ShowConsequence="false" />
                             </div>
                         }
                     </div>
@@ -173,6 +200,15 @@
                 <div class="modal-body">
                     <EditForm Model="editingAgentType" OnValidSubmit="SaveAgentType">
                         <DataAnnotationsValidator />
+                        
+                        <!-- Enhanced Unsaved Changes Tracking -->
+                        <UnsavedChangesTracker @ref="unsavedChangesTracker"
+                                             FormId="agent-type-form"
+                                             TrackChanges="@(showModal && hasFormChanges)"
+                                             Context="agenttype"
+                                             UserRole="Developer"
+                                             WarningMessage="You have unsaved agent type configuration. Are you sure you want to leave without saving?"
+                                             OnUnsavedChangesChanged="OnUnsavedChangesChanged" />
                         
                         <div class="row mb-3">
                             <div class="col-md-6">
@@ -202,10 +238,14 @@
                             <div class="input-group">
                                 <InputText @bind-Value="editingAgentType.GlobalSecurityGroupId" class="form-control" 
                                          id="globalSecurityGroupId" placeholder="Azure AD Security Group ID" />
-                                <button type="button" class="btn btn-outline-secondary" 
-                                        @onclick="() => ValidateSecurityGroup(editingAgentType.GlobalSecurityGroupId)">
-                                    <i class="fas fa-check"></i> Validate
-                                </button>
+                                <ActionButton Text="Validate"
+                                            IconClass="fas fa-check"
+                                            Type="ActionType.Secondary"
+                                            Size="ButtonSize.Normal"
+                                            OnClick="@(async () => { ValidateSecurityGroup(editingAgentType.GlobalSecurityGroupId); await Task.CompletedTask; })"
+                                            FullDescription="Verify that this security group exists in Azure AD"
+                                            ConsequenceText="Check Azure AD connectivity"
+                                            ShowConsequence="false" />
                             </div>
                             <ValidationMessage For="@(() => editingAgentType.GlobalSecurityGroupId)" class="text-danger" />
                             <div class="form-text">Azure AD Security Group ID that users will be added to</div>
@@ -266,6 +306,10 @@
     private bool isLoading = true;
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
+    
+    // Enhanced unsaved changes tracking
+    private UnsavedChangesTracker? unsavedChangesTracker;
+    private bool hasFormChanges = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -440,6 +484,28 @@
         {
             Logger.LogError(ex, "Error validating security group {GroupId}", groupId);
             errorMessage = "Error validating security group. Please try again.";
+        }
+    }
+
+    // Enhanced unsaved changes tracking methods
+    private void OnInputChanged()
+    {
+        hasFormChanges = true;
+        unsavedChangesTracker?.MarkAsChanged();
+    }
+
+    private void OnUnsavedChangesChanged(bool hasChanges)
+    {
+        hasFormChanges = hasChanges;
+        StateHasChanged();
+    }
+
+    private async Task OnFormSubmitted()
+    {
+        hasFormChanges = false;
+        if (unsavedChangesTracker != null)
+        {
+            await unsavedChangesTracker.MarkAsSaved();
         }
     }
 

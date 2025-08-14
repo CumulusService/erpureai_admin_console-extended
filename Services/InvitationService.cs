@@ -20,6 +20,9 @@ public class InvitationService : IInvitationService
     private readonly IAgentGroupAssignmentService _agentGroupAssignmentService;
     private readonly ITeamsGroupService _teamsGroupService;
     private readonly IAgentTypeService _agentTypeService;
+    private readonly IStateValidationService _stateValidationService;
+    private readonly IOperationStatusService _operationStatusService;
+    private readonly IUserDatabaseAccessService _userDatabaseAccessService;
 
     public InvitationService(
         IOrganizationService organizationService,
@@ -30,7 +33,10 @@ public class InvitationService : IInvitationService
         ILogger<InvitationService> logger,
         IAgentGroupAssignmentService agentGroupAssignmentService,
         ITeamsGroupService teamsGroupService,
-        IAgentTypeService agentTypeService)
+        IAgentTypeService agentTypeService,
+        IStateValidationService stateValidationService,
+        IOperationStatusService operationStatusService,
+        IUserDatabaseAccessService userDatabaseAccessService)
     {
         _organizationService = organizationService;
         _graphService = graphService;
@@ -41,6 +47,9 @@ public class InvitationService : IInvitationService
         _agentGroupAssignmentService = agentGroupAssignmentService;
         _teamsGroupService = teamsGroupService;
         _agentTypeService = agentTypeService;
+        _stateValidationService = stateValidationService;
+        _operationStatusService = operationStatusService;
+        _userDatabaseAccessService = userDatabaseAccessService;
     }
 
     private bool IsDataverseAvailable()
@@ -79,20 +88,41 @@ public class InvitationService : IInvitationService
 
     public async Task<InvitationResult> InviteUserAsync(Guid organizationId, string emailToInvite, Guid invitedBy, List<LegacyAgentType> agentTypes)
     {
-        // Call the enhanced method with empty agent type IDs for backward compatibility
-        return await InviteUserAsync(organizationId, emailToInvite, invitedBy, agentTypes, new List<Guid>());
+        // Call the enhanced method with empty agent type IDs and database IDs for backward compatibility
+        // Default role based on legacy agent types: Admin agents -> OrgAdmin, others -> User
+        var role = agentTypes.Contains(LegacyAgentType.Admin) ? UserRole.OrgAdmin : UserRole.User;
+        return await InviteUserAsync(organizationId, emailToInvite, invitedBy, agentTypes, new List<Guid>(), new List<Guid>(), role);
     }
 
     /// <summary>
     /// Enhanced invitation method that supports both legacy and new agent-based group assignment
     /// </summary>
-    public async Task<InvitationResult> InviteUserAsync(Guid organizationId, string emailToInvite, Guid invitedBy, List<LegacyAgentType> agentTypes, List<Guid> agentTypeIds)
+    public async Task<InvitationResult> InviteUserAsync(Guid organizationId, string emailToInvite, Guid invitedBy, List<LegacyAgentType> agentTypes, List<Guid> agentTypeIds, List<Guid> selectedDatabaseIds, UserRole assignedRole = UserRole.User, string? currentUserEmail = null)
     {
+        var operationId = Guid.NewGuid().ToString();
+        await _operationStatusService.StartOperationAsync(operationId, "UserInvitation", $"Inviting {emailToInvite} to join organization");
+        
         try
         {
+            // Step 0: SECURITY - Prevent self-invitation
+            if (!string.IsNullOrEmpty(currentUserEmail) && 
+                string.Equals(currentUserEmail, emailToInvite, StringComparison.OrdinalIgnoreCase))
+            {
+                await _operationStatusService.CompleteOperationAsync(operationId, false, "Self-invitation not allowed");
+                _logger.LogWarning("SECURITY: Self-invitation attempt blocked - user {CurrentUser} tried to invite themselves", currentUserEmail);
+                return new InvitationResult
+                {
+                    Success = false,
+                    Message = "You cannot invite yourself",
+                    Errors = { "Self-invitation is not allowed for security reasons" }
+                };
+            }
+
             // Step 1: Validate domain permission
+            await _operationStatusService.UpdateStatusAsync(operationId, "Validating invitation permissions...");
             if (!await CanInviteEmailAsync(organizationId, emailToInvite))
             {
+                await _operationStatusService.CompleteOperationAsync(operationId, false, "Domain validation failed");
                 return new InvitationResult
                 {
                     Success = false,
@@ -101,9 +131,11 @@ public class InvitationService : IInvitationService
                 };
             }
 
+            await _operationStatusService.UpdateStatusAsync(operationId, "Loading organization details...");
             var organization = await _organizationService.GetByIdAsync(organizationId.ToString());
             if (organization == null)
             {
+                await _operationStatusService.CompleteOperationAsync(operationId, false, "Organization not found");
                 return new InvitationResult
                 {
                     Success = false,
@@ -113,8 +145,9 @@ public class InvitationService : IInvitationService
             }
 
             // Step 2: Determine redirect URI and collect agent share URLs
+            await _operationStatusService.UpdateStatusAsync(operationId, "Configuring user access settings...");
             var isAdminUser = agentTypes.Contains(LegacyAgentType.Admin);
-            var redirectUri = isAdminUser ? "https://localhost:5242/admin" : "https://localhost:5242/user";
+            var redirectUri = isAdminUser ? "http://localhost:5243/admin" : "http://localhost:5243/user";
             
             // Collect agent share URLs from database-driven agent types
             var agentShareUrls = new List<string>();
@@ -128,6 +161,7 @@ public class InvitationService : IInvitationService
             }
 
             // Step 3: Send enhanced Azure AD B2B invitation via Graph API
+            await _operationStatusService.UpdateStatusAsync(operationId, "Creating user in directory...");
             var graphInvitation = await _graphService.InviteGuestUserAsync(
                 emailToInvite, 
                 organization.Name, 
@@ -136,6 +170,7 @@ public class InvitationService : IInvitationService
                 isAdminUser);
             if (!graphInvitation.Success)
             {
+                await _operationStatusService.CompleteOperationAsync(operationId, false, "Azure AD invitation failed");
                 return new InvitationResult
                 {
                     Success = false,
@@ -144,53 +179,125 @@ public class InvitationService : IInvitationService
                 };
             }
 
-            // Step 4: Create OnboardedUser record in SQL Server
-            var onboardedUser = new OnboardedUser
-            {
-                OnboardedUserId = Guid.NewGuid(),
-                Name = emailToInvite.Split('@')[0], // Use email prefix as default name
-                Email = emailToInvite,
-                OrganizationLookupId = organizationId,
-                OrganizationId = organizationId, // Set the foreign key property
-                AgentTypes = agentTypes, // Legacy field for backward compatibility
-                AgentTypeIds = agentTypeIds, // New database-driven agent type IDs
-                RedirectUri = redirectUri, // Custom redirect URI for this user type
-                LastInvitationDate = DateTime.UtcNow, // Track when invitation was sent
-                StateCode = StateCode.Active,
-                StatusCode = StatusCode.Active,
-                CreatedBy = invitedBy,
-                CreatedOn = DateTime.UtcNow,
-                ModifiedOn = DateTime.UtcNow,
-                ModifiedBy = invitedBy,
-                // Set required fields with defaults
-                FullName = emailToInvite.Split('@')[0], // Use email prefix as display name
-                AssignedDatabaseIds = new List<Guid>(), // Will be assigned by admin later
-                OwnerId = invitedBy, // Set the required OwnerId field
-                OwningUser = invitedBy // Set the owning user as well
-            };
+            // Step 4: Create or Update OnboardedUser record in SQL Server - CHECK FOR EXISTING FIRST
+            _logger.LogInformation("💾 Checking for existing user {Email} with Azure Object ID: {AzureObjectId}", 
+                emailToInvite, graphInvitation.UserId);
 
-            // Save to SQL Server
-            await SaveOnboardedUserToSqlServer(onboardedUser);
+            // CRITICAL FIX: Check for existing OnboardedUser by AzureObjectId first
+            var existingUser = await _dbContext.OnboardedUsers
+                .FirstOrDefaultAsync(u => u.AzureObjectId == graphInvitation.UserId);
+
+            OnboardedUser onboardedUser;
+            bool userWasCreated = false;
+
+            if (existingUser != null)
+            {
+                _logger.LogInformation("Found existing OnboardedUser {UserId} with AzureObjectId {AzureObjectId} - updating record instead of creating duplicate", 
+                    existingUser.OnboardedUserId, graphInvitation.UserId);
+                
+                // Update existing user with new invitation details
+                existingUser.Email = emailToInvite; // Update email in case it changed
+                existingUser.AgentTypes = agentTypes; // Update legacy field
+                existingUser.AgentTypeIds = agentTypeIds; // Update agent type IDs
+                existingUser.RedirectUri = redirectUri; // Update redirect URI
+                existingUser.LastInvitationDate = DateTime.UtcNow; // Update last invitation date
+                existingUser.ModifiedOn = DateTime.UtcNow;
+                existingUser.ModifiedBy = invitedBy;
+                existingUser.IsActive = true; // Ensure user is active
+                existingUser.StateCode = StateCode.Active;
+                existingUser.StatusCode = StatusCode.Active;
+                
+                onboardedUser = existingUser;
+            }
+            else
+            {
+                _logger.LogInformation("No existing OnboardedUser found with AzureObjectId {AzureObjectId} - creating new record", 
+                    graphInvitation.UserId);
+                
+                // Create new user record
+                onboardedUser = new OnboardedUser
+                {
+                    OnboardedUserId = Guid.NewGuid(),
+                    Name = emailToInvite.Split('@')[0], // Use email prefix as default name
+                    Email = emailToInvite,
+                    AzureObjectId = graphInvitation.UserId, // 🔑 CRITICAL: Store Azure AD Object ID for reliable lookups
+                    OrganizationLookupId = organizationId,
+                    OrganizationId = organizationId, // Set the foreign key property
+                    AgentTypes = agentTypes, // Legacy field for backward compatibility
+                    AgentTypeIds = agentTypeIds, // New database-driven agent type IDs
+                    AssignedRole = assignedRole, // 🔑 NEW: Set the user role based on invitation flow
+                    RedirectUri = redirectUri, // Custom redirect URI for this user type
+                    LastInvitationDate = DateTime.UtcNow, // Track when invitation was sent
+                    StateCode = StateCode.Active,
+                    StatusCode = StatusCode.Active,
+                    IsActive = true, // Ensure user is active for access validation
+                    CreatedBy = invitedBy,
+                    CreatedOn = DateTime.UtcNow,
+                    ModifiedOn = DateTime.UtcNow,
+                    ModifiedBy = invitedBy,
+                    // Set required fields with defaults
+                    FullName = emailToInvite.Split('@')[0], // Use email prefix as display name
+                    AssignedDatabaseIds = new List<Guid>(), // Will be assigned by admin later
+                    OwnerId = invitedBy, // Set the required OwnerId field
+                    OwningUser = invitedBy // Set the owning user as well
+                };
+                
+                userWasCreated = true;
+            }
+
+            // Save to SQL Server (create or update)
+            await SaveOrUpdateOnboardedUserToSqlServer(onboardedUser, userWasCreated);
+
+            // Step 4.5: Assign selected databases to the user
+            if (selectedDatabaseIds.Any())
+            {
+                await _operationStatusService.UpdateStatusAsync(operationId, "Assigning database access...");
+                _logger.LogInformation("Assigning {DatabaseCount} databases to user {Email}", selectedDatabaseIds.Count, emailToInvite);
+                
+                var databaseAssignmentSuccess = await _userDatabaseAccessService.UpdateUserDatabaseAssignmentsAsync(
+                    onboardedUser.OnboardedUserId, 
+                    selectedDatabaseIds, 
+                    organizationId, 
+                    invitedBy.ToString()
+                );
+                
+                if (databaseAssignmentSuccess)
+                {
+                    _logger.LogInformation("✅ Successfully assigned {DatabaseCount} databases to user {Email}", selectedDatabaseIds.Count, emailToInvite);
+                    
+                    // Update the OnboardedUser record with assigned database IDs
+                    onboardedUser.AssignedDatabaseIds = selectedDatabaseIds;
+                    await SaveOrUpdateOnboardedUserToSqlServer(onboardedUser, false); // Update existing record
+                }
+                else
+                {
+                    _logger.LogWarning("❌ Failed to assign databases to user {Email} - continuing with invitation", emailToInvite);
+                }
+            }
+            else
+            {
+                _logger.LogInformation("No databases selected for user {Email} - skipping database assignment", emailToInvite);
+            }
 
             // Step 5: Skip organization-based security groups - using agent-based Global Security Groups instead
             _logger.LogInformation("Skipping organization-specific security group assignment for user {Email} - using agent-based Global Security Groups", 
                 emailToInvite);
 
-            // Step 5.5: Assign user to agent-based security groups (FIXED VERSION)
-            Directory.CreateDirectory("C:\\temp");
-            await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - INVITATION: About to process agent type assignments for user {emailToInvite}\n");
-            await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - INVITATION: Agent type IDs count: {agentTypeIds.Count}, IDs: {string.Join(", ", agentTypeIds)}\n");
+            // Step 5.5: Assign user to agent-based security groups using AgentGroupAssignmentService
+            await _operationStatusService.UpdateStatusAsync(operationId, "Granting permissions...");
+            _logger.LogInformation("Processing agent type assignments for user {Email}", emailToInvite);
+            _logger.LogInformation("Agent type IDs count: {Count}, IDs: {IDs}", agentTypeIds.Count, string.Join(", ", agentTypeIds));
             
             // Collect Teams App IDs from selected agent types for automatic installation
             List<string> teamsAppIds = new();
             
             if (agentTypeIds.Any())
             {
-                await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                    $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - INVITATION: Starting security group assignment for user {emailToInvite} with UserId {graphInvitation.UserId}\n");
+                await _operationStatusService.UpdateStatusAsync(operationId, "Setting up user groups...", 
+                    $"Configuring access to {agentTypeIds.Count} agent types");
+                _logger.LogInformation("Starting security group assignment for user {Email} with UserId {UserId}", emailToInvite, graphInvitation.UserId);
                 
+                // Get selected agent types for Teams App collection
                 var selectedAgentTypes = await _agentTypeService.GetAgentTypesByIdsAsync(agentTypeIds);
                 
                 // Collect Teams App IDs from selected agent types for automatic installation
@@ -199,156 +306,160 @@ public class InvitationService : IInvitationService
                     .Select(agentType => agentType.TeamsAppId!)
                     .ToList();
                 
-                await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                    $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEAMS: Found {teamsAppIds.Count} Teams App IDs to install: {string.Join(", ", teamsAppIds)}\n");
+                _logger.LogInformation("Found {Count} Teams App IDs to install: {TeamsAppIds}", teamsAppIds.Count, string.Join(", ", teamsAppIds));
                 
-                // FIXED: Direct Azure AD group assignment using Graph API
-                foreach (var agentType in selectedAgentTypes)
+                // CRITICAL FIX: Use AgentGroupAssignmentService to properly create database records
+                var assignmentSuccess = await _agentGroupAssignmentService.AssignUserToAgentTypeGroupsAsync(
+                    graphInvitation.UserId, 
+                    agentTypeIds, 
+                    organizationId, 
+                    invitedBy.ToString()
+                );
+                
+                if (assignmentSuccess)
                 {
-                    if (!string.IsNullOrEmpty(agentType.GlobalSecurityGroupId))
-                    {
-                        await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - INVITATION: Assigning user {graphInvitation.UserId} to security group {agentType.GlobalSecurityGroupId} for agent {agentType.Name}\n");
-                        
-                        try
-                        {
-                            // Enhanced Debug: Check if group exists first with detailed info
-                            var groupExists = await _graphService.GroupExistsAsync(agentType.GlobalSecurityGroupId);
-                            await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - INVITATION: Group exists check for {agentType.GlobalSecurityGroupId}: {groupExists}\n");
-                            
-                            if (!groupExists)
-                            {
-                                await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                                    $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - INVITATION: CRITICAL - Security group {agentType.GlobalSecurityGroupId} does not exist in Azure AD\n");
-                                throw new Exception("Security group does not exist in Azure AD");
-                            }
-                            
-                            // Enhanced Debug: Check user exists
-                            await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - INVITATION: Checking if user {graphInvitation.UserId} exists in Azure AD\n");
-                            
-                            // Use existing GraphService method with detailed error handling
-                            await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - INVITATION: Calling AddUserToGroupAsync for user {graphInvitation.UserId} to group {agentType.GlobalSecurityGroupId}\n");
-                            
-                            var success = await _graphService.AddUserToGroupAsync(graphInvitation.UserId, agentType.GlobalSecurityGroupId);
-                            
-                            await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - INVITATION: AddUserToGroupAsync returned: {success}\n");
-                            
-                            if (!success) 
-                            {
-                                await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                                    $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - INVITATION: CRITICAL - AddUserToGroupAsync failed. This could be: 1) Permissions issue with Graph API, 2) User not found, 3) Group access denied\n");
-                                throw new Exception("AddUserToGroupAsync returned false - check Graph API permissions and user/group access");
-                            }
-                            
-                            await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - INVITATION: SUCCESS - User assigned to security group {agentType.GlobalSecurityGroupId}\n");
-                        }
-                        catch (Exception ex)
-                        {
-                            await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - INVITATION: FAILED to assign user to security group {agentType.GlobalSecurityGroupId}. Error: {ex.Message}\n");
-                        }
-                    }
+                    _logger.LogInformation("✅ Successfully assigned user {UserId} to all requested agent type security groups", graphInvitation.UserId);
+                    await _operationStatusService.UpdateStatusAsync(operationId, "Permissions granted successfully");
+                }
+                else
+                {
+                    _logger.LogError("❌ Failed to assign user {UserId} to some agent type security groups - check logs for details", graphInvitation.UserId);
+                    await _operationStatusService.UpdateStatusAsync(operationId, "Warning: Some permissions could not be granted");
                 }
             }
             else
             {
-                await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                    $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - INVITATION: No agent type IDs provided - skipping security group assignment\n");
+                _logger.LogInformation("No agent type IDs provided - skipping security group assignment");
             }
 
-            // Step 5.6: FIXED M365 Teams group creation and assignment
-            await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEAMS: Starting M365 Teams group creation for organization {organizationId}\n");
+            // Step 5.6: FIXED M365 Teams group creation and assignment - CHECK FOR EXISTING GROUP FIRST
+            _logger.LogInformation("Starting M365 Teams group creation/assignment for organization {OrganizationId}", organizationId);
             
             var orgForTeams = await _organizationService.GetByIdAsync(organizationId.ToString());
             if (orgForTeams != null)
             {
-                var teamName = $"{orgForTeams.Name} - Team";
-                var description = $"Microsoft Teams collaboration space for {orgForTeams.Name}";
+                string groupIdToUse = null;
+                bool groupWasCreated = false;
                 
-                await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                    $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEAMS: Creating Teams group: {teamName}\n");
-                
-                try
+                // CHECK FOR EXISTING M365 GROUP - CRITICAL FIX FOR DUPLICATION
+                if (!string.IsNullOrEmpty(orgForTeams.M365GroupId))
                 {
-                    // Enhanced Teams creation with detailed logging
-                    await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                        $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEAMS: About to call CreateTeamsGroupAsync with name='{teamName}', description='{description}'\n");
+                    _logger.LogInformation("Organization {OrganizationId} already has M365GroupId {GroupId} - reusing existing group", 
+                        organizationId, orgForTeams.M365GroupId);
+                    groupIdToUse = orgForTeams.M365GroupId;
+                }
+                else
+                {
+                    // Only create new group if organization doesn't have one
+                    var teamName = $"{orgForTeams.Name} - Team";
+                    var description = $"Microsoft Teams collaboration space for {orgForTeams.Name}";
                     
-                    var teamsResult = await _graphService.CreateTeamsGroupAsync(teamName, description, organizationId.ToString(), teamsAppIds);
+                    _logger.LogInformation("Creating new Teams group: {TeamName} for organization {OrganizationId}", 
+                        teamName, organizationId);
                     
-                    await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                        $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEAMS: CreateTeamsGroupAsync result - Success: {teamsResult.Success}, GroupId: {teamsResult.GroupId}, TeamId: {teamsResult.TeamId}, TeamUrl: {teamsResult.TeamUrl}\n");
-                    
-                    if (teamsResult.Errors.Any())
+                    try
                     {
-                        await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEAMS: Errors during creation: {string.Join(", ", teamsResult.Errors)}\n");
+                        var teamsResult = await _graphService.CreateTeamsGroupAsync(teamName, description, organizationId.ToString(), teamsAppIds);
+                    
+                        _logger.LogInformation("CreateTeamsGroupAsync result - Success: {Success}, GroupId: {GroupId}", 
+                            teamsResult.Success, teamsResult.GroupId);
+                        
+                        if (teamsResult.Errors.Any())
+                        {
+                            _logger.LogWarning("Errors during Teams group creation: {Errors}", 
+                                string.Join(", ", teamsResult.Errors));
+                        }
+                        
+                        if (teamsResult.Success && !string.IsNullOrEmpty(teamsResult.GroupId))
+                        {
+                            _logger.LogInformation("Group created successfully. Saving Group ID {GroupId} to organization {OrganizationId}", 
+                                teamsResult.GroupId, organizationId);
+                            
+                            // Save M365 Group ID back to organization
+                            try
+                            {
+                                var organizationToUpdate = await _organizationService.GetByIdAsync(organizationId.ToString());
+                                if (organizationToUpdate != null)
+                                {
+                                    organizationToUpdate.M365GroupId = teamsResult.GroupId;
+                                    var updateResult = await _organizationService.UpdateOrganizationAsync(organizationToUpdate);
+                                    
+                                    if (updateResult)
+                                    {
+                                        _logger.LogInformation("SUCCESS - M365GroupId {GroupId} saved to organization {OrganizationId}", 
+                                            teamsResult.GroupId, organizationId);
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning("Update returned false when saving M365GroupId to organization {OrganizationId}", 
+                                            organizationId);
+                                    }
+                                }
+                                else
+                                {
+                                    _logger.LogWarning("Could not find organization {OrganizationId} to update M365GroupId", 
+                                        organizationId);
+                                }
+                            }
+                            catch (Exception updateEx)
+                            {
+                                _logger.LogError(updateEx, "Failed to save M365GroupId to organization {OrganizationId}", 
+                                    organizationId);
+                                // Don't fail the entire invitation process if this update fails
+                            }
+                            
+                            groupIdToUse = teamsResult.GroupId;
+                            groupWasCreated = true;
+                            
+                            _logger.LogInformation("Waiting 5 seconds for group provisioning before adding user...");
+                            
+                            // Wait for group provisioning
+                            await Task.Delay(5000);
+                        }
+                        else
+                        {
+                            throw new Exception($"CreateTeamsGroupAsync failed: {string.Join(", ", teamsResult.Errors)}");
+                        }
                     }
-                    
-                    if (teamsResult.Success && !string.IsNullOrEmpty(teamsResult.GroupId))
+                    catch (Exception ex)
                     {
-                        await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEAMS: Group created successfully. Waiting 5 seconds for provisioning before adding user...\n");
-                        
-                        // Wait for group provisioning
-                        await Task.Delay(5000);
-                        
-                        await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEAMS: Adding user {graphInvitation.UserId} to Teams group {teamsResult.GroupId}\n");
-                        
-                        // Add user to the created Teams group
-                        var userAdded = await _graphService.AddUserToTeamsGroupAsync(graphInvitation.UserId, teamsResult.GroupId);
-                        
-                        await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEAMS: User addition result: {userAdded}\n");
-                        
-                        if (userAdded)
-                        {
-                            await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEAMS: SUCCESS - Teams group created with ID: {teamsResult.GroupId}, User added as member\n");
-                        }
-                        else
-                        {
-                            await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEAMS: WARNING - Teams group created but failed to add user as member\n");
-                        }
-                        
-                        // Check if Teams conversion succeeded
-                        if (string.IsNullOrEmpty(teamsResult.TeamId) || teamsResult.Errors.Any(e => e.Contains("Teams conversion")))
-                        {
-                            await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEAMS: WARNING - Group created but may not be Teams-enabled. TeamId: {teamsResult.TeamId}\n");
-                        }
-                        else
-                        {
-                            await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEAMS: SUCCESS - Full Teams functionality enabled with TeamId: {teamsResult.TeamId}\n");
-                        }
+                        _logger.LogError(ex, "Failed to create Teams group for organization {OrganizationId}", organizationId);
+                        throw;
+                    }
+                }
+                
+                // Add user to the Teams group (whether existing or newly created)
+                if (!string.IsNullOrEmpty(groupIdToUse))
+                {
+                    _logger.LogInformation("Adding user {UserId} to Teams group {GroupId} (created: {WasCreated})", 
+                        graphInvitation.UserId, groupIdToUse, groupWasCreated);
+                    
+                    var userAdded = await _graphService.AddUserToTeamsGroupAsync(graphInvitation.UserId, groupIdToUse);
+                    
+                    _logger.LogInformation("AddUserToTeamsGroupAsync returned: {Success}", userAdded);
+                    
+                    if (userAdded)
+                    {
+                        _logger.LogInformation("SUCCESS - User {UserId} added to Teams group {GroupId}", 
+                            graphInvitation.UserId, groupIdToUse);
                     }
                     else
                     {
-                        throw new Exception($"CreateTeamsGroupAsync failed: {string.Join(", ", teamsResult.Errors)}");
+                        _logger.LogWarning("FAILED - Could not add user {UserId} to Teams group {GroupId}", 
+                            graphInvitation.UserId, groupIdToUse);
                     }
                 }
-                catch (Exception ex)
+                else
                 {
-                    await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                        $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEAMS: FAILED - Teams group creation failed. Error: {ex.Message}\n");
+                    _logger.LogWarning("No valid GroupId available for adding user to Teams group");
                 }
             }
             else
             {
-                await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-                    $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEAMS: FAILED - Organization not found for Teams group creation\n");
+                _logger.LogWarning("Organization {OrganizationId} not found - skipping Teams group creation", organizationId);
             }
 
-            // Step 6: Auto-assign Azure AD app role if user has Admin agent type
+            // Step 6: Auto-assign Azure AD app role based on user type
             if (agentTypes.Contains(LegacyAgentType.Admin))
             {
                 _logger.LogInformation("Assigning OrgAdmin app role to user {Email} with Admin agent type", emailToInvite);
@@ -363,6 +474,26 @@ public class InvitationService : IInvitationService
                     _logger.LogWarning("User {Email} was invited successfully but OrgAdmin app role assignment failed. User may need manual role assignment.", emailToInvite);
                     // Note: We don't fail the entire invitation if role assignment fails
                 }
+            }
+            else if (agentTypeIds.Any())
+            {
+                // Non-admin user with agent types gets OrgUser role
+                _logger.LogInformation("Assigning OrgUser app role to user {Email} with non-admin agent types", emailToInvite);
+                var roleAssigned = await _graphService.AssignAppRoleToUserAsync(graphInvitation.UserId, "OrgUser");
+                
+                if (roleAssigned)
+                {
+                    _logger.LogInformation("Successfully assigned OrgUser app role to user {Email}", emailToInvite);
+                }
+                else
+                {
+                    _logger.LogWarning("User {Email} was invited successfully but OrgUser app role assignment failed. User may need manual role assignment.", emailToInvite);
+                    // Note: We don't fail the entire invitation if role assignment fails
+                }
+            }
+            else
+            {
+                _logger.LogInformation("User {Email} has no agent types - skipping app role assignment", emailToInvite);
             }
 
             _logger.LogInformation("Successfully invited user {Email} to organization {OrganizationId}", 
@@ -383,11 +514,23 @@ public class InvitationService : IInvitationService
             
             messageDetails.Add($"Custom redirect URI: {redirectUri}");
             
+            // Final validation
+            await _operationStatusService.UpdateStatusAsync(operationId, "Finalizing invitation...");
+            var finalValidation = await _stateValidationService.ValidateUserStateConsistencyAsync(graphInvitation.UserId, organizationId);
+            if (!finalValidation.IsValid)
+            {
+                _logger.LogWarning("Post-invitation validation found issues: {Issues}", string.Join(", ", finalValidation.Errors));
+                await _operationStatusService.UpdateStatusAsync(operationId, "Warning: Final validation found inconsistencies", 
+                    string.Join(", ", finalValidation.Errors));
+            }
+            
             var message = $"Successfully invited {emailToInvite}";
             if (messageDetails.Any())
             {
                 message += $" with {string.Join(", ", messageDetails)}";
             }
+
+            await _operationStatusService.CompleteOperationAsync(operationId, true, message);
 
             return new InvitationResult
             {
@@ -401,6 +544,8 @@ public class InvitationService : IInvitationService
         {
             _logger.LogError(ex, "Error inviting user {Email} to organization {OrganizationId}", 
                 emailToInvite, organizationId);
+            
+            await _operationStatusService.CompleteOperationAsync(operationId, false, $"Invitation failed: {ex.Message}");
             
             return new InvitationResult
             {
@@ -439,27 +584,120 @@ public class InvitationService : IInvitationService
         }
     }
 
-    public Task<InvitationResult> ResendInvitationAsync(Guid invitationId)
+    public async Task<InvitationResult> ResendInvitationAsync(Guid invitationId)
     {
         try
         {
-            // Implementation would resend the B2B invitation
-            // For now, return success
-            return Task.FromResult(new InvitationResult
+            _logger.LogInformation("📧 RESENDING INVITATION for invitation ID {InvitationId}", invitationId);
+
+            // Step 1: Find the user in the database by the invitation ID (OnboardedUserId)
+            var user = await _dbContext.OnboardedUsers
+                .Where(u => u.OnboardedUserId == invitationId)
+                .FirstOrDefaultAsync();
+
+            if (user == null)
             {
-                Success = true,
-                Message = "Invitation resent successfully"
-            });
+                _logger.LogError("❌ User not found for invitation ID {InvitationId}", invitationId);
+                return new InvitationResult
+                {
+                    Success = false,
+                    Message = "User not found for the given invitation ID"
+                };
+            }
+
+            _logger.LogInformation("📋 Found user {Email} for invitation resend", user.Email);
+
+            // Step 2: Check if user has already accepted (no need to resend)
+            if (user.StateCode == StateCode.Active)
+            {
+                _logger.LogInformation("✅ User {Email} has already accepted invitation", user.Email);
+                return new InvitationResult
+                {
+                    Success = true,
+                    Message = $"User {user.Email} has already accepted the invitation"
+                };
+            }
+
+            // Step 3: Check current invitation status via Azure AD
+            var statusCheck = await _graphService.CheckInvitationStatusAsync(user.Email);
+            if (statusCheck.InvitationStatus == InvitationStatus.Accepted)
+            {
+                // Update database to reflect accepted status
+                user.StateCode = StateCode.Active;
+                user.StatusCode = StatusCode.Active;
+                user.ModifiedOn = DateTime.UtcNow;
+                await _dbContext.SaveChangesAsync();
+
+                _logger.LogInformation("✅ User {Email} had already accepted invitation - updated database", user.Email);
+                return new InvitationResult
+                {
+                    Success = true,
+                    Message = $"User {user.Email} has already accepted the invitation"
+                };
+            }
+
+            // Step 4: Get organization details for proper invitation
+            var organization = await _organizationService.GetByIdAsync((user.OrganizationLookupId ?? Guid.Empty).ToString());
+            if (organization == null)
+            {
+                _logger.LogError("❌ Organization not found for user {Email}", user.Email);
+                return new InvitationResult
+                {
+                    Success = false,
+                    Message = "Organization not found for the user"
+                };
+            }
+
+            // Step 5: Resend invitation via GraphService (creates new B2B invitation)
+            _logger.LogInformation("🔄 Creating new B2B invitation to resend for {Email}", user.Email);
+            
+            var graphResult = await _graphService.InviteGuestUserAsync(
+                user.Email, 
+                organization.Name,
+                user.RedirectUri ?? "/home", // Use stored redirect URI or default
+                new List<string>(), // Agent share URLs - would need to rebuild from user's agent types
+                false // Regular user invitation
+            );
+
+            if (graphResult.Success)
+            {
+                // Step 6: Update database with resend information
+                user.LastInvitationDate = DateTime.UtcNow;
+                user.ModifiedOn = DateTime.UtcNow;
+                await _dbContext.SaveChangesAsync();
+
+                _logger.LogInformation("✅ Successfully resent invitation to {Email}", user.Email);
+                
+                return new InvitationResult
+                {
+                    Success = true,
+                    Message = $"Invitation successfully resent to {user.Email}",
+                    InvitationId = invitationId.ToString(),
+                    InvitationUrl = graphResult.InvitationUrl
+                };
+            }
+            else
+            {
+                _logger.LogError("❌ Failed to resend Graph invitation to {Email}: {Errors}", 
+                    user.Email, string.Join(", ", graphResult.Errors));
+                
+                return new InvitationResult
+                {
+                    Success = false,
+                    Message = $"Failed to resend invitation to {user.Email}",
+                    Errors = graphResult.Errors
+                };
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error resending invitation {InvitationId}", invitationId);
-            return Task.FromResult(new InvitationResult
+            _logger.LogError(ex, "💥 Error resending invitation {InvitationId}", invitationId);
+            return new InvitationResult
             {
                 Success = false,
-                Message = "Failed to resend invitation",
+                Message = "An unexpected error occurred while resending the invitation",
                 Errors = { ex.Message }
-            });
+            };
         }
     }
 
@@ -494,22 +732,34 @@ public class InvitationService : IInvitationService
         }
     }
 
-    private async Task SaveOnboardedUserToSqlServer(OnboardedUser user)
+    private async Task SaveOrUpdateOnboardedUserToSqlServer(OnboardedUser user, bool isNewUser)
     {
         try
         {
-            _logger.LogInformation("Attempting to save OnboardedUser: {UserId} ({Email}) to SQL Server", user.OnboardedUserId, user.Email);
-            _logger.LogDebug("OnboardedUser details - OwnerId: {OwnerId}, OrganizationId: {OrgId}, Email: {Email}", 
-                user.OwnerId, user.OrganizationLookupId, user.Email);
+            if (isNewUser)
+            {
+                _logger.LogInformation("Creating new OnboardedUser: {UserId} ({Email}) to SQL Server", user.OnboardedUserId, user.Email);
+                _dbContext.OnboardedUsers.Add(user);
+            }
+            else
+            {
+                _logger.LogInformation("Updating existing OnboardedUser: {UserId} ({Email}) in SQL Server", user.OnboardedUserId, user.Email);
+                _dbContext.OnboardedUsers.Update(user);
+            }
             
-            _dbContext.OnboardedUsers.Add(user);
+            _logger.LogDebug("OnboardedUser details - OwnerId: {OwnerId}, OrganizationId: {OrgId}, Email: {Email}, AzureObjectId: {AzureObjectId}", 
+                user.OwnerId, user.OrganizationLookupId, user.Email, user.AzureObjectId);
+            
             await _dbContext.SaveChangesAsync();
-            _logger.LogInformation("Successfully saved OnboardedUser to SQL Server: {UserId} ({Email})", user.OnboardedUserId, user.Email);
+            
+            var action = isNewUser ? "saved" : "updated";
+            _logger.LogInformation("Successfully {Action} OnboardedUser to SQL Server: {UserId} ({Email})", action, user.OnboardedUserId, user.Email);
         }
         catch (Microsoft.EntityFrameworkCore.DbUpdateException dbEx)
         {
-            _logger.LogError(dbEx, "Database update exception when saving OnboardedUser {UserId} ({Email}). Inner exception: {InnerException}", 
-                user.OnboardedUserId, user.Email, dbEx.InnerException?.Message);
+            var action = isNewUser ? "saving" : "updating";
+            _logger.LogError(dbEx, "Database update exception when {Action} OnboardedUser {UserId} ({Email}). Inner exception: {InnerException}", 
+                action, user.OnboardedUserId, user.Email, dbEx.InnerException?.Message);
             throw; // Re-throw to be handled by the calling method
         }
         catch (Exception ex)

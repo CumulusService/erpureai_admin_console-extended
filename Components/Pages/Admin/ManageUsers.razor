@@ -3,11 +3,20 @@
 @rendermode InteractiveServer
 @using AdminConsole.Models
 @using AdminConsole.Services
+@using AdminConsole.Components.Shared
 @using System.Security.Cryptography
 @inject IGraphService GraphService
 @inject IOnboardedUserService OnboardedUserService
 @inject IDataIsolationService DataIsolationService
 @inject IOrganizationSetupService OrganizationSetupService
+@inject IKeyVaultService KeyVaultService
+@inject IUserAccessValidationService UserAccessValidationService
+@inject IAgentGroupAssignmentService AgentGroupAssignmentService
+@inject ITeamsGroupService TeamsGroupService
+@inject IOrganizationService OrganizationService
+@inject IInvitationService InvitationService
+@inject IAgentTypeService AgentTypeService
+@inject IUserDatabaseAccessService UserDatabaseAccessService
 @inject IHttpContextAccessor HttpContextAccessor
 @inject NavigationManager Navigation
 @inject ILogger<ManageUsers> Logger
@@ -18,16 +27,51 @@
 
 <div class="container-fluid">
     <div class="d-sm-flex align-items-center justify-content-between mb-4">
-        <h1 class="h3 mb-0 text-gray-800">
+        <h1 class="h3 mb-0 admin-page-title">
             <i class="fas fa-users text-info me-2"></i>
             My Organization Users
         </h1>
-        <a href="/admin/users/invite" class="btn btn-primary btn-sm d-none d-md-inline-block">
-            <i class="fas fa-user-plus"></i> Invite User
-        </a>
-        <a href="/admin/users/invite" class="btn btn-primary btn-sm d-md-none">
-            <i class="fas fa-user-plus"></i>
-        </a>
+        <div class="d-flex gap-2">
+            <button class="btn btn-secondary btn-sm" @onclick="RefreshUsers" disabled="@isLoading">
+                @if (isLoading)
+                {
+                    <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                }
+                else
+                {
+                    <i class="fas fa-sync-alt me-1"></i>
+                }
+                <span class="d-none d-md-inline">Refresh</span>
+            </button>
+            
+            @if (organizationAgentTypes.Any())
+            {
+                <button class="btn btn-info btn-sm" @onclick="ShowBulkAgentAssignmentModal" disabled="@isLoading">
+                    <i class="fas fa-users-cog me-1"></i> 
+                    <span class="d-none d-sm-inline">Assign Agent Types</span>
+                    <span class="d-sm-none">Agents</span>
+                    (@organizationAgentTypes.Count)
+                </button>
+                <button class="btn btn-success btn-sm ms-2" @onclick="ShowAssignToAllUsersModal" disabled="@isLoading">
+                    <i class="fas fa-users me-1"></i> 
+                    <span class="d-none d-sm-inline">Assign to ALL Users</span>
+                    <span class="d-sm-none">All Users</span>
+                    (@filteredUsers.Count())
+                </button>
+            }
+            else
+            {
+                <button class="btn btn-outline-secondary btn-sm" disabled title="No agent types allocated to organization">
+                    <i class="fas fa-users-cog me-1"></i> No Agent Types
+                </button>
+            }
+            <a href="/admin/users/invite" class="btn btn-primary btn-sm d-none d-md-inline-block">
+                <i class="fas fa-user-plus"></i> Invite User
+            </a>
+            <a href="/admin/users/invite" class="btn btn-primary btn-sm d-md-none">
+                <i class="fas fa-user-plus"></i>
+            </a>
+        </div>
     </div>
 
     <!-- Filter and Search -->
@@ -35,7 +79,7 @@
         <div class="card-header py-3">
             <div class="row align-items-center">
                 <div class="col-md-4">
-                    <h6 class="m-0 font-weight-bold text-primary">Users in My Organization (@filteredUsers.Count())</h6>
+                    <h6 class="m-0 font-weight-bold admin-section-header">Users in My Organization (@filteredUsers.Count())</h6>
                 </div>
                 <div class="col-md-4">
                     <select class="form-select form-select-sm" @bind="statusFilter" @bind:after="FilterUsers">
@@ -67,6 +111,8 @@
                                 <th>User</th>
                                 <th>Email</th>
                                 <th>Role</th>
+                                <th>Agent Types</th>
+                                <th>Database Access</th>
                                 <th>Status</th>
                                 <th>Invited</th>
                                 <th>Actions</th>
@@ -97,11 +143,69 @@
                                         </span>
                                     </td>
                                     <td>
-                                        @switch (user.InvitationStatus)
+                                        @{
+                                            var userAgentTypes = GetUserAgentTypes(user);
+                                        }
+                                        @if (userAgentTypes.Any())
                                         {
-                                            case "Accepted":
+                                            <div class="d-flex flex-wrap gap-1">
+                                                @foreach (var agentType in userAgentTypes.Take(3))
+                                                {
+                                                    <span class="badge bg-info text-white small">
+                                                        <i class="fas fa-robot me-1"></i>
+                                                        @agentType.DisplayName
+                                                    </span>
+                                                }
+                                                @if (userAgentTypes.Count > 3)
+                                                {
+                                                    <span class="badge bg-secondary small">+@(userAgentTypes.Count - 3) more</span>
+                                                }
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted small">None</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        @{
+                                            var userDatabases = GetUserDatabases(user);
+                                        }
+                                        @if (userDatabases.Any())
+                                        {
+                                            <div class="d-flex flex-wrap gap-1">
+                                                @foreach (var database in userDatabases.Take(2))
+                                                {
+                                                    <span class="badge bg-success text-white small">
+                                                        <i class="fas fa-database me-1"></i>
+                                                        @database.FriendlyName
+                                                    </span>
+                                                }
+                                                @if (userDatabases.Count > 2)
+                                                {
+                                                    <span class="badge bg-secondary small">+@(userDatabases.Count - 2) more</span>
+                                                }
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted small">No databases assigned</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        @{
+                                            var userStatus = GetUserActualStatus(user);
+                                        }
+                                        @switch (userStatus)
+                                        {
+                                            case "Active":
                                                 <span class="badge bg-success">
                                                     <i class="fas fa-check me-1"></i> Active
+                                                </span>
+                                                break;
+                                            case "Disabled":
+                                                <span class="badge bg-danger">
+                                                    <i class="fas fa-user-slash me-1"></i> Disabled
                                                 </span>
                                                 break;
                                             case "PendingAcceptance":
@@ -109,9 +213,20 @@
                                                     <i class="fas fa-clock me-1"></i> Pending
                                                 </span>
                                                 break;
+                                            case "Inactive":
+                                                <span class="badge bg-secondary">
+                                                    <i class="fas fa-user-times me-1"></i> Inactive
+                                                </span>
+                                                break;
+                                            @* ADDITIVE: Enhanced status display for deleted users *@
+                                            case "Deleted":
+                                                <span class="badge bg-dark">
+                                                    <i class="fas fa-trash me-1"></i> Deleted
+                                                </span>
+                                                break;
                                             default:
                                                 <span class="badge bg-secondary">
-                                                    @user.InvitationStatus
+                                                    @userStatus
                                                 </span>
                                                 break;
                                         }
@@ -122,32 +237,11 @@
                                         </small>
                                     </td>
                                     <td>
-                                        <div class="dropdown">
-                                            <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" 
-                                                    data-bs-toggle="dropdown" aria-expanded="false">
-                                                <i class="fas fa-ellipsis-v"></i>
-                                            </button>
-                                            <ul class="dropdown-menu">
-                                                <li>
-                                                    <button class="dropdown-item" @onclick="() => ViewUserDetails(user)">
-                                                        <i class="fas fa-eye me-1"></i> View Details
-                                                    </button>
-                                                </li>
-                                                @if (user.InvitationStatus == "PendingAcceptance")
-                                                {
-                                                    <li>
-                                                        <button class="dropdown-item" @onclick="() => ResendInvitation(user)">
-                                                            <i class="fas fa-paper-plane me-1"></i> Resend Invitation
-                                                        </button>
-                                                    </li>
-                                                }
-                                                <li><hr class="dropdown-divider"></li>
-                                                <li>
-                                                    <button class="dropdown-item text-danger" @onclick="() => ShowRevokeConfirmation(user)">
-                                                        <i class="fas fa-user-times me-1"></i> Remove User
-                                                    </button>
-                                                </li>
-                                            </ul>
+                                        <div class="d-flex justify-content-end">
+                                            <ActionDropdown ButtonText="Actions"
+                                                            Actions="@GetUserActions(user)"
+                                                            IsDisabled="@isLoading"
+                                                            CssClass="btn-outline-primary btn-sm me-2" />
                                         </div>
                                     </td>
                                 </tr>
@@ -184,6 +278,277 @@
         </div>
     </div>
 
+    <!-- Bulk Agent Assignment Modal -->
+    @if (showBulkAgentAssignmentModal)
+    {
+        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title text-info">
+                            <i class="fas fa-users-cog me-2"></i> Bulk Agent Type Assignment
+                        </h5>
+                        <button type="button" class="btn-close" @onclick="CloseBulkAgentAssignmentModal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <strong>Bulk Assignment:</strong> Select users and agent types to assign/update multiple users at once. This will sync with Azure AD security groups.
+                        </div>
+                        
+                        <!-- User Selection -->
+                        <div class="mb-4">
+                            <h6>Select Users:</h6>
+                            <div class="border rounded p-3" style="max-height: 200px; overflow-y: auto;">
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="selectAllUsers" 
+                                           @onchange="ToggleAllUsersSelection" checked="@areAllUsersSelected">
+                                    <label class="form-check-label fw-bold" for="selectAllUsers">
+                                        Select All (@filteredUsers.Count() users)
+                                    </label>
+                                </div>
+                                <hr>
+                                @foreach (var user in filteredUsers.OrderBy(u => u.DisplayName))
+                                {
+                                    <div class="form-check mb-1">
+                                        <input class="form-check-input" type="checkbox" id="user_@user.Id" 
+                                               @onchange="(e) => ToggleUserSelection(user, (bool)e.Value!)" 
+                                               checked="@selectedUsersForBulkAssignment.Contains(user)">
+                                        <label class="form-check-label" for="user_@user.Id">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <span>@user.DisplayName</span>
+                                                <small class="text-muted">@user.Email</small>
+                                            </div>
+                                        </label>
+                                    </div>
+                                }
+                            </div>
+                            <small class="text-muted">@selectedUsersForBulkAssignment.Count user(s) selected</small>
+                        </div>
+                        
+                        <!-- Agent Type Selection -->
+                        <div class="mb-4">
+                            <h6>Select Agent Types:</h6>
+                            <div class="row">
+                                @foreach (var agentType in organizationAgentTypes)
+                                {
+                                    <div class="col-md-6 mb-2">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="agent_@agentType.Id" 
+                                                   @onchange="(e) => ToggleAgentTypeSelection(agentType.Id, (bool)e.Value!)" 
+                                                   checked="@selectedAgentTypesForBulkAssignment.Contains(agentType.Id)">
+                                            <label class="form-check-label" for="agent_@agentType.Id">
+                                                <i class="fas fa-robot me-1"></i>
+                                                @agentType.DisplayName
+                                                <small class="d-block text-muted">@agentType.Description</small>
+                                            </label>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                            <small class="text-muted">@selectedAgentTypesForBulkAssignment.Count agent type(s) selected</small>
+                        </div>
+                        
+                        <!-- Assignment Options -->
+                        <div class="mb-3">
+                            <h6>Assignment Mode:</h6>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="assignmentMode" id="replaceMode" 
+                                       @onchange="() => bulkAssignmentMode = BulkAssignmentMode.Replace" 
+                                       checked="@(bulkAssignmentMode == BulkAssignmentMode.Replace)">
+                                <label class="form-check-label" for="replaceMode">
+                                    <strong>Replace:</strong> Replace all current agent types with selected ones
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="assignmentMode" id="addMode" 
+                                       @onchange="() => bulkAssignmentMode = BulkAssignmentMode.Add" 
+                                       checked="@(bulkAssignmentMode == BulkAssignmentMode.Add)">
+                                <label class="form-check-label" for="addMode">
+                                    <strong>Add:</strong> Add selected agent types to existing ones
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" @onclick="CloseBulkAgentAssignmentModal">Cancel</button>
+                        <button type="button" class="btn btn-info" @onclick="ConfirmBulkAgentAssignment" 
+                                disabled="@(isBulkAssigning || !selectedUsersForBulkAssignment.Any() || !selectedAgentTypesForBulkAssignment.Any())">
+                            @if (isBulkAssigning)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                            }
+                            <i class="fas fa-users-cog me-1"></i> 
+                            Assign to @selectedUsersForBulkAssignment.Count User(s)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- Assign to ALL Users Modal -->
+    @if (showAssignToAllUsersModal)
+    {
+        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+            <div class="modal-dialog modal-md">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title text-success">
+                            <i class="fas fa-users me-2"></i> Assign to ALL Users
+                        </h5>
+                        <button type="button" class="btn-close" @onclick="CloseAssignToAllUsersModal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <strong>Organization-Wide Assignment:</strong> This will apply the selected agent types to ALL <strong>@filteredUsers.Count()</strong> active users in your organization simultaneously. This action will sync with Azure AD security groups.
+                        </div>
+                        
+                        <!-- Agent Type Selection -->
+                        <div class="mb-4">
+                            <h6>Select Agent Types to Apply:</h6>
+                            @if (organizationAgentTypes.Any())
+                            {
+                                <div class="row">
+                                    @foreach (var agentType in organizationAgentTypes)
+                                    {
+                                        <div class="col-12 mb-2">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="allUsers_agent_@agentType.Id" 
+                                                       @onchange="(e) => ToggleAgentTypeForAllUsers(agentType.Id, (bool)e.Value!)" 
+                                                       checked="@selectedAgentTypesForAllUsers.Contains(agentType.Id)">
+                                                <label class="form-check-label" for="allUsers_agent_@agentType.Id">
+                                                    <div class="d-flex align-items-center">
+                                                        <i class="fas fa-robot me-2"></i>
+                                                        <div>
+                                                            <strong>@agentType.DisplayName</strong>
+                                                            <small class="d-block text-muted">@agentType.Description</small>
+                                                        </div>
+                                                    </div>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                                <small class="text-muted">@selectedAgentTypesForAllUsers.Count agent type(s) selected</small>
+                            }
+                            else
+                            {
+                                <div class="text-muted">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    No agent types are allocated to your organization.
+                                </div>
+                            }
+                        </div>
+                        
+                        <!-- Assignment Options -->
+                        <div class="mb-3">
+                            <h6>Assignment Mode:</h6>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="allUsersAssignmentMode" id="allUsersReplaceMode" 
+                                       @onchange="() => assignToAllUsersMode = BulkAssignmentMode.Replace" 
+                                       checked="@(assignToAllUsersMode == BulkAssignmentMode.Replace)">
+                                <label class="form-check-label" for="allUsersReplaceMode">
+                                    <strong>Replace:</strong> Replace all current agent types with selected ones for ALL users
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="allUsersAssignmentMode" id="allUsersAddMode" 
+                                       @onchange="() => assignToAllUsersMode = BulkAssignmentMode.Add" 
+                                       checked="@(assignToAllUsersMode == BulkAssignmentMode.Add)">
+                                <label class="form-check-label" for="allUsersAddMode">
+                                    <strong>Add:</strong> Add selected agent types to existing ones for ALL users
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" @onclick="CloseAssignToAllUsersModal">Cancel</button>
+                        <button type="button" class="btn btn-success" @onclick="ConfirmAssignToAllUsers" 
+                                disabled="@(isAssigningToAllUsers || !selectedAgentTypesForAllUsers.Any())">
+                            @if (isAssigningToAllUsers)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                            }
+                            <i class="fas fa-users me-1"></i> 
+                            Apply to ALL @filteredUsers.Count() User(s)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- Individual User Agent Management Modal -->
+    @if (showUserAgentManagementModal && selectedUserForAgentManagement != null)
+    {
+        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+            <div class="modal-dialog modal-md">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title text-info">
+                            <i class="fas fa-robot me-2"></i> Manage Agent Types
+                        </h5>
+                        <button type="button" class="btn-close" @onclick="CloseUserAgentManagementModal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-info">
+                            <i class="fas fa-user me-2"></i>
+                            <strong>User:</strong> @selectedUserForAgentManagement.DisplayName (@selectedUserForAgentManagement.Email)
+                        </div>
+                        
+                        @if (organizationAgentTypes.Any())
+                        {
+                            <div class="mb-3">
+                                <h6>Available Agent Types for Your Organization:</h6>
+                                @foreach (var agentType in organizationAgentTypes)
+                                {
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" id="userAgent_@agentType.Id" 
+                                               @onchange="(e) => ToggleUserAgentTypeSelection(agentType.Id, (bool)e.Value!)" 
+                                               checked="@selectedUserAgentTypes.Contains(agentType.Id)">
+                                        <label class="form-check-label" for="userAgent_@agentType.Id">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <div>
+                                                    <i class="fas fa-robot me-1"></i>
+                                                    <strong>@agentType.DisplayName</strong>
+                                                    <small class="d-block text-muted">@agentType.Description</small>
+                                                </div>
+                                            </div>
+                                        </label>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="text-muted">
+                                <i class="fas fa-info-circle me-2"></i>
+                                No agent types are allocated to your organization. Please contact the system administrator.
+                            </div>
+                        }
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" @onclick="CloseUserAgentManagementModal">Cancel</button>
+                        @if (organizationAgentTypes.Any())
+                        {
+                            <button type="button" class="btn btn-info" @onclick="SaveUserAgentAssignment" 
+                                    disabled="@isUpdatingUserAgent">
+                                @if (isUpdatingUserAgent)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                                }
+                                <i class="fas fa-save me-1"></i> 
+                                Update Agent Types
+                            </button>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
     @if (!string.IsNullOrEmpty(errorMessage))
     {
         <div class="alert alert-danger alert-dismissible fade show mt-4" role="alert">
@@ -219,7 +584,188 @@
     }
 </div>
 
+<!-- Reactivate Confirmation Modal -->
+@if (userToReactivate != null && showReactivateModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title text-success">
+                        <i class="fas fa-user-check me-2"></i> Reactivate User Access
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseReactivateModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Reactivating User Access</strong>
+                    </div>
+                    <p>Are you sure you want to reactivate access for <strong>@userToReactivate.DisplayName</strong>?</p>
+                    <p><strong>This will:</strong></p>
+                    <ul>
+                        <li>Enable the user account in Azure Entra ID (if disabled)</li>
+                        <li>Restore user access to your organization</li>
+                        <li>Allow the user to access the application again</li>
+                        <li>Restore all previous permissions and group memberships</li>
+                    </ul>
+                    <div class="alert alert-warning">
+                        <small><i class="fas fa-exclamation-triangle me-1"></i> Make sure you trust this user before reactivating their access.</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseReactivateModal">Cancel</button>
+                    <button type="button" class="btn btn-success" @onclick="ConfirmReactivateAccess" disabled="@isReactivatingAccess">
+                        @if (isReactivatingAccess)
+                        {
+                            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                        }
+                        <i class="fas fa-user-check me-1"></i> Reactivate Access
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@* ADDITIVE: Enhanced Reactivation Results Modal - shows detailed restoration feedback *@
+@if (showReactivationResultsModal && reactivationResults != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title @(reactivationResults.OverallSuccess ? "text-success" : "text-warning")">
+                        <i class="@(reactivationResults.OverallSuccess ? "fas fa-check-circle" : "fas fa-exclamation-triangle") me-2"></i>
+                        User Reactivation @(reactivationResults.OverallSuccess ? "Completed" : "Completed with Issues")
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseReactivationResultsModal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert @(reactivationResults.OverallSuccess ? "alert-success" : "alert-warning")">
+                        <i class="@(reactivationResults.OverallSuccess ? "fas fa-check-circle" : "fas fa-exclamation-triangle") me-2"></i>
+                        <strong>@reactivationResults.UserDisplayName</strong> (@reactivationResults.UserEmail) has been processed.
+                    </div>
+                    
+                    @if (reactivationResults.SuccessfulSteps.Any())
+                    {
+                        <div class="card mb-3">
+                            <div class="card-header bg-success text-white">
+                                <h6 class="mb-0">
+                                    <i class="fas fa-check me-2"></i>Successfully Restored (@reactivationResults.SuccessfulSteps.Count items)
+                                </h6>
+                            </div>
+                            <div class="card-body">
+                                <ul class="list-unstyled mb-0">
+                                    @foreach (var step in reactivationResults.SuccessfulSteps)
+                                    {
+                                        <li class="mb-1">
+                                            <i class="fas fa-check-circle text-success me-2"></i>@step
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        </div>
+                    }
+                    
+                    @if (reactivationResults.FailedSteps.Any())
+                    {
+                        <div class="card mb-3">
+                            <div class="card-header bg-danger text-white">
+                                <h6 class="mb-0">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>Issues Encountered (@reactivationResults.FailedSteps.Count items)
+                                </h6>
+                            </div>
+                            <div class="card-body">
+                                <ul class="list-unstyled mb-0">
+                                    @foreach (var step in reactivationResults.FailedSteps)
+                                    {
+                                        <li class="mb-1">
+                                            <i class="fas fa-times-circle text-danger me-2"></i>@step
+                                        </li>
+                                    }
+                                </ul>
+                                <div class="alert alert-info mt-3 mb-0">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    <small>Some restoration steps failed, but the user should still be able to access the application. You may need to manually assign missing permissions or contact support.</small>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h6 class="mb-0">
+                                <i class="fas fa-info-circle me-2"></i>Next Steps
+                            </h6>
+                        </div>
+                        <div class="card-body">
+                            @if (reactivationResults.OverallSuccess)
+                            {
+                                <p class="text-success mb-2">
+                                    <i class="fas fa-thumbs-up me-2"></i>
+                                    <strong>User is ready to access the application!</strong>
+                                </p>
+                                <ul class="small mb-0">
+                                    <li>The user can now log in and access all assigned resources</li>
+                                    <li>All permissions and group memberships have been restored</li>
+                                    <li>No further action is required</li>
+                                </ul>
+                            }
+                            else
+                            {
+                                <p class="text-warning mb-2">
+                                    <i class="fas fa-wrench me-2"></i>
+                                    <strong>User can access the application, but some issues need attention:</strong>
+                                </p>
+                                <ul class="small mb-0">
+                                    <li>Review the failed items listed above</li>
+                                    <li>Consider manually assigning missing permissions</li>
+                                    <li>Contact the user to verify their access is working correctly</li>
+                                    <li>Contact support if issues persist</li>
+                                </ul>
+                            }
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-primary" @onclick="CloseReactivationResultsModal">
+                        <i class="fas fa-check me-1"></i> Got It
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Confirmation Modal -->
+<ConfirmationModal @ref="confirmationModal"
+                 IsVisible="@showConfirmationModal"
+                 Title="@confirmationTitle"
+                 Message="@confirmationMessage"
+                 DetailsText="@confirmationDetails"
+                 ConsequenceText="@confirmationConsequence"
+                 ConfirmText="@confirmationConfirmText"
+                 CancelText="Cancel"
+                 Type="@confirmationType"
+                 OnConfirm="@OnConfirmAction"
+                 OnCancel="@OnCancelAction"
+                 IsProcessing="@isProcessingConfirmation"
+                 RequireConfirmationText="@requireConfirmationText"
+                 ConfirmationText="@requiredConfirmationText" />
+
 @code {
+    // ADDITIVE: Helper class for reactivation results tracking (doesn't affect existing functionality)
+    public class ReactivationResultSummary
+    {
+        public string UserDisplayName { get; set; } = "";
+        public string UserEmail { get; set; } = "";
+        public List<string> SuccessfulSteps { get; set; } = new();
+        public List<string> FailedSteps { get; set; } = new();
+        public bool OverallSuccess => SuccessfulSteps.Any() && !FailedSteps.Any();
+        public DateTime ProcessedAt { get; set; } = DateTime.UtcNow;
+    }
+    
     private List<GuestUser> allUsers = new();
     private List<GuestUser> filteredUsers = new();
     private string searchTerm = string.Empty;
@@ -227,12 +773,75 @@
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
     private Guid currentUserOrgId;
+    private UserRole currentUserRole = UserRole.User;
     private bool isLoading = true;
+    
+    // Modal states for reactivation functionality
+    private bool showReactivateModal = false;
+    private GuestUser? userToReactivate;
+    private bool isReactivatingAccess = false;
+    
+    // ADDITIVE: Enhanced reactivation results modal (doesn't interfere with existing functionality)
+    private bool showReactivationResultsModal = false;
+    private ReactivationResultSummary? reactivationResults;
+    
+    // Confirmation modal state
+    private ConfirmationModal? confirmationModal;
+    private bool showConfirmationModal = false;
+    private string confirmationTitle = "";
+    private string confirmationMessage = "";
+    private string confirmationDetails = "";
+    private string confirmationConsequence = "";
+    private string confirmationConfirmText = "Confirm";
+    private ConfirmationType confirmationType = ConfirmationType.Danger;
+    private bool isProcessingConfirmation = false;
+    private bool requireConfirmationText = false;
+    private string requiredConfirmationText = "";
+    private Func<Task>? pendingAction;
+    
+    // Cache for database user status to avoid repeated lookups
+    private Dictionary<string, OnboardedUser?> userStatusCache = new();
+    
+    // Cache for user agent types
+    private Dictionary<string, List<AgentTypeEntity>> userAgentTypesCache = new();
+    private List<AgentTypeEntity> organizationAgentTypes = new();
+    
+    // Cache for user databases
+    private Dictionary<string, List<DatabaseCredential>> userDatabasesCache = new();
+    
+    // Bulk agent assignment state (existing functionality)
+    private bool showBulkAgentAssignmentModal = false;
+    private List<GuestUser> selectedUsersForBulkAssignment = new();
+    private List<Guid> selectedAgentTypesForBulkAssignment = new();
+    private bool areAllUsersSelected = false;
+    private bool isBulkAssigning = false;
+    private BulkAssignmentMode bulkAssignmentMode = BulkAssignmentMode.Replace;
+    
+    // Assign to ALL Users state (new functionality)
+    private bool showAssignToAllUsersModal = false;
+    private List<Guid> selectedAgentTypesForAllUsers = new();
+    private bool isAssigningToAllUsers = false;
+    private BulkAssignmentMode assignToAllUsersMode = BulkAssignmentMode.Replace;
+    
+    private enum BulkAssignmentMode
+    {
+        Replace,
+        Add
+    }
+    
+    // Individual user agent management state
+    private bool showUserAgentManagementModal = false;
+    private GuestUser? selectedUserForAgentManagement;
+    private List<Guid> selectedUserAgentTypes = new();
+    private bool isUpdatingUserAgent = false;
 
     protected override async Task OnInitializedAsync()
     {
         try
         {
+            // Get current user role for access control
+            currentUserRole = DataIsolationService.GetCurrentUserRole();
+            
             // Get current user's organization
             var currentUserOrgIdStr = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
             if (!string.IsNullOrEmpty(currentUserOrgIdStr))
@@ -249,8 +858,31 @@
                     Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgIdStr);
                 }
                 
-                // Initialize default secrets for Organization Admin if not already done
-                await InitializeDefaultSecretsAsync(currentUserOrgIdStr);
+                await LoadOrganizationAgentTypes();
+                
+                // Initialize secrets asynchronously in the background - don't block page loading
+                // This prevents the heavy Key Vault operation from blocking page load
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        // Check if secrets already exist before creating them
+                        var existingSecrets = await KeyVaultService.GetSecretNamesAsync(currentUserOrgIdStr);
+                        if (!existingSecrets.Any())
+                        {
+                            Logger.LogInformation("No existing secrets found for organization {OrganizationId}, initializing defaults", currentUserOrgIdStr);
+                            await InitializeDefaultSecretsAsync(currentUserOrgIdStr);
+                        }
+                        else
+                        {
+                            Logger.LogDebug("Secrets already exist for organization {OrganizationId}, skipping initialization", currentUserOrgIdStr);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "Could not check existing secrets for organization {OrganizationId}, skipping secret initialization", currentUserOrgIdStr);
+                    }
+                });
                 
                 await LoadUsers();
             }
@@ -276,13 +908,106 @@
     {
         try
         {
+            // Check if user is authenticated before loading data
+            var currentUser = HttpContextAccessor.HttpContext?.User;
+            if (currentUser?.Identity?.IsAuthenticated != true)
+            {
+                Logger.LogWarning("Cannot load users - user not authenticated");
+                allUsers = new List<GuestUser>();
+                filteredUsers = allUsers;
+                return;
+            }
+
+            // Validate organization ID
+            if (currentUserOrgId == Guid.Empty)
+            {
+                Logger.LogWarning("Cannot load users - invalid organization ID");
+                allUsers = new List<GuestUser>();
+                filteredUsers = allUsers;
+                return;
+            }
+
             // Load users from OnboardedUserService
             var onboardedUsers = await OnboardedUserService.GetByOrganizationAsync(currentUserOrgId);
             
-            // Convert to GuestUser for backward compatibility
-            allUsers = onboardedUsers.Select(u => new GuestUser(u)).ToList();
+            // Convert to GuestUser for backward compatibility and ensure unique users by email
+            allUsers = onboardedUsers
+                .Select(u => new GuestUser(u))
+                .GroupBy(u => u.Email?.ToLowerInvariant())
+                .Select(g => g.OrderByDescending(u => u.InvitedDateTime).First()) // Keep the most recent invitation if duplicates
+                .ToList();
+            
+            // Load database user status and agent types for accurate display
+            foreach (var user in allUsers)
+            {
+                try
+                {
+                    var dbUser = await OnboardedUserService.GetByEmailAsync(user.Email, currentUserOrgId);
+                    userStatusCache[user.Email] = dbUser;
+                    
+                    // Load agent types for this user if they exist in database
+                    if (dbUser != null)
+                    {
+                        try
+                        {
+                            var userAgentTypes = await OnboardedUserService.GetUserAgentTypesAsync(dbUser.OnboardedUserId, currentUserOrgId);
+                            userAgentTypesCache[user.Email] = userAgentTypes;
+                        }
+                        catch (Exception agentEx)
+                        {
+                            Logger.LogWarning(agentEx, "Could not load agent types for {Email}", user.Email);
+                            userAgentTypesCache[user.Email] = new List<AgentTypeEntity>();
+                        }
+                        
+                        // Load databases for this user
+                        try
+                        {
+                            var userDatabases = await UserDatabaseAccessService.GetUserAssignedDatabasesAsync(dbUser.OnboardedUserId, currentUserOrgId);
+                            userDatabasesCache[user.Email] = userDatabases;
+                        }
+                        catch (Exception dbEx)
+                        {
+                            Logger.LogWarning(dbEx, "Could not load databases for {Email}", user.Email);
+                            userDatabasesCache[user.Email] = new List<DatabaseCredential>();
+                        }
+                        
+                        // CRITICAL FIX: Auto-fetch real-time Azure AD invitation status like ManageAdmins.razor
+                        // This ensures all screens show consistent and accurate invitation status
+                        if (dbUser.LastInvitationDate != null && dbUser.LastInvitationDate != DateTime.MinValue)
+                        {
+                            try
+                            {
+                                var realTimeStatus = await dbUser.GetRealTimeInvitationStatusAsync(GraphService);
+                                // Override the database-based status with real Azure AD status
+                                user.InvitationStatus = realTimeStatus;
+                                
+                                Logger.LogDebug("Updated invitation status for {Email}: Database={DatabaseStatus}, Azure AD={AzureStatus}", 
+                                    dbUser.Email, dbUser.GetInvitationStatus(), realTimeStatus);
+                            }
+                            catch (Exception statusEx)
+                            {
+                                Logger.LogWarning(statusEx, "Failed to get real-time invitation status for {Email}, using database status", dbUser.Email);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        userAgentTypesCache[user.Email] = new List<AgentTypeEntity>();
+                        userDatabasesCache[user.Email] = new List<DatabaseCredential>();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Could not load database user status for {Email}", user.Email);
+                    userStatusCache[user.Email] = null;
+                    userAgentTypesCache[user.Email] = new List<AgentTypeEntity>();
+                    userDatabasesCache[user.Email] = new List<DatabaseCredential>();
+                }
+            }
             
             filteredUsers = allUsers;
+            
+            Logger.LogInformation("Loaded {UserCount} unique users for organization {OrganizationId}", allUsers.Count, currentUserOrgId);
         }
         catch (Exception ex)
         {
@@ -350,42 +1075,420 @@
         StateHasChanged();
     }
 
+    private List<DropdownAction> GetUserActions(GuestUser user)
+    {
+        var actions = new List<DropdownAction>();
+
+        var currentStatus = GetUserActualStatus(user);
+        
+        // Primary actions - most commonly used
+        actions.Add(new DropdownAction
+        {
+            Title = "📋 View Details",
+            Description = "See complete user profile and settings",
+            IconClass = "fas fa-user-circle",
+            Type = ActionType.Info,
+            OnClick = EventCallback.Factory.Create(this, () => ViewUserDetails(user))
+        });
+        
+        // Status-dependent actions
+        if (currentStatus == "PendingAcceptance")
+        {
+            actions.Add(new DropdownAction
+            {
+                Title = "📧 Resend Invitation",
+                Description = "Send another invitation email",
+                IconClass = "fas fa-paper-plane",
+                Type = ActionType.Warning,
+                OnClick = EventCallback.Factory.Create(this, () => ResendInvitation(user)),
+                IsDisabled = isLoading
+            });
+        }
+        
+        // Always show refresh - it's useful for all statuses
+        actions.Add(new DropdownAction
+        {
+            Title = "🔄 Refresh Status",
+            Description = "Get latest status from Azure AD",
+            IconClass = "fas fa-sync",
+            Type = ActionType.Info,
+            OnClick = EventCallback.Factory.Create(this, () => RefreshUserStatus(user))
+        });
+
+        // Separator before management actions
+        actions.Add(DropdownAction.CreateSeparator());
+        
+        // Agent Types management - show only if organization has agent types allocated
+        if (organizationAgentTypes.Any() && user.OnboardedUser != null)
+        {
+            var userAgentTypes = GetUserAgentTypes(user);
+            actions.Add(new DropdownAction
+            {
+                Title = "🤖 Manage Agent Types",
+                Description = $"Currently assigned: {(userAgentTypes.Any() ? userAgentTypes.Count + " agent(s)" : "none")}",
+                IconClass = "fas fa-robot",
+                Type = ActionType.Info,
+                OnClick = EventCallback.Factory.Create(this, () => ShowUserAgentManagementModal(user)),
+                IsDisabled = isLoading
+            });
+        }
+        else if (!organizationAgentTypes.Any())
+        {
+            actions.Add(new DropdownAction
+            {
+                Title = "🤖 Agent Types Not Available",
+                Description = "No agent types allocated by SuperAdmin",
+                IconClass = "fas fa-robot",
+                Type = ActionType.Secondary,
+                IsDisabled = true
+            });
+        }
+
+        // User management actions based on permissions
+        if (CanRemoveUser(user))
+        {
+            if (currentStatus == "Disabled" || currentStatus == "Inactive")
+            {
+                actions.Add(new DropdownAction
+                {
+                    Title = "✅ Reactivate Access",
+                    Description = "Restore user access and permissions",
+                    IconClass = "fas fa-user-check",
+                    Type = ActionType.Success,
+                    OnClick = EventCallback.Factory.Create(this, () => ShowReactivateConfirmation(user))
+                });
+            }
+            else if (currentStatus == "Active")
+            {
+                actions.Add(new DropdownAction
+                {
+                    Title = "⚠️ Disable Access",
+                    Description = "Remove access to organization",
+                    IconClass = "fas fa-user-slash",
+                    Type = ActionType.Danger,
+                    OnClick = EventCallback.Factory.Create(this, () => ShowRevokeConfirmation(user)),
+                    ConsequenceText = "Disables Azure AD account"
+                });
+            }
+        }
+        else
+        {
+            // Show why the user can't be managed with clear explanations
+            var targetUserRole = GetUserRole(user);
+            string title, description, icon;
+            
+            if (IsCurrentUser(user))
+            {
+                title = "🚫 Cannot Self-Manage";
+                description = "You cannot manage your own account";
+                icon = "fas fa-user-shield";
+            }
+            else if (targetUserRole == UserRole.OrgAdmin)
+            {
+                title = "🛡️ Protected Admin";
+                description = "Admin users require SuperAdmin approval";
+                icon = "fas fa-shield-alt";
+            }
+            else if (currentUserRole == UserRole.User)
+            {
+                title = "🔒 Insufficient Permissions";
+                description = "Contact your administrator for assistance";
+                icon = "fas fa-lock";
+            }
+            else
+            {
+                title = "❓ Permission Check Failed";
+                description = "Unable to determine user management permissions";
+                icon = "fas fa-question-circle";
+            }
+            
+            actions.Add(new DropdownAction
+            {
+                Title = title,
+                Description = description,
+                IconClass = icon,
+                Type = ActionType.Secondary,
+                IsDisabled = true
+            });
+        }
+
+        return actions;
+    }
+
+    private bool CanRemoveUser(GuestUser user)
+    {
+        Logger.LogInformation("=== CanRemoveUser DEBUG ===");
+        Logger.LogInformation("Target User: {UserEmail}", user.Email);
+        Logger.LogInformation("Current User Role: {CurrentUserRole}", currentUserRole);
+        
+        // Get current user info for debugging
+        var currentUserEmail = HttpContextAccessor.HttpContext?.User.FindFirst("email")?.Value ?? 
+                              HttpContextAccessor.HttpContext?.User.FindFirst("preferred_username")?.Value;
+        Logger.LogInformation("Current User Email: {CurrentUserEmail}", currentUserEmail);
+        
+        // CRITICAL SECURITY CHECK: No one can deactivate themselves - this is the primary issue to fix
+        if (IsCurrentUser(user))
+        {
+            Logger.LogInformation("RESULT: FALSE - User cannot remove themselves: {UserEmail}", user.Email);
+            return false;
+        }
+
+        // ADDITIONAL SAFETY CHECK: If current user is OrgAdmin, prevent removal of users with same email domain
+        // This provides extra protection against OrgAdmin-to-OrgAdmin deactivation
+        if (currentUserRole == UserRole.OrgAdmin && !string.IsNullOrEmpty(currentUserEmail))
+        {
+            var currentUserDomain = currentUserEmail.Split('@').LastOrDefault();
+            var targetUserDomain = user.Email?.Split('@').LastOrDefault();
+            
+            if (!string.IsNullOrEmpty(currentUserDomain) && 
+                !string.IsNullOrEmpty(targetUserDomain) &&
+                string.Equals(currentUserDomain, targetUserDomain, StringComparison.OrdinalIgnoreCase))
+            {
+                Logger.LogInformation("SAFETY CHECK: Same domain users - Current: {CurrentDomain}, Target: {TargetDomain}", 
+                    currentUserDomain, targetUserDomain);
+                
+                // Additional check: if both users are from the same organization domain,
+                // only allow deactivation if target user has no admin permissions in database
+                var targetUserRole = GetUserRole(user);
+                if (targetUserRole == UserRole.OrgAdmin)
+                {
+                    Logger.LogInformation("RESULT: FALSE - OrgAdmin cannot remove other OrgAdmin: {UserEmail}", user.Email);
+                    return false;
+                }
+            }
+        }
+
+        // Super Admins can remove anyone (except themselves, checked above)
+        if (currentUserRole == UserRole.SuperAdmin)
+        {
+            Logger.LogInformation("RESULT: TRUE - SuperAdmin can remove user: {UserEmail}", user.Email);
+            return true;
+        }
+
+        // Org Admins can only remove regular organization users (OrgUsers), not other Org Admins
+        if (currentUserRole == UserRole.OrgAdmin)
+        {
+            var targetUserRole = GetUserRole(user);
+            
+            // OrgAdmins can remove regular users but NOT other OrgAdmins
+            var canRemove = targetUserRole != UserRole.OrgAdmin;
+            Logger.LogInformation("RESULT: {CanRemove} - OrgAdmin attempting to remove user: {UserEmail} (Target Role: {TargetRole})", 
+                canRemove, user.Email, targetUserRole);
+            return canRemove;
+        }
+
+        // Regular users cannot remove anyone
+        Logger.LogInformation("RESULT: FALSE - Regular user cannot remove anyone: {UserEmail}", user.Email);
+        return false;
+    }
+
+    private bool IsUserOrgAdmin(GuestUser user)
+    {
+        // Use the proper role detection method from OnboardedUser extensions
+        return user.OnboardedUser?.GetUserRole() == UserRole.OrgAdmin;
+    }
+
+    private UserRole GetUserRole(GuestUser user)
+    {
+        // Use the extension method to get the user's role from database
+        var role = user.OnboardedUser?.GetUserRole() ?? UserRole.User;
+        Logger.LogInformation("GetUserRole for {UserEmail}: {Role} (OnboardedUser: {HasOnboardedUser}, AgentTypes: {AgentTypes})", 
+            user.Email, role, user.OnboardedUser != null, 
+            user.OnboardedUser?.AgentTypes != null ? string.Join(", ", user.OnboardedUser.AgentTypes) : "null");
+        return role;
+    }
+
+    private bool IsOrgUserWithAzureRole(GuestUser user)
+    {
+        // This would ideally check if the user has OrgUser Azure AD app role
+        // For now, we'll assume users with Admin agent type are OrgAdmins
+        // and others with any agent types are OrgUsers
+        var onboardedUser = user.OnboardedUser;
+        if (onboardedUser == null) return false;
+        
+        // If user has Admin agent type, they're OrgAdmin (handled by IsUserOrgAdmin)
+        if (onboardedUser.AgentTypes?.Contains(LegacyAgentType.Admin) == true)
+            return false;
+            
+        // If user has other agent types, they're likely OrgUsers
+        return onboardedUser.AgentTypes?.Any() == true;
+    }
+
+    private bool IsCurrentUser(GuestUser user)
+    {
+        // Get current user's email from the HTTP context
+        var currentUserEmail = HttpContextAccessor.HttpContext?.User.FindFirst("email")?.Value ?? 
+                              HttpContextAccessor.HttpContext?.User.FindFirst("preferred_username")?.Value ?? 
+                              HttpContextAccessor.HttpContext?.User.FindFirst("upn")?.Value ?? 
+                              HttpContextAccessor.HttpContext?.User.FindFirst("unique_name")?.Value ??
+                              HttpContextAccessor.HttpContext?.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value;
+
+        Logger.LogInformation("IsCurrentUser DEBUG: Current user email: {CurrentUserEmail}, Target user email: {TargetUserEmail}", 
+            currentUserEmail, user.Email);
+
+        // Compare with the target user's email
+        var isCurrentUser = !string.IsNullOrEmpty(currentUserEmail) && 
+                           string.Equals(currentUserEmail, user.Email, StringComparison.OrdinalIgnoreCase);
+        
+        Logger.LogInformation("IsCurrentUser result: {IsCurrentUser}", isCurrentUser);
+        return isCurrentUser;
+    }
+
     private void ViewUserDetails(GuestUser user)
     {
         Navigation.NavigateTo($"/admin/users/{user.OnboardedUser.OnboardedUserId}");
     }
 
-    private Task ResendInvitation(GuestUser user)
+    private async Task RefreshUserStatus(GuestUser user)
+    {
+        try
+        {
+            ClearMessages();
+            Logger.LogInformation("Refreshing status for user {Email} from Azure AD", user.Email);
+            
+            // Show loading state
+            isLoading = true;
+            StateHasChanged();
+            
+            if (user.OnboardedUser != null)
+            {
+                // Get real-time status from Azure AD
+                var realTimeStatus = await user.OnboardedUser.GetRealTimeInvitationStatusAsync(GraphService);
+                var oldStatus = user.InvitationStatus;
+                
+                // Update the user's status in the UI
+                user.InvitationStatus = realTimeStatus;
+                
+                // If status changed from pending to accepted, update database
+                if (oldStatus == "PendingAcceptance" && realTimeStatus == "Accepted")
+                {
+                    user.OnboardedUser.StateCode = StateCode.Active;
+                    user.OnboardedUser.StatusCode = StatusCode.Active;
+                    user.OnboardedUser.ModifiedOn = DateTime.UtcNow;
+                    
+                    // Save to database
+                    await OnboardedUserService.UpdateAsync(user.OnboardedUser, Guid.Empty);
+                    
+                    successMessage = $"✅ Status updated: {user.DisplayName} has accepted the invitation and is now active.";
+                    Logger.LogInformation("User {Email} status updated from PendingAcceptance to Accepted", user.Email);
+                }
+                else if (oldStatus != realTimeStatus)
+                {
+                    successMessage = $"✅ Status refreshed: {user.DisplayName} is currently '{realTimeStatus}'";
+                    Logger.LogInformation("User {Email} status refreshed: {OldStatus} → {NewStatus}", user.Email, oldStatus, realTimeStatus);
+                }
+                else
+                {
+                    successMessage = $"✅ Status confirmed: {user.DisplayName} is '{realTimeStatus}'";
+                    Logger.LogInformation("User {Email} status confirmed as {Status}", user.Email, realTimeStatus);
+                }
+            }
+            else
+            {
+                errorMessage = "Could not refresh status: User record not found";
+                Logger.LogWarning("Could not refresh status for {Email}: OnboardedUser is null", user.Email);
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"❌ Failed to refresh status for {user.DisplayName}: {ex.Message}";
+            Logger.LogError(ex, "Error refreshing status for user {Email}", user.Email);
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ResendInvitation(GuestUser user)
     {
         try
         {
             ClearMessages();
             Logger.LogInformation("Resending invitation to {Email} for organization {OrganizationId}", user.Email, currentUserOrgId);
             
-            // TODO: Implement resend invitation via Graph API
-            // This would typically involve creating a new invitation
-            successMessage = $"Invitation resent to {user.Email}. They will receive a new invitation email.";
-            
+            // Show loading state
+            isLoading = true;
             StateHasChanged();
+            
+            // Use InvitationService to resend invitation for regular users
+            // The GuestUser has an OnboardedUser property with the database record
+            if (user.OnboardedUser?.OnboardedUserId != null)
+            {
+                var result = await InvitationService.ResendInvitationAsync(user.OnboardedUser.OnboardedUserId);
+                
+                if (result.Success)
+                {
+                    successMessage = $"✅ Invitation successfully resent to {user.DisplayName} ({user.Email}). They will receive a new invitation email.";
+                    
+                    // Update invitation status to reflect resend
+                    user.InvitationStatus = "PendingAcceptance";
+                    user.InvitedDateTime = DateTime.UtcNow;
+                    
+                    Logger.LogInformation("Successfully resent invitation to {Email}", user.Email);
+                }
+                else
+                {
+                    errorMessage = $"❌ Failed to resend invitation to {user.DisplayName}: {result.Message}";
+                    Logger.LogError("Failed to resend invitation to {Email}: {Message}", user.Email, result.Message);
+                }
+            }
+            else
+            {
+                // Fallback: Use GraphService if OnboardedUser info is not available
+                Logger.LogWarning("OnboardedUser info not available, using GraphService fallback for {Email}", user.Email);
+                
+                // Try to get Azure Object ID first, fall back to email for invitation operations
+                var azureObjectId = await OnboardedUserService.GetAzureObjectIdByEmailAsync(user.Email, currentUserOrgId);
+                var userIdForInvitation = !string.IsNullOrEmpty(azureObjectId) ? azureObjectId : user.Email;
+                
+                Logger.LogInformation("Resending invitation using {IdType}: {UserId}", 
+                    !string.IsNullOrEmpty(azureObjectId) ? "Azure Object ID" : "Email", userIdForInvitation);
+                
+                var result = await GraphService.ResendInvitationAsync(userIdForInvitation);
+                
+                if (result)
+                {
+                    successMessage = $"✅ Invitation successfully resent to {user.DisplayName} ({user.Email}). They will receive a new invitation email.";
+                    user.InvitationStatus = "PendingAcceptance";
+                    user.InvitedDateTime = DateTime.UtcNow;
+                }
+                else
+                {
+                    errorMessage = $"❌ Failed to resend invitation to {user.DisplayName}. Please try again.";
+                }
+            }
         }
         catch (Exception ex)
         {
+            errorMessage = $"❌ An unexpected error occurred while resending the invitation to {user.DisplayName}. Please try again.";
             Logger.LogError(ex, "Error resending invitation to {Email}", user.Email);
-            errorMessage = "Failed to resend invitation. Please try again.";
+        }
+        finally
+        {
+            isLoading = false;
             StateHasChanged();
         }
-        return Task.CompletedTask;
     }
 
     private async Task ShowRevokeConfirmation(GuestUser user)
     {
-        var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", 
-            $"Are you sure you want to remove {user.DisplayName} ({user.Email}) from your organization? This action cannot be undone.");
-            
-        if (confirmed)
-        {
-            await RevokeUserAccess(user);
-        }
+        confirmationTitle = "Remove User Access";
+        confirmationMessage = $"You are about to remove access for {user.DisplayName} ({user.Email}).";
+        confirmationDetails = $"<strong>User:</strong> {user.DisplayName}<br>" +
+                            $"<strong>Email:</strong> {user.Email}<br>" +
+                            $"<strong>Current Status:</strong> {user.InvitationStatus}<br>" +
+                            $"<strong>Action:</strong> Remove all organization access and disable account";
+        confirmationConsequence = "This user will immediately lose access to all organization resources, databases, and security groups. The user account will be deactivated and they cannot sign in.";
+        confirmationConfirmText = "Remove Access";
+        confirmationType = ConfirmationType.Danger;
+        requireConfirmationText = false;
+        pendingAction = () => RevokeUserAccess(user);
+        showConfirmationModal = true;
+        StateHasChanged();
+        
+        await Task.CompletedTask;
     }
     
     private async Task RevokeUserAccess(GuestUser user)
@@ -395,16 +1498,51 @@
             ClearMessages();
             Logger.LogInformation("Revoking access for user {UserId} ({Email})", user.Id, user.Email);
             
-            // Revoke access via Graph API
-            var success = await GraphService.RevokeUserAccessAsync(user.Id);
+            // Get Azure Object ID for GraphService operations (never use database ID or email)
+            var azureObjectId = await OnboardedUserService.GetAzureObjectIdByEmailAsync(user.Email, currentUserOrgId);
             
-            if (success)
+            bool graphSuccess = false;
+            if (!string.IsNullOrEmpty(azureObjectId))
             {
-                successMessage = $"Access revoked for {user.DisplayName}. They can no longer access your organization.";
-                await LoadUsers(); // Refresh the list
+                Logger.LogInformation("🔍 Found Azure Object ID {AzureObjectId} for {UserEmail}, using for GraphService operations", 
+                    azureObjectId, user.Email);
+                graphSuccess = await GraphService.RevokeUserAccessAsync(azureObjectId);
             }
             else
             {
+                Logger.LogWarning("❌ No Azure Object ID found for {UserEmail}, skipping GraphService operations. User may only be revoked in database.", user.Email);
+                graphSuccess = true; // Skip GraphService operations if no Azure Object ID available
+            }
+            
+            if (graphSuccess)
+            {
+                Logger.LogInformation("Successfully revoked Graph API access for {Email}", user.Email);
+            }
+            else
+            {
+                Logger.LogWarning("Graph API revocation failed for {Email}, continuing with database revocation", user.Email);
+            }
+
+            // Always perform database-based revocation (this is the critical part that blocks app access)
+            var currentUser = HttpContextAccessor.HttpContext?.User;
+            var revokedByEmail = currentUser?.FindFirst("email")?.Value ?? "system";
+            
+            var databaseSuccess = await UserAccessValidationService.RevokeUserAccessAsync(user.Email, revokedByEmail);
+            
+            if (databaseSuccess)
+            {
+                Logger.LogInformation("Successfully revoked database access for {Email}", user.Email);
+                successMessage = $"Access revoked for {user.DisplayName}. They can no longer access your organization.";
+                
+                // Refresh the user list to reflect the new status
+                await LoadUsers();
+                FilterUsers();
+                
+                Logger.LogInformation("User access fully revoked for {Email}. User will be blocked from accessing the application.", user.Email);
+            }
+            else
+            {
+                Logger.LogError("Failed to revoke database access for {Email}. User may still be able to access the application!", user.Email);
                 errorMessage = "Failed to revoke user access. Please try again.";
             }
         }
@@ -415,5 +1553,958 @@
         }
         
         StateHasChanged();
+    }
+    
+    private string GetUserActualStatus(GuestUser user)
+    {
+        try
+        {
+            // Check cache first
+            if (userStatusCache.TryGetValue(user.Email, out var cachedUser))
+            {
+                if (cachedUser == null)
+                {
+                    // User not found in database, fall back to invitation status
+                    return user.InvitationStatus;
+                }
+                
+                // Return database status
+                if (cachedUser.IsDeleted)
+                    return "Deleted";
+                if (!cachedUser.IsActive || cachedUser.StatusCode != StatusCode.Active)
+                    return "Disabled";
+                return "Active";
+            }
+            
+            // If not cached, fall back to invitation status for now
+            // The cache will be populated during LoadUsers
+            return user.InvitationStatus == "Accepted" ? "Active" : user.InvitationStatus;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error getting user status for {Email}", user.Email);
+            return user.InvitationStatus;
+        }
+    }
+
+    private void ShowReactivateConfirmation(GuestUser user)
+    {
+        userToReactivate = user;
+        showReactivateModal = true;
+        StateHasChanged();
+    }
+
+    private void CloseReactivateModal()
+    {
+        userToReactivate = null;
+        showReactivateModal = false;
+        isReactivatingAccess = false;
+    }
+    
+    /// <summary>
+    /// ADDITIVE: Closes the enhanced reactivation results modal
+    /// </summary>
+    private void CloseReactivationResultsModal()
+    {
+        showReactivationResultsModal = false;
+        reactivationResults = null;
+        StateHasChanged();
+    }
+
+    private async Task ConfirmReactivateAccess()
+    {
+        if (userToReactivate == null || isReactivatingAccess) return;
+
+        // Check authentication before proceeding
+        var currentUser = HttpContextAccessor.HttpContext?.User;
+        if (currentUser?.Identity?.IsAuthenticated != true)
+        {
+            Logger.LogError("Cannot reactivate user - current user not authenticated");
+            errorMessage = "Authentication required to perform this action. Please log in and try again.";
+            return;
+        }
+
+        isReactivatingAccess = true;
+        var restorationSteps = new List<string>();
+        var failedSteps = new List<string>();
+        
+        try
+        {
+            Logger.LogInformation("=== STARTING COMPLETE USER REACTIVATION for {Email} (ID: {Id}) ===", userToReactivate.Email, userToReactivate.Id);
+
+            // Step 1: Get user data from database
+            Logger.LogInformation("Step 1: Getting user data from database");
+            var onboardedUser = await OnboardedUserService.GetByEmailAsync(userToReactivate.Email, currentUserOrgId);
+            var organization = await OrganizationService.GetByIdAsync(currentUserOrgId.ToString());
+            
+            if (onboardedUser == null)
+            {
+                Logger.LogError("Cannot reactivate - user {Email} not found in database", userToReactivate.Email);
+                errorMessage = "User not found in database. Cannot complete reactivation.";
+                return;
+            }
+
+            // Step 2: Enable user account in Azure Entra ID
+            Logger.LogInformation("Step 2: Enabling user account in Azure Entra ID");
+            var graphSuccess = await GraphService.EnableUserAccountAsync(userToReactivate.Id);
+            
+            if (graphSuccess)
+            {
+                Logger.LogInformation("✅ Successfully enabled Azure AD account for {Email}", userToReactivate.Email);
+                restorationSteps.Add("Azure AD account enabled");
+            }
+            else
+            {
+                Logger.LogWarning("❌ Azure AD account enable failed for {Email}, continuing with other steps", userToReactivate.Email);
+                failedSteps.Add("Azure AD account enable");
+            }
+
+            // Step 3: Restore Agent Type Security Group assignments
+            Logger.LogInformation("Step 3: Restoring agent type security group assignments");
+            if (onboardedUser.AgentTypeIds?.Any() == true || onboardedUser.AgentTypes?.Any() == true)
+            {
+                try
+                {
+                    // CRITICAL FIX: Use bidirectional sync instead of just reactivation to handle missing groups
+                    var agentGroupSuccess = await AgentGroupAssignmentService.SyncUserAgentGroupAssignmentsAsync(userToReactivate.Id, currentUserOrgId);
+                    
+                    if (agentGroupSuccess)
+                    {
+                        Logger.LogInformation("✅ Successfully restored agent group assignments for {Email}", userToReactivate.Email);
+                        restorationSteps.Add("Agent security groups restored");
+                    }
+                    else
+                    {
+                        Logger.LogWarning("❌ Agent group restoration failed for {Email}", userToReactivate.Email);
+                        failedSteps.Add("Agent security groups");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "❌ Exception during agent group restoration for {Email}", userToReactivate.Email);
+                    failedSteps.Add("Agent security groups (exception)");
+                }
+            }
+            else
+            {
+                Logger.LogInformation("ℹ️ User {Email} has no agent types - skipping agent group restoration", userToReactivate.Email);
+            }
+
+            // Step 4: Add user back to Microsoft 365/Teams group
+            Logger.LogInformation("Step 4: Adding user to Microsoft 365/Teams group");
+            if (organization?.HasM365Group() == true)
+            {
+                try
+                {
+                    var teamsSuccess = await TeamsGroupService.AddUserToOrganizationTeamsGroupAsync(userToReactivate.Id, currentUserOrgId);
+                    
+                    if (teamsSuccess)
+                    {
+                        Logger.LogInformation("✅ Successfully added user to Teams group for {Email}", userToReactivate.Email);
+                        restorationSteps.Add("Microsoft 365/Teams group restored");
+                    }
+                    else
+                    {
+                        Logger.LogWarning("❌ Teams group restoration failed for {Email}", userToReactivate.Email);
+                        failedSteps.Add("Microsoft 365/Teams group");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "❌ Exception during Teams group restoration for {Email}", userToReactivate.Email);
+                    failedSteps.Add("Microsoft 365/Teams group (exception)");
+                }
+            }
+            else
+            {
+                Logger.LogInformation("ℹ️ Organization has no M365 group configured - skipping Teams group restoration");
+            }
+
+            // Step 5: Assign appropriate app role
+            Logger.LogInformation("Step 5: Assigning app role");
+            try
+            {
+                var userRole = onboardedUser.GetUserRole();
+                string appRoleName = userRole == UserRole.OrgAdmin ? "OrgAdmin" : "OrgUser";
+                
+                var appRoleSuccess = await GraphService.AssignAppRoleToUserAsync(userToReactivate.Id, appRoleName);
+                
+                if (appRoleSuccess)
+                {
+                    Logger.LogInformation("✅ Successfully assigned app role '{AppRole}' to {Email}", appRoleName, userToReactivate.Email);
+                    restorationSteps.Add($"App role '{appRoleName}' assigned");
+                }
+                else
+                {
+                    Logger.LogWarning("❌ App role assignment failed for {Email}", userToReactivate.Email);
+                    failedSteps.Add($"App role '{appRoleName}'");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "❌ Exception during app role assignment for {Email}", userToReactivate.Email);
+                failedSteps.Add("App role assignment (exception)");
+            }
+
+            // Step 6: Update database status
+            Logger.LogInformation("Step 6: Updating database status");
+            var reactivatedByEmail = currentUser?.FindFirst("email")?.Value ?? "system";
+            
+            var databaseSuccess = await UserAccessValidationService.RestoreUserAccessAsync(userToReactivate.Email, reactivatedByEmail);
+            
+            if (databaseSuccess)
+            {
+                Logger.LogInformation("✅ Successfully updated database status for {Email}", userToReactivate.Email);
+                restorationSteps.Add("Database status updated");
+                
+                // Step 7: Refresh UI
+                await LoadUsers();
+                FilterUsers();
+                
+                // ADDITIVE: Capture reactivation results for enhanced feedback modal (doesn't replace existing functionality)
+                reactivationResults = new ReactivationResultSummary
+                {
+                    UserDisplayName = userToReactivate.DisplayName,
+                    UserEmail = userToReactivate.Email,
+                    SuccessfulSteps = restorationSteps.ToList(),
+                    FailedSteps = failedSteps.ToList()
+                };
+                
+                CloseReactivateModal();
+                
+                // Show enhanced results modal (additive feature - doesn't replace existing success message)
+                showReactivationResultsModal = true;
+                
+                // Generate existing success message (preserved for backward compatibility)
+                var restorationSummary = $"Access restored for {userToReactivate.DisplayName}.";
+                if (restorationSteps.Any())
+                {
+                    restorationSummary += $" Completed: {string.Join(", ", restorationSteps)}.";
+                }
+                if (failedSteps.Any())
+                {
+                    restorationSummary += $" Some issues: {string.Join(", ", failedSteps)}.";
+                }
+                
+                successMessage = restorationSummary;
+                
+                Logger.LogInformation("=== USER REACTIVATION COMPLETED for {Email} === Success: {SuccessCount}, Failed: {FailedCount}", 
+                    userToReactivate.Email, restorationSteps.Count, failedSteps.Count);
+            }
+            else
+            {
+                Logger.LogError("❌ Failed to update database status for {Email}. User may still be blocked!", userToReactivate.Email);
+                errorMessage = "Failed to restore user access. Please try again.";
+                failedSteps.Add("Database status update");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "=== CRITICAL ERROR during user reactivation for {Email} ===", userToReactivate?.Email);
+            errorMessage = "An unexpected error occurred while reactivating access. Please try again.";
+        }
+        finally
+        {
+            isReactivatingAccess = false;
+        }
+    }
+
+    private async Task RefreshUsers()
+    {
+        if (isLoading) return;
+        
+        try
+        {
+            isLoading = true;
+            StateHasChanged();
+            
+            // Clear any cached data
+            userStatusCache.Clear();
+            userAgentTypesCache.Clear();
+            userDatabasesCache.Clear();
+            
+            await LoadUsers();
+            await LoadOrganizationAgentTypes();
+            
+            // 🔧 SYNC FIX: Auto-sync user agent types to organization allocation
+            // This helps fix cases where users have agent types but they're not allocated to the org
+            await SyncUserAgentTypesToOrganization();
+            
+            Logger.LogInformation("User list refreshed successfully - {UserCount} users loaded", allUsers.Count);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error refreshing user list");
+            errorMessage = "Error refreshing users. Please try again.";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnConfirmAction()
+    {
+        if (pendingAction != null)
+        {
+            isProcessingConfirmation = true;
+            StateHasChanged();
+            
+            try
+            {
+                await pendingAction();
+            }
+            finally
+            {
+                isProcessingConfirmation = false;
+                showConfirmationModal = false;
+                pendingAction = null;
+                StateHasChanged();
+            }
+        }
+    }
+    
+    private async Task OnCancelAction()
+    {
+        showConfirmationModal = false;
+        pendingAction = null;
+        StateHasChanged();
+        await Task.CompletedTask;
+    }
+    
+    private async Task LoadOrganizationAgentTypes()
+    {
+        try
+        {
+            Logger.LogInformation("🔍 DEBUG: Loading organization agent types for org {OrgId}", currentUserOrgId);
+            
+            var orgAgentTypeIds = await OrganizationService.GetOrganizationAgentTypesAsync(currentUserOrgId.ToString());
+            Logger.LogInformation("🔍 DEBUG: Found {Count} agent type IDs allocated to organization: {AgentTypeIds}", 
+                orgAgentTypeIds.Count, string.Join(", ", orgAgentTypeIds));
+            
+            if (orgAgentTypeIds.Any())
+            {
+                var allAgentTypes = await AgentTypeService.GetActiveAgentTypesAsync();
+                Logger.LogInformation("🔍 DEBUG: Found {Count} total active agent types in system", allAgentTypes.Count);
+                
+                organizationAgentTypes = allAgentTypes.Where(at => orgAgentTypeIds.Contains(at.Id)).ToList();
+                
+                Logger.LogInformation("✅ Loaded {Count} organization-allocated agent types: {AgentTypeNames}", 
+                    organizationAgentTypes.Count, string.Join(", ", organizationAgentTypes.Select(at => at.Name)));
+            }
+            else
+            {
+                organizationAgentTypes = new List<AgentTypeEntity>();
+                Logger.LogInformation("⚠️ No agent types allocated to organization {OrgId}", currentUserOrgId);
+            }
+            
+            // Force UI update
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "❌ CRITICAL ERROR loading organization-allocated agent types for org {OrgId}: {ErrorMessage}", currentUserOrgId, ex.Message);
+            Logger.LogError("❌ Full Exception Details: {FullException}", ex.ToString());
+            organizationAgentTypes = new List<AgentTypeEntity>();
+        }
+    }
+    
+    private List<AgentTypeEntity> GetUserAgentTypes(GuestUser user)
+    {
+        if (userAgentTypesCache.TryGetValue(user.Email, out var agentTypes))
+        {
+            // CRITICAL FIX: Only show agent types that are currently allocated to the organization by SuperAdmin
+            // This ensures OrgAdmin only sees agent types that SuperAdmin has made available
+            var organizationAgentTypeIds = organizationAgentTypes.Select(oat => oat.Id).ToHashSet();
+            var filteredAgentTypes = agentTypes.Where(at => organizationAgentTypeIds.Contains(at.Id)).ToList();
+            
+            // Debug logging for troubleshooting
+            if (agentTypes.Count != filteredAgentTypes.Count)
+            {
+                Logger.LogInformation("🔍 FILTERED: User {Email} had {OriginalCount} agent types, showing {FilteredCount} (org-allocated only)", 
+                    user.Email, agentTypes.Count, filteredAgentTypes.Count);
+            }
+            
+            return filteredAgentTypes;
+        }
+        return new List<AgentTypeEntity>();
+    }
+    
+    private List<DatabaseCredential> GetUserDatabases(GuestUser user)
+    {
+        if (userDatabasesCache.TryGetValue(user.Email, out var databases))
+        {
+            return databases;
+        }
+        return new List<DatabaseCredential>();
+    }
+    
+    private void ShowBulkAgentAssignmentModal()
+    {
+        selectedUsersForBulkAssignment.Clear();
+        selectedAgentTypesForBulkAssignment.Clear();
+        areAllUsersSelected = false;
+        bulkAssignmentMode = BulkAssignmentMode.Replace;
+        showBulkAgentAssignmentModal = true;
+        StateHasChanged();
+    }
+    
+    private void CloseBulkAgentAssignmentModal()
+    {
+        showBulkAgentAssignmentModal = false;
+        selectedUsersForBulkAssignment.Clear();
+        selectedAgentTypesForBulkAssignment.Clear();
+        areAllUsersSelected = false;
+        StateHasChanged();
+    }
+    
+    private void ToggleAllUsersSelection(ChangeEventArgs e)
+    {
+        var isChecked = (bool)e.Value!;
+        areAllUsersSelected = isChecked;
+        
+        if (isChecked)
+        {
+            selectedUsersForBulkAssignment = filteredUsers.ToList();
+        }
+        else
+        {
+            selectedUsersForBulkAssignment.Clear();
+        }
+        
+        StateHasChanged();
+    }
+    
+    private void ToggleUserSelection(GuestUser user, bool isSelected)
+    {
+        if (isSelected && !selectedUsersForBulkAssignment.Contains(user))
+        {
+            selectedUsersForBulkAssignment.Add(user);
+        }
+        else if (!isSelected && selectedUsersForBulkAssignment.Contains(user))
+        {
+            selectedUsersForBulkAssignment.Remove(user);
+        }
+        
+        // Update "select all" checkbox
+        areAllUsersSelected = selectedUsersForBulkAssignment.Count == filteredUsers.Count();
+        
+        StateHasChanged();
+    }
+    
+    private void ToggleAgentTypeSelection(Guid agentTypeId, bool isSelected)
+    {
+        if (isSelected && !selectedAgentTypesForBulkAssignment.Contains(agentTypeId))
+        {
+            selectedAgentTypesForBulkAssignment.Add(agentTypeId);
+        }
+        else if (!isSelected && selectedAgentTypesForBulkAssignment.Contains(agentTypeId))
+        {
+            selectedAgentTypesForBulkAssignment.Remove(agentTypeId);
+        }
+        
+        StateHasChanged();
+    }
+    
+    private async Task ConfirmBulkAgentAssignment()
+    {
+        if (isBulkAssigning || !selectedUsersForBulkAssignment.Any() || !selectedAgentTypesForBulkAssignment.Any())
+            return;
+        
+        try
+        {
+            isBulkAssigning = true;
+            ClearMessages();
+            StateHasChanged();
+            
+            var currentUserId = GetCurrentUserId();
+            var successCount = 0;
+            var failureCount = 0;
+            var errors = new List<string>();
+            
+            Logger.LogInformation("Starting bulk agent assignment for {UserCount} users with {AgentTypeCount} agent types", 
+                selectedUsersForBulkAssignment.Count, selectedAgentTypesForBulkAssignment.Count);
+            
+            foreach (var user in selectedUsersForBulkAssignment)
+            {
+                try
+                {
+                    if (user.OnboardedUser == null)
+                    {
+                        errors.Add($"{user.DisplayName}: User not found in database");
+                        failureCount++;
+                        continue;
+                    }
+                    
+                    var finalAgentTypes = new List<Guid>();
+                    
+                    if (bulkAssignmentMode == BulkAssignmentMode.Add)
+                    {
+                        // Get current agent types and add new ones
+                        var currentAgentTypes = await OnboardedUserService.GetUserAgentTypesAsync(user.OnboardedUser.OnboardedUserId, currentUserOrgId);
+                        finalAgentTypes.AddRange(currentAgentTypes.Select(at => at.Id));
+                        
+                        // Add new agent types (avoid duplicates)
+                        foreach (var newAgentType in selectedAgentTypesForBulkAssignment)
+                        {
+                            if (!finalAgentTypes.Contains(newAgentType))
+                            {
+                                finalAgentTypes.Add(newAgentType);
+                            }
+                        }
+                    }
+                    else // Replace mode
+                    {
+                        finalAgentTypes = selectedAgentTypesForBulkAssignment.ToList();
+                    }
+                    
+                    var success = await OnboardedUserService.UpdateUserAgentTypesWithSyncAsync(
+                        user.OnboardedUser.OnboardedUserId,
+                        finalAgentTypes,
+                        currentUserOrgId,
+                        currentUserId);
+                    
+                    if (success)
+                    {
+                        successCount++;
+                        Logger.LogInformation("Successfully updated agent types for {UserEmail}", user.Email);
+                    }
+                    else
+                    {
+                        failureCount++;
+                        errors.Add($"{user.DisplayName}: Update failed");
+                        Logger.LogError("Failed to update agent types for {UserEmail}", user.Email);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    failureCount++;
+                    errors.Add($"{user.DisplayName}: {ex.Message}");
+                    Logger.LogError(ex, "Exception updating agent types for {UserEmail}", user.Email);
+                }
+            }
+            
+            // Generate results message
+            var resultMessage = $"Bulk assignment completed: {successCount} successful, {failureCount} failed.";
+            
+            if (successCount > 0)
+            {
+                successMessage = resultMessage;
+                if (errors.Any())
+                {
+                    successMessage += $" Errors: {string.Join("; ", errors.Take(3))}";
+                    if (errors.Count > 3)
+                    {
+                        successMessage += $" and {errors.Count - 3} more.";
+                    }
+                }
+                
+                // Refresh the user list to show updated agent types
+                await LoadUsers();
+                FilterUsers();
+            }
+            else
+            {
+                errorMessage = $"Bulk assignment failed: {string.Join("; ", errors.Take(5))}";
+            }
+            
+            CloseBulkAgentAssignmentModal();
+            
+            Logger.LogInformation("Bulk agent assignment completed: {SuccessCount} successful, {FailureCount} failed", 
+                successCount, failureCount);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Critical error during bulk agent assignment");
+            errorMessage = "An unexpected error occurred during bulk assignment. Please try again.";
+        }
+        finally
+        {
+            isBulkAssigning = false;
+            StateHasChanged();
+        }
+    }
+    
+    private Guid GetCurrentUserId()
+    {
+        try
+        {
+            var user = HttpContextAccessor.HttpContext?.User;
+            var objectId = user?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+            
+            if (!string.IsNullOrEmpty(objectId) && Guid.TryParse(objectId, out var userId))
+            {
+                return userId;
+            }
+            
+            Logger.LogWarning("Could not get current user ID from claims");
+            return Guid.NewGuid(); // Fallback
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error getting current user ID");
+            return Guid.NewGuid(); // Fallback
+        }
+    }
+    
+    private async Task ShowUserAgentManagementModal(GuestUser user)
+    {
+        selectedUserForAgentManagement = user;
+        selectedUserAgentTypes.Clear();
+        
+        if (user.OnboardedUser != null)
+        {
+            try
+            {
+                // Load current agent type assignments for this user
+                var currentAgentTypes = await OnboardedUserService.GetUserAgentTypesAsync(user.OnboardedUser.OnboardedUserId, currentUserOrgId);
+                selectedUserAgentTypes = currentAgentTypes.Select(at => at.Id).ToList();
+                
+                Logger.LogInformation("Loaded {Count} current agent types for user {UserEmail}", 
+                    currentAgentTypes.Count, user.Email);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error loading current agent types for user {UserEmail}", user.Email);
+                selectedUserAgentTypes.Clear();
+            }
+        }
+        
+        showUserAgentManagementModal = true;
+        StateHasChanged();
+    }
+    
+    private void CloseUserAgentManagementModal()
+    {
+        showUserAgentManagementModal = false;
+        selectedUserForAgentManagement = null;
+        selectedUserAgentTypes.Clear();
+        StateHasChanged();
+    }
+    
+    private void ToggleUserAgentTypeSelection(Guid agentTypeId, bool isSelected)
+    {
+        if (isSelected && !selectedUserAgentTypes.Contains(agentTypeId))
+        {
+            selectedUserAgentTypes.Add(agentTypeId);
+        }
+        else if (!isSelected && selectedUserAgentTypes.Contains(agentTypeId))
+        {
+            selectedUserAgentTypes.Remove(agentTypeId);
+        }
+        
+        StateHasChanged();
+    }
+    
+    private async Task SaveUserAgentAssignment()
+    {
+        if (selectedUserForAgentManagement == null || selectedUserForAgentManagement.OnboardedUser == null || isUpdatingUserAgent)
+            return;
+        
+        try
+        {
+            isUpdatingUserAgent = true;
+            ClearMessages();
+            StateHasChanged();
+            
+            var currentUserId = GetCurrentUserId();
+            
+            var result = await OnboardedUserService.UpdateUserAgentTypesWithFallbackAsync(
+                selectedUserForAgentManagement.OnboardedUser.OnboardedUserId,
+                selectedUserAgentTypes.ToList(),
+                currentUserOrgId,
+                currentUserId);
+            
+            if (result.Success)
+            {
+                if (result.AzureADSynced)
+                {
+                    successMessage = $"Agent types updated successfully for {selectedUserForAgentManagement?.DisplayName}. Azure AD security group memberships have been synchronized.";
+                }
+                else if (!string.IsNullOrEmpty(result.WarningMessage))
+                {
+                    successMessage = $"Agent types updated successfully for {selectedUserForAgentManagement?.DisplayName}. However, there was a warning: {result.WarningMessage}";
+                }
+                else
+                {
+                    successMessage = $"Agent types updated successfully for {selectedUserForAgentManagement?.DisplayName}.";
+                }
+                
+                // Refresh the user list to show updated agent types
+                await LoadUsers();
+                FilterUsers();
+                
+                CloseUserAgentManagementModal();
+                
+                Logger.LogInformation("Successfully updated agent types for user {UserEmail} - Azure AD synced: {AzureSynced}", selectedUserForAgentManagement?.Email, result.AzureADSynced);
+            }
+            else
+            {
+                errorMessage = !string.IsNullOrEmpty(result.ErrorMessage) 
+                    ? $"Failed to update agent types for {selectedUserForAgentManagement?.DisplayName}: {result.ErrorMessage}"
+                    : $"Failed to update agent types for {selectedUserForAgentManagement?.DisplayName}. Please try again.";
+                Logger.LogError("Failed to update agent types for user {UserEmail} - Error: {ErrorMessage}", selectedUserForAgentManagement?.Email, result.ErrorMessage);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating agent types for user {UserEmail}", selectedUserForAgentManagement?.Email);
+            errorMessage = $"An unexpected error occurred while updating agent types for {selectedUserForAgentManagement?.DisplayName}. Please try again.";
+        }
+        finally
+        {
+            isUpdatingUserAgent = false;
+            StateHasChanged();
+        }
+    }
+    
+    // NEW: Assign to ALL Users methods (separate from existing bulk functionality)
+    private void ShowAssignToAllUsersModal()
+    {
+        selectedAgentTypesForAllUsers.Clear();
+        assignToAllUsersMode = BulkAssignmentMode.Replace;
+        showAssignToAllUsersModal = true;
+        StateHasChanged();
+    }
+    
+    private void CloseAssignToAllUsersModal()
+    {
+        showAssignToAllUsersModal = false;
+        selectedAgentTypesForAllUsers.Clear();
+        StateHasChanged();
+    }
+    
+    private void ToggleAgentTypeForAllUsers(Guid agentTypeId, bool isSelected)
+    {
+        if (isSelected && !selectedAgentTypesForAllUsers.Contains(agentTypeId))
+        {
+            selectedAgentTypesForAllUsers.Add(agentTypeId);
+        }
+        else if (!isSelected && selectedAgentTypesForAllUsers.Contains(agentTypeId))
+        {
+            selectedAgentTypesForAllUsers.Remove(agentTypeId);
+        }
+        
+        StateHasChanged();
+    }
+    
+    private async Task ConfirmAssignToAllUsers()
+    {
+        if (isAssigningToAllUsers || !selectedAgentTypesForAllUsers.Any())
+            return;
+        
+        try
+        {
+            isAssigningToAllUsers = true;
+            ClearMessages();
+            StateHasChanged();
+            
+            var currentUserId = GetCurrentUserId();
+            var successCount = 0;
+            var failureCount = 0;
+            var errors = new List<string>();
+            
+            // Get ALL active users in the organization (no manual selection required)
+            var allActiveUsers = filteredUsers.Where(u => u.OnboardedUser != null && 
+                                                         GetUserActualStatus(u) == "Active").ToList();
+            
+            Logger.LogInformation("Starting assignment to ALL users: {UserCount} users with {AgentTypeCount} agent types", 
+                allActiveUsers.Count, selectedAgentTypesForAllUsers.Count);
+            
+            foreach (var user in allActiveUsers)
+            {
+                try
+                {
+                    if (user.OnboardedUser == null)
+                    {
+                        errors.Add($"{user.DisplayName}: User not found in database");
+                        failureCount++;
+                        continue;
+                    }
+                    
+                    var finalAgentTypes = new List<Guid>();
+                    
+                    if (assignToAllUsersMode == BulkAssignmentMode.Add)
+                    {
+                        // Get current agent types and add new ones
+                        var currentAgentTypes = await OnboardedUserService.GetUserAgentTypesAsync(user.OnboardedUser.OnboardedUserId, currentUserOrgId);
+                        finalAgentTypes.AddRange(currentAgentTypes.Select(at => at.Id));
+                        
+                        // Add new agent types (avoid duplicates)
+                        foreach (var newAgentType in selectedAgentTypesForAllUsers)
+                        {
+                            if (!finalAgentTypes.Contains(newAgentType))
+                            {
+                                finalAgentTypes.Add(newAgentType);
+                            }
+                        }
+                    }
+                    else // Replace mode
+                    {
+                        finalAgentTypes = selectedAgentTypesForAllUsers.ToList();
+                    }
+                    
+                    var success = await OnboardedUserService.UpdateUserAgentTypesWithSyncAsync(
+                        user.OnboardedUser.OnboardedUserId,
+                        finalAgentTypes,
+                        currentUserOrgId,
+                        currentUserId);
+                    
+                    if (success)
+                    {
+                        successCount++;
+                        Logger.LogInformation("Successfully updated agent types for ALL users operation: {UserEmail}", user.Email);
+                    }
+                    else
+                    {
+                        failureCount++;
+                        errors.Add($"{user.DisplayName}: Update failed");
+                        Logger.LogError("Failed to update agent types for ALL users operation: {UserEmail}", user.Email);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    failureCount++;
+                    errors.Add($"{user.DisplayName}: {ex.Message}");
+                    Logger.LogError(ex, "Exception updating agent types for ALL users operation: {UserEmail}", user.Email);
+                }
+            }
+            
+            // Generate results message
+            var resultMessage = $"Assignment to ALL users completed: {successCount} successful, {failureCount} failed.";
+            
+            if (successCount > 0)
+            {
+                successMessage = resultMessage;
+                if (errors.Any())
+                {
+                    successMessage += $" Errors: {string.Join("; ", errors.Take(3))}";
+                    if (errors.Count > 3)
+                    {
+                        successMessage += $" and {errors.Count - 3} more.";
+                    }
+                }
+                
+                // Refresh the user list to show updated agent types
+                await LoadUsers();
+                FilterUsers();
+            }
+            else
+            {
+                errorMessage = $"Assignment to ALL users failed: {string.Join("; ", errors.Take(5))}";
+            }
+            
+            CloseAssignToAllUsersModal();
+            
+            Logger.LogInformation("Assignment to ALL users completed: {SuccessCount} successful, {FailureCount} failed", 
+                successCount, failureCount);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Critical error during assignment to ALL users");
+            errorMessage = "An unexpected error occurred during assignment to ALL users. Please try again.";
+        }
+        finally
+        {
+            isAssigningToAllUsers = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Syncs existing user agent types to organization allocation.
+    /// This helps fix cases where users were assigned agent types but those types 
+    /// weren't allocated to the organization, making them invisible in the UI.
+    /// </summary>
+    private async Task SyncUserAgentTypesToOrganization()
+    {
+        try
+        {
+            Logger.LogInformation("🔧 SYNC: Starting user agent types to organization sync for org {OrgId}", currentUserOrgId);
+            
+            // Get all users in the organization with agent types
+            var usersWithAgentTypes = new List<Guid>();
+            var allUserAgentTypeIds = new HashSet<Guid>();
+            
+            foreach (var user in allUsers.Where(u => u.OnboardedUser != null))
+            {
+                try
+                {
+                    var userAgentTypes = await OnboardedUserService.GetUserAgentTypesAsync(
+                        user.OnboardedUser!.OnboardedUserId, 
+                        currentUserOrgId
+                    );
+                    
+                    if (userAgentTypes.Any())
+                    {
+                        usersWithAgentTypes.Add(user.OnboardedUser.OnboardedUserId);
+                        foreach (var agentType in userAgentTypes)
+                        {
+                            allUserAgentTypeIds.Add(agentType.Id);
+                        }
+                        
+                        Logger.LogInformation("🔍 User {Email} has {Count} agent types: {AgentTypes}", 
+                            user.Email, userAgentTypes.Count, string.Join(", ", userAgentTypes.Select(at => at.Name)));
+                    }
+                }
+                catch (Exception userEx)
+                {
+                    Logger.LogWarning(userEx, "⚠️ Could not load agent types for user {Email}", user.Email);
+                }
+            }
+            
+            if (!allUserAgentTypeIds.Any())
+            {
+                Logger.LogInformation("✅ SYNC: No user agent types found - nothing to sync");
+                return;
+            }
+            
+            // Get current organization agent types
+            var currentOrgAgentTypeIds = await OrganizationService.GetOrganizationAgentTypesAsync(currentUserOrgId.ToString());
+            var currentOrgAgentTypeSet = currentOrgAgentTypeIds.ToHashSet();
+            
+            // Find agent types that users have but aren't allocated to the organization
+            var missingAgentTypeIds = allUserAgentTypeIds.Except(currentOrgAgentTypeSet).ToList();
+            
+            if (!missingAgentTypeIds.Any())
+            {
+                Logger.LogInformation("✅ SYNC: All user agent types are already allocated to organization - no sync needed");
+                return;
+            }
+            
+            Logger.LogInformation("🔧 SYNC: Found {Count} agent types that need to be allocated to organization: {AgentTypeIds}", 
+                missingAgentTypeIds.Count, string.Join(", ", missingAgentTypeIds));
+            
+            // Merge existing and missing agent types
+            var finalAgentTypeIds = currentOrgAgentTypeIds.Union(missingAgentTypeIds).ToList();
+            
+            // Update organization with the merged list
+            var updateSuccess = await OrganizationService.UpdateOrganizationAgentTypesAsync(
+                currentUserOrgId.ToString(), 
+                finalAgentTypeIds
+            );
+            
+            if (updateSuccess)
+            {
+                Logger.LogInformation("✅ SYNC: Successfully allocated {Count} additional agent types to organization {OrgId}", 
+                    missingAgentTypeIds.Count, currentUserOrgId);
+                    
+                // Reload organization agent types to reflect the changes
+                await LoadOrganizationAgentTypes();
+                
+                successMessage = $"✅ Synced {missingAgentTypeIds.Count} agent types to organization. Users should now see their assigned agent types.";
+            }
+            else
+            {
+                Logger.LogWarning("⚠️ SYNC: Failed to update organization agent types");
+                // Don't show error message to user since this is a background operation
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "❌ SYNC: Error during user agent types to organization sync");
+            // Don't show error message to user since this is a background operation
+        }
     }
 }

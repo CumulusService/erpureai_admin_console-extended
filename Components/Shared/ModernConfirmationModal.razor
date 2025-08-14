@@ -1,0 +1,137 @@
+@using Microsoft.JSInterop
+@inject IJSRuntime JSRuntime
+
+@if (IsVisible)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onclick:stopPropagation="true">
+        <div class="modal-dialog modal-dialog-centered @(Size == ModalSize.Small ? "modal-sm" : Size == ModalSize.Large ? "modal-lg" : "")">
+            <div class="modal-content">
+                <div class="modal-header @GetHeaderClass()">
+                    <h5 class="modal-title d-flex align-items-center">
+                        @if (!string.IsNullOrEmpty(Icon))
+                        {
+                            <i class="@Icon @GetIconColorClass() me-2"></i>
+                        }
+                        @Title
+                    </h5>
+                    @if (ShowCloseButton)
+                    {
+                        <button type="button" class="btn-close" @onclick="() => HandleAction(false)" aria-label="Close"></button>
+                    }
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(Message))
+                    {
+                        <p class="mb-0">@((MarkupString)Message)</p>
+                    }
+                    @if (ChildContent != null)
+                    {
+                        @ChildContent
+                    }
+                </div>
+                <div class="modal-footer">
+                    @if (ShowCancelButton)
+                    {
+                        <button type="button" class="btn @GetSecondaryButtonClass()" @onclick="() => HandleAction(false)">
+                            @if (!string.IsNullOrEmpty(CancelIcon))
+                            {
+                                <i class="@CancelIcon me-1"></i>
+                            }
+                            @CancelText
+                        </button>
+                    }
+                    <button type="button" class="btn @GetPrimaryButtonClass()" @onclick="() => HandleAction(true)">
+                        @if (!string.IsNullOrEmpty(ConfirmIcon))
+                        {
+                            <i class="@ConfirmIcon me-1"></i>
+                        }
+                        @ConfirmText
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; } = false;
+    [Parameter] public string Title { get; set; } = "Confirm";
+    [Parameter] public string Message { get; set; } = "";
+    [Parameter] public string ConfirmText { get; set; } = "OK";
+    [Parameter] public string CancelText { get; set; } = "Cancel";
+    [Parameter] public string Icon { get; set; } = "";
+    [Parameter] public string ConfirmIcon { get; set; } = "";
+    [Parameter] public string CancelIcon { get; set; } = "";
+    [Parameter] public ModalType Type { get; set; } = ModalType.Confirmation;
+    [Parameter] public ModalSize Size { get; set; } = ModalSize.Medium;
+    [Parameter] public bool ShowCloseButton { get; set; } = true;
+    [Parameter] public bool ShowCancelButton { get; set; } = true;
+    [Parameter] public EventCallback<bool> OnResult { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    public enum ModalType
+    {
+        Confirmation,
+        Warning,
+        Danger,
+        Info,
+        Success
+    }
+
+    public enum ModalSize
+    {
+        Small,
+        Medium,
+        Large
+    }
+
+    private async Task HandleAction(bool confirmed)
+    {
+        IsVisible = false;
+        await OnResult.InvokeAsync(confirmed);
+        StateHasChanged();
+    }
+
+    private string GetHeaderClass() => Type switch
+    {
+        ModalType.Danger => "border-bottom-danger",
+        ModalType.Warning => "border-bottom-warning",
+        ModalType.Success => "border-bottom-success",
+        ModalType.Info => "border-bottom-info",
+        _ => ""
+    };
+
+    private string GetIconColorClass() => Type switch
+    {
+        ModalType.Danger => "text-danger",
+        ModalType.Warning => "text-warning",
+        ModalType.Success => "text-success",
+        ModalType.Info => "text-info",
+        _ => "text-primary"
+    };
+
+    private string GetPrimaryButtonClass() => Type switch
+    {
+        ModalType.Danger => "btn-danger",
+        ModalType.Warning => "btn-warning",
+        ModalType.Success => "btn-success",
+        ModalType.Info => "btn-info",
+        _ => "btn-primary"
+    };
+
+    private string GetSecondaryButtonClass() => "btn-secondary";
+
+    public async Task ShowAsync()
+    {
+        IsVisible = true;
+        StateHasChanged();
+        await Task.CompletedTask;
+    }
+
+    public async Task HideAsync()
+    {
+        IsVisible = false;
+        StateHasChanged();
+        await Task.CompletedTask;
+    }
+}

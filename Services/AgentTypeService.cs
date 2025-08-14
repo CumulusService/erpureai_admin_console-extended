@@ -13,6 +13,7 @@ public class AgentTypeService : IAgentTypeService
     private readonly AdminConsoleDbContext _context;
     private readonly ILogger<AgentTypeService> _logger;
     private readonly IGraphService _graphService;
+    private readonly IOrganizationService _organizationService;
 
     private static readonly SemaphoreSlim _tableInitSemaphore = new(1, 1);
     private static bool _tablesInitialized = false;
@@ -20,11 +21,13 @@ public class AgentTypeService : IAgentTypeService
     public AgentTypeService(
         AdminConsoleDbContext context,
         ILogger<AgentTypeService> logger,
-        IGraphService graphService)
+        IGraphService graphService,
+        IOrganizationService organizationService)
     {
         _context = context;
         _logger = logger;
         _graphService = graphService;
+        _organizationService = organizationService;
     }
 
     private async Task EnsureTablesExistAsync()
@@ -254,6 +257,16 @@ public class AgentTypeService : IAgentTypeService
                 return false;
             }
 
+            // 🎯 DETECT TEAMS APP ID CHANGES before updating
+            var oldTeamsAppId = existingAgentType.TeamsAppId;
+            var newTeamsAppId = agentType.TeamsAppId;
+            var teamsAppIdChanged = !string.Equals(oldTeamsAppId, newTeamsAppId, StringComparison.OrdinalIgnoreCase);
+
+            _logger.LogInformation("🔄 Agent Type Update: {Name} (ID: {Id}) - Teams App ID Changed: {Changed} " +
+                                 "(Old: '{OldAppId}', New: '{NewAppId}')", 
+                agentType.Name, agentType.Id, teamsAppIdChanged, 
+                oldTeamsAppId ?? "null", newTeamsAppId ?? "null");
+
             // Update properties
             existingAgentType.Name = agentType.Name;
             existingAgentType.DisplayName = agentType.DisplayName;
@@ -267,13 +280,120 @@ public class AgentTypeService : IAgentTypeService
 
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Updated agent type {Name} with ID {Id}", agentType.Name, agentType.Id);
+            _logger.LogInformation("✅ Updated agent type {Name} with ID {Id}", agentType.Name, agentType.Id);
+
+            // 🚀 TRIGGER TEAMS APP INSTALL/UNINSTALL if TeamsAppId changed
+            if (teamsAppIdChanged)
+            {
+                _logger.LogInformation("🎯 Teams App ID changed for agent type {Name} - processing affected organizations", 
+                    agentType.Name);
+                
+                await ProcessTeamsAppUpdateForOrganizationsAsync(agentType.Id, oldTeamsAppId, newTeamsAppId);
+            }
+
             return true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating agent type {Id}", agentType.Id);
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Processes Teams app installation/uninstallation for organizations that have access to the specified agent type
+    /// </summary>
+    /// <param name="agentTypeId">The agent type ID that was updated</param>
+    /// <param name="oldTeamsAppId">The previous Teams App ID (null if none)</param>
+    /// <param name="newTeamsAppId">The new Teams App ID (null if removed)</param>
+    private async Task ProcessTeamsAppUpdateForOrganizationsAsync(Guid agentTypeId, string? oldTeamsAppId, string? newTeamsAppId)
+    {
+        try
+        {
+            _logger.LogInformation("🔍 Finding organizations that have access to agent type {AgentTypeId}", agentTypeId);
+
+            // Find all organizations that have this agent type in their OrganizationAgentTypeIds
+            var allOrganizations = await _context.Organizations
+                .AsNoTracking() // Force fresh data from database, bypass EF caching
+                .Where(o => o.StateCode == StateCode.Active)
+                .ToListAsync();
+
+            var affectedOrganizations = allOrganizations
+                .Where(org => org.GetOrganizationAgentTypeIds().Contains(agentTypeId))
+                .ToList();
+
+            _logger.LogInformation("📊 Found {Count} organizations with access to agent type {AgentTypeId}: {OrgNames}", 
+                affectedOrganizations.Count, agentTypeId, 
+                string.Join(", ", affectedOrganizations.Select(o => o.Name)));
+
+            foreach (var organization in affectedOrganizations)
+            {
+                try
+                {
+                    // Skip organizations without Teams groups
+                    if (string.IsNullOrEmpty(organization.M365GroupId))
+                    {
+                        _logger.LogWarning("⚠️ Organization {OrgName} (ID: {OrgId}) has no M365GroupId - skipping Teams app operations", 
+                            organization.Name, organization.OrganizationId);
+                        continue;
+                    }
+
+                    _logger.LogInformation("🎯 Processing Teams app update for organization {OrgName} (M365GroupId: {GroupId})", 
+                        organization.Name, organization.M365GroupId);
+
+                    // Step 1: Uninstall old Teams app if it exists
+                    if (!string.IsNullOrEmpty(oldTeamsAppId))
+                    {
+                        _logger.LogInformation("🗑️ Uninstalling old Teams app {OldAppId} from organization {OrgName}", 
+                            oldTeamsAppId, organization.Name);
+                        
+                        var uninstallSuccess = await _graphService.UninstallTeamsAppAsync(organization.M365GroupId, oldTeamsAppId);
+                        
+                        if (uninstallSuccess)
+                        {
+                            _logger.LogInformation("✅ Successfully uninstalled old Teams app {OldAppId} from organization {OrgName}", 
+                                oldTeamsAppId, organization.Name);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("⚠️ Failed to uninstall old Teams app {OldAppId} from organization {OrgName} - continuing with new installation", 
+                                oldTeamsAppId, organization.Name);
+                        }
+                    }
+
+                    // Step 2: Install new Teams app if it exists
+                    if (!string.IsNullOrEmpty(newTeamsAppId))
+                    {
+                        _logger.LogInformation("📱 Installing new Teams app {NewAppId} to organization {OrgName}", 
+                            newTeamsAppId, organization.Name);
+                        
+                        var installSuccess = await _graphService.InstallTeamsAppAsync(organization.M365GroupId, newTeamsAppId);
+                        
+                        if (installSuccess)
+                        {
+                            _logger.LogInformation("✅ Successfully installed new Teams app {NewAppId} to organization {OrgName}", 
+                                newTeamsAppId, organization.Name);
+                        }
+                        else
+                        {
+                            _logger.LogError("❌ Failed to install new Teams app {NewAppId} to organization {OrgName}", 
+                                newTeamsAppId, organization.Name);
+                        }
+                    }
+                }
+                catch (Exception orgEx)
+                {
+                    _logger.LogError(orgEx, "❌ Error processing Teams app update for organization {OrgName} (ID: {OrgId})", 
+                        organization.Name, organization.OrganizationId);
+                }
+            }
+
+            _logger.LogInformation("🏁 Completed Teams app update processing for agent type {AgentTypeId} across {Count} organizations", 
+                agentTypeId, affectedOrganizations.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "💥 Critical error during Teams app update processing for agent type {AgentTypeId}", agentTypeId);
         }
     }
 

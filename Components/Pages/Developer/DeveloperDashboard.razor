@@ -2,8 +2,10 @@
 @page "/developer/dashboard"
 @using AdminConsole.Models
 @using AdminConsole.Services
+@using AdminConsole.Components.Shared
 @inject IAgentTypeService AgentTypeService
 @inject ILogger<DeveloperDashboard> Logger
+@inject NavigationManager Navigation
 @attribute [Authorize(Policy = "DevOnly")]
 @rendermode InteractiveServer
 
@@ -13,8 +15,8 @@
     <div class="row">
         <div class="col-12">
             <div class="mb-4">
-                <h2 class="mb-1">Developer Dashboard</h2>
-                <p class="text-muted mb-0">System configuration and management tools</p>
+                <h2 class="mb-1 text-white">Developer Dashboard</h2>
+                <p class="text-light mb-0">System configuration and management tools</p>
             </div>
 
             <div class="row">
@@ -44,10 +46,15 @@
                                 </div>
                             </div>
                             <div class="mt-3">
-                                <a href="/developer/agent-types" class="btn btn-primary btn-sm w-100">
-                                    <i class="fas fa-cog me-1"></i>
-                                    Manage Agent Types
-                                </a>
+                                <ActionButton Text="Manage Agent Types"
+                                            IconClass="fas fa-cog"
+                                            Type="ActionType.Primary"
+                                            Size="ButtonSize.Small"
+                                            OnClick="@(async () => { Navigation.NavigateTo("/developer/agent-types"); await Task.CompletedTask; })"
+                                            FullDescription="Configure agent types and their global security group assignments"
+                                            ConsequenceText="Navigate to agent types management"
+                                            ShowConsequence="false"
+                                            AdditionalClasses="w-100" />
                             </div>
                         </div>
                     </div>
@@ -79,10 +86,15 @@
                                 </div>
                             </div>
                             <div class="mt-3">
-                                <a href="/developer/agent-types" class="btn btn-info btn-sm w-100">
-                                    <i class="fas fa-link me-1"></i>
-                                    Configure Groups
-                                </a>
+                                <ActionButton Text="Configure Groups"
+                                            IconClass="fas fa-link"
+                                            Type="ActionType.Info"
+                                            Size="ButtonSize.Small"
+                                            OnClick="@(async () => { Navigation.NavigateTo("/developer/agent-types"); await Task.CompletedTask; })"
+                                            FullDescription="Link agent types to Azure AD security groups for access control"
+                                            ConsequenceText="Navigate to security group configuration"
+                                            ShowConsequence="false"
+                                            AdditionalClasses="w-100" />
                             </div>
                         </div>
                     </div>

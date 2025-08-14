@@ -1,0 +1,341 @@
+@using AdminConsole.Models
+@using AdminConsole.Services
+@inject IOnboardedUserService OnboardedUserService
+@inject IAgentTypeService AgentTypeService
+@inject IAgentGroupAssignmentService AgentGroupAssignmentService
+@inject IModalService ModalService
+
+<div class="modal fade show" style="display: block;" tabindex="-1" role="dialog" aria-labelledby="agentAssignmentModalLabel" aria-hidden="false">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="agentAssignmentModalLabel">
+                    <i class="fas fa-user-cog me-2"></i>
+                    Manage Agent Types - @User.FullName
+                </h5>
+                <button type="button" class="btn-close" @onclick="Close" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                @if (IsLoading)
+                {
+                    <div class="d-flex justify-content-center p-4">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading agent types...</span>
+                        </div>
+                    </div>
+                }
+                else if (!string.IsNullOrEmpty(ErrorMessage))
+                {
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        @ErrorMessage
+                    </div>
+                }
+                else
+                {
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6 class="text-muted mb-3">
+                                <i class="fas fa-info-circle me-2"></i>
+                                User Information
+                            </h6>
+                            <dl class="row">
+                                <dt class="col-sm-4">Email:</dt>
+                                <dd class="col-sm-8">@User.Email</dd>
+                                <dt class="col-sm-4">Organization:</dt>
+                                <dd class="col-sm-8">@User.Organization?.Name</dd>
+                                <dt class="col-sm-4">Status:</dt>
+                                <dd class="col-sm-8">
+                                    <span class="badge bg-@(User.StateCode == StateCode.Active ? "success" : "secondary")">
+                                        @(User.StateCode == StateCode.Active ? "Active" : "Inactive")
+                                    </span>
+                                </dd>
+                            </dl>
+                        </div>
+                        <div class="col-md-6">
+                            <h6 class="text-muted mb-3">
+                                <i class="fas fa-users me-2"></i>
+                                Current Assignments
+                            </h6>
+                            <div class="current-assignments">
+                                @if (CurrentAssignments?.Any() == true)
+                                {
+                                    @foreach (var agentType in CurrentAssignments)
+                                    {
+                                        <span class="badge bg-primary me-1 mb-1">@agentType.Name</span>
+                                    }
+                                }
+                                else
+                                {
+                                    <span class="text-muted">No agent types assigned</span>
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr class="my-4">
+
+                    <h6 class="text-muted mb-3">
+                        <i class="fas fa-edit me-2"></i>
+                        Select Agent Types
+                        <small class="text-danger">*At least one agent type must be selected</small>
+                    </h6>
+
+                    @if (AvailableAgentTypes?.Any() == true)
+                    {
+                        <div class="row">
+                            @foreach (var agentType in AvailableAgentTypes)
+                            {
+                                <div class="col-12 mb-2">
+                                    <div class="form-check p-2 border rounded @(SelectedAgentTypeIds.Contains(agentType.Id) ? "border-primary bg-primary bg-opacity-10" : "border-secondary")">
+                                        <input class="form-check-input" 
+                                               type="checkbox" 
+                                               id="agent_@agentType.Id" 
+                                               checked="@SelectedAgentTypeIds.Contains(agentType.Id)"
+                                               @onchange="@((ChangeEventArgs e) => ToggleAgentType(agentType.Id, (bool)e.Value!))" />
+                                        <label class="form-check-label w-100" for="agent_@agentType.Id">
+                                            <div class="d-flex align-items-center">
+                                                <div class="flex-grow-1">
+                                                    <strong class="text-dark">@agentType.Name</strong>
+                                                    @if (!string.IsNullOrEmpty(agentType.Description))
+                                                    {
+                                                        <br><small class="text-secondary">@GetShortDescription(agentType.Description)</small>
+                                                    }
+                                                </div>
+                                                @if (!string.IsNullOrEmpty(agentType.GlobalSecurityGroupId))
+                                                {
+                                                    <small class="badge bg-success ms-2">
+                                                        <i class="fas fa-shield-alt"></i>
+                                                    </small>
+                                                }
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            No agent types are currently available for assignment.
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(ValidationMessage))
+                    {
+                        <div class="alert alert-warning mt-3">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            @ValidationMessage
+                        </div>
+                    }
+                }
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" @onclick="Close" disabled="@IsSaving">
+                    Cancel
+                </button>
+                <button type="button" class="btn btn-primary" @onclick="SaveChanges" disabled="@(IsSaving || !HasChanges || !IsValidSelection)">
+                    @if (IsSaving)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                        <span>Saving...</span>
+                    }
+                    else
+                    {
+                        <span>Save</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public OnboardedUser User { get; set; } = null!;
+    [Parameter] public EventCallback OnSaved { get; set; }
+    [Parameter] public EventCallback OnClosed { get; set; }
+
+    private bool IsLoading = true;
+    private bool IsSaving = false;
+    private string ErrorMessage = string.Empty;
+    private string ValidationMessage = string.Empty;
+
+    private List<AgentTypeEntity> AvailableAgentTypes = new();
+    private List<AgentTypeEntity> CurrentAssignments = new();
+    private HashSet<Guid> SelectedAgentTypeIds = new();
+    private HashSet<Guid> OriginalAgentTypeIds = new();
+
+    private bool HasChanges => !SelectedAgentTypeIds.SetEquals(OriginalAgentTypeIds);
+    private bool IsValidSelection => SelectedAgentTypeIds.Count > 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        IsLoading = true;
+        ErrorMessage = string.Empty;
+
+        try
+        {
+            // Load available agent types
+            AvailableAgentTypes = await AgentTypeService.GetActiveAgentTypesAsync();
+
+            // Load current user assignments
+            if (User.OrganizationId.HasValue)
+            {
+                CurrentAssignments = await OnboardedUserService.GetUserAgentTypesAsync(User.OnboardedUserId, User.OrganizationId.Value);
+                
+                // Initialize selected agent types
+                SelectedAgentTypeIds = CurrentAssignments.Select(a => a.Id).ToHashSet();
+                OriginalAgentTypeIds = new HashSet<Guid>(SelectedAgentTypeIds);
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Failed to load agent type data: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private void ToggleAgentType(Guid agentTypeId, bool isSelected)
+    {
+        ValidationMessage = string.Empty;
+
+        if (isSelected)
+        {
+            SelectedAgentTypeIds.Add(agentTypeId);
+        }
+        else
+        {
+            SelectedAgentTypeIds.Remove(agentTypeId);
+        }
+
+        // Validate selection
+        if (SelectedAgentTypeIds.Count == 0)
+        {
+            ValidationMessage = "At least one agent type must be selected to maintain system access.";
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task SaveChanges()
+    {
+        if (!IsValidSelection || !User.OrganizationId.HasValue)
+            return;
+
+        IsSaving = true;
+        ErrorMessage = string.Empty;
+        ValidationMessage = string.Empty;
+
+        try
+        {
+            Console.WriteLine($"Starting agent type update for user {User.Email}");
+            
+            // Validate the assignment
+            var isValidAssignment = await OnboardedUserService.ValidateAgentTypeAssignmentAsync(SelectedAgentTypeIds.ToList());
+            if (!isValidAssignment)
+            {
+                ValidationMessage = "Invalid agent type selection. At least one agent type must be selected.";
+                return;
+            }
+
+            Console.WriteLine($"Validation passed, updating agent types: {string.Join(", ", SelectedAgentTypeIds)}");
+            
+            // Update the user's agent type assignments with Azure AD sync
+            var success = await OnboardedUserService.UpdateUserAgentTypesWithSyncAsync(
+                User.OnboardedUserId,
+                SelectedAgentTypeIds.ToList(),
+                User.OrganizationId.Value,
+                Guid.NewGuid() // TODO: Get current user ID from authentication context
+            );
+
+            Console.WriteLine($"Update operation completed with result: {success}");
+
+            if (success)
+            {
+                Console.WriteLine("Showing success message and closing modal");
+                
+                // Show success message using modal service
+                await ModalService.ShowSuccessAsync("Agent Type Assignment", 
+                    $"Agent types have been successfully updated for {User.FullName}. Azure AD security group memberships have been synchronized.");
+
+                // Notify parent component
+                if (OnSaved.HasDelegate)
+                {
+                    await OnSaved.InvokeAsync();
+                }
+
+                // Close the modal
+                await Close();
+            }
+            else
+            {
+                // More detailed error message for Azure AD sync failures
+                ErrorMessage = "Agent type assignment failed. The database may have been updated, but Azure AD security group synchronization failed. This means the user may not have the correct permissions. Please contact your system administrator or try again.";
+                Console.WriteLine("Agent assignment failed - showing error message");
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error saving changes: {ex.Message}";
+        }
+        finally
+        {
+            IsSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task Close()
+    {
+        if (OnClosed.HasDelegate)
+        {
+            await OnClosed.InvokeAsync();
+        }
+    }
+    
+    private string GetShortDescription(string description)
+    {
+        if (string.IsNullOrEmpty(description))
+            return string.Empty;
+            
+        const int maxLength = 60;
+        if (description.Length <= maxLength)
+            return description;
+            
+        return description.Substring(0, maxLength) + "...";
+    }
+}
+
+<style>
+    .form-check {
+        transition: all 0.2s ease-in-out;
+    }
+
+    .form-check:hover {
+        background-color: #f8f9fa !important;
+        border-color: #dee2e6 !important;
+    }
+
+    .form-check-input:checked ~ .form-check-label {
+        color: #0d6efd;
+    }
+
+    .current-assignments .badge {
+        font-size: 0.875em;
+    }
+
+    .modal-body {
+        max-height: 70vh;
+        overflow-y: auto;
+    }
+</style>

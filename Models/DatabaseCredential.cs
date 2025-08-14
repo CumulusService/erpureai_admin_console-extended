@@ -3,6 +3,27 @@ using System.ComponentModel.DataAnnotations;
 namespace AdminConsole.Models;
 
 /// <summary>
+/// Custom validation attribute to require CurrentSchema for HANA databases
+/// </summary>
+public class RequiredForHANAAttribute : ValidationAttribute
+{
+    protected override ValidationResult? IsValid(object? value, ValidationContext validationContext)
+    {
+        if (validationContext.ObjectInstance is DatabaseCredentialModel model)
+        {
+            if (model.DatabaseType == DatabaseType.HANA)
+            {
+                if (string.IsNullOrWhiteSpace(value?.ToString()))
+                {
+                    return new ValidationResult(ErrorMessage ?? "Current Schema is required for HANA databases");
+                }
+            }
+        }
+        return ValidationResult.Success;
+    }
+}
+
+/// <summary>
 /// Represents shared database credentials for SAP Business One access
 /// These are organization-level credentials that all users in the org share
 /// </summary>
@@ -78,6 +99,13 @@ public class DatabaseCredential
     public string? ConnectionStringSecretName { get; set; } = string.Empty;
     
     /// <summary>
+    /// Reference to the Key Vault secret containing consolidated credentials
+    /// SAP password stored as secret value, connection string stored as tag
+    /// Optional field for backward compatibility with existing credentials
+    /// </summary>
+    public string? ConsolidatedSecretName { get; set; } = string.Empty;
+    
+    /// <summary>
     /// Full connection string for this database (used with EF Core) - DEPRECATED: Use ConnectionStringSecretName instead
     /// </summary>
     [StringLength(1000)]
@@ -139,6 +167,36 @@ public class DatabaseCredential
     /// Whether to trust server certificate (MSSQL)
     /// </summary>
     public bool TrustServerCertificate { get; set; } = true;
+    
+    /// <summary>
+    /// SAP Service Layer hostname for this database credential (optional - falls back to organization setting)
+    /// </summary>
+    [StringLength(255)]
+    public string? SAPServiceLayerHostname { get; set; }
+    
+    /// <summary>
+    /// SAP API Gateway hostname for this database credential (optional - falls back to organization setting)
+    /// </summary>
+    [StringLength(255)]
+    public string? SAPAPIGatewayHostname { get; set; }
+    
+    /// <summary>
+    /// SAP Business One Web Client hostname for this database credential (optional - falls back to organization setting)
+    /// </summary>
+    [StringLength(255)]
+    public string? SAPBusinessOneWebClientHost { get; set; }
+    
+    /// <summary>
+    /// Document code for this database credential (optional - falls back to organization setting)
+    /// </summary>
+    [StringLength(50)]
+    public string? DocumentCode { get; set; }
+    
+    /// <summary>
+    /// SAP Service Layer database schema - derived from CurrentSchema (HANA) or DatabaseName (MSSQL)
+    /// </summary>
+    [StringLength(128)]
+    public string? SAPServiceLayerDBSchema { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -191,6 +249,7 @@ public class DatabaseCredentialModel
     public int? Port { get; set; }
     
     // Additional connection properties for HANA
+    [RequiredForHANA(ErrorMessage = "Current Schema is required for HANA databases")]
     [StringLength(128, ErrorMessage = "Current schema cannot exceed 128 characters")]
     public string? CurrentSchema { get; set; } = string.Empty;
     
@@ -200,6 +259,23 @@ public class DatabaseCredentialModel
     
     // Additional connection properties for MSSQL
     public bool TrustServerCertificate { get; set; } = true;
+    
+    // SAP Configuration (mandatory - database level)
+    [Required(ErrorMessage = "SAP Service Layer hostname is required")]
+    [StringLength(255, ErrorMessage = "SAP Service Layer hostname cannot exceed 255 characters")]
+    public string SAPServiceLayerHostname { get; set; } = string.Empty;
+    
+    [Required(ErrorMessage = "SAP API Gateway hostname is required")]
+    [StringLength(255, ErrorMessage = "SAP API Gateway hostname cannot exceed 255 characters")]
+    public string SAPAPIGatewayHostname { get; set; } = string.Empty;
+    
+    [Required(ErrorMessage = "SAP Business One Web Client host is required")]
+    [StringLength(255, ErrorMessage = "SAP Business One Web Client host cannot exceed 255 characters")]
+    public string SAPBusinessOneWebClientHost { get; set; } = string.Empty;
+    
+    [Required(ErrorMessage = "Document code is required")]
+    [StringLength(50, ErrorMessage = "Document code cannot exceed 50 characters")]
+    public string DocumentCode { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -215,7 +291,7 @@ public static class DatabaseCredentialExtensions
     {
         var dbTypeString = credential.DatabaseType.ToString().ToLowerInvariant();
         var friendlyName = credential.FriendlyName.Replace(" ", "-").Replace("_", "-").ToLowerInvariant();
-        return $"sap-password-{dbTypeString}-{friendlyName}-{credential.Id.ToString("N")[..8]}";
+        return $"sap-password-{dbTypeString}-{friendlyName}-{credential.OrganizationId.ToString("N")[..8]}";
     }
     
     /// <summary>
@@ -226,7 +302,19 @@ public static class DatabaseCredentialExtensions
     {
         var dbTypeString = credential.DatabaseType.ToString().ToLowerInvariant();
         var friendlyName = credential.FriendlyName.Replace(" ", "-").Replace("_", "-").ToLowerInvariant();
-        return $"connection-string-{dbTypeString}-{friendlyName}-{credential.Id.ToString("N")[..8]}";
+        return $"connection-string-{dbTypeString}-{friendlyName}-{credential.OrganizationId.ToString("N")[..8]}";
+    }
+    
+    /// <summary>
+    /// Generates the Key Vault secret name for storing consolidated database credentials
+    /// Stores SAP password as secret value and connection string as a tag
+    /// Uses organization ID to ensure proper tenant isolation and secret versioning
+    /// </summary>
+    public static string GenerateConsolidatedSecretName(this DatabaseCredential credential)
+    {
+        var dbTypeString = credential.DatabaseType.ToString().ToLowerInvariant();
+        var friendlyName = credential.FriendlyName.Replace(" ", "-").Replace("_", "-").ToLowerInvariant();
+        return $"database-credential-{dbTypeString}-{friendlyName}-{credential.OrganizationId.ToString("N")[..8]}";
     }
     
     /// <summary>
@@ -249,10 +337,55 @@ public static class DatabaseCredentialExtensions
                 $"Server={credential.ServerInstance}{(credential.Port.HasValue ? $",{credential.Port}" : "")};Database={credential.DatabaseName};User Id={credential.DatabaseUsername};Password={{password}};TrustServerCertificate={credential.TrustServerCertificate.ToString().ToLower()};",
             
             DatabaseType.HANA => 
-                $"Server={credential.ServerInstance}{(credential.Port.HasValue ? $":{credential.Port}" : "")};Database={credential.DatabaseName};UID={credential.DatabaseUsername};Password={{password}};{(!string.IsNullOrEmpty(credential.CurrentSchema) ? $"CurrentSchema={credential.CurrentSchema};" : "")}Encrypt={credential.Encrypt.ToString().ToLower()};SSLValidateCertificate={credential.SSLValidateCertificate.ToString().ToLower()};",
+                $"Server={credential.ServerInstance}{(credential.Port.HasValue ? $":{credential.Port}" : "")};Database={credential.DatabaseName};UID={credential.DatabaseUsername};Password={{password}};CurrentSchema={credential.CurrentSchema};Encrypt={credential.Encrypt.ToString().ToLower()};SSLValidateCertificate={credential.SSLValidateCertificate.ToString().ToLower()};",
             
             _ => throw new ArgumentException($"Unsupported database type: {credential.DatabaseType}")
         };
+    }
+    
+    /// <summary>
+    /// Validates HANA database credential consistency
+    /// </summary>
+    public static (bool IsValid, string ErrorMessage) ValidateHANAConsistency(this DatabaseCredential credential)
+    {
+        if (credential.DatabaseType != DatabaseType.HANA)
+        {
+            return (true, string.Empty); // Not HANA, no validation needed
+        }
+        
+        // For HANA databases, CurrentSchema is required
+        if (string.IsNullOrEmpty(credential.CurrentSchema))
+        {
+            return (false, "HANA databases require CurrentSchema to be specified");
+        }
+        
+        // DatabaseName and CurrentSchema are different concepts for HANA
+        // DatabaseName = the actual database (e.g., FP2502)  
+        // CurrentSchema = the default schema within that database (e.g., SBODEMOUS)
+        if (string.IsNullOrEmpty(credential.DatabaseName))
+        {
+            return (false, "HANA databases require DatabaseName to be specified");
+        }
+        
+        return (true, string.Empty);
+    }
+    
+    /// <summary>
+    /// Validates HANA database credential model consistency
+    /// </summary>
+    public static (bool IsValid, string ErrorMessage) ValidateHANAConsistency(this DatabaseCredentialModel model)
+    {
+        if (model.DatabaseType != DatabaseType.HANA)
+        {
+            return (true, string.Empty); // Not HANA, no validation needed
+        }
+        
+        if (string.IsNullOrEmpty(model.CurrentSchema))
+        {
+            return (false, "HANA databases require CurrentSchema to be specified");
+        }
+        
+        return (true, string.Empty);
     }
     
     /// <summary>
@@ -266,7 +399,7 @@ public static class DatabaseCredentialExtensions
                 $"Server={model.ServerInstance}{(model.Port.HasValue ? $",{model.Port}" : "")};Database={model.DatabaseName};User Id={model.DatabaseUsername};Password={{password}};TrustServerCertificate={model.TrustServerCertificate.ToString().ToLower()};",
             
             DatabaseType.HANA => 
-                $"Server={model.ServerInstance}{(model.Port.HasValue ? $":{model.Port}" : "")};Database={model.DatabaseName};UID={model.DatabaseUsername};Password={{password}};{(!string.IsNullOrEmpty(model.CurrentSchema) ? $"CurrentSchema={model.CurrentSchema};" : "")}Encrypt={model.Encrypt.ToString().ToLower()};SSLValidateCertificate={model.SSLValidateCertificate.ToString().ToLower()};",
+                $"Server={model.ServerInstance}{(model.Port.HasValue ? $":{model.Port}" : "")};Database={model.DatabaseName};UID={model.DatabaseUsername};Password={{password}};CurrentSchema={model.CurrentSchema};Encrypt={model.Encrypt.ToString().ToLower()};SSLValidateCertificate={model.SSLValidateCertificate.ToString().ToLower()};",
             
             _ => throw new ArgumentException($"Unsupported database type: {model.DatabaseType}")
         };
@@ -316,4 +449,21 @@ public class DatabaseCredentialGeneralSettingsModel
     public bool SSLValidateCertificate { get; set; } = false;
     
     public bool TrustServerCertificate { get; set; } = true;
+    
+    // SAP Configuration (mandatory - database level)
+    [Required(ErrorMessage = "SAP Service Layer hostname is required")]
+    [StringLength(255, ErrorMessage = "SAP Service Layer hostname cannot exceed 255 characters")]
+    public string SAPServiceLayerHostname { get; set; } = string.Empty;
+    
+    [Required(ErrorMessage = "SAP API Gateway hostname is required")]
+    [StringLength(255, ErrorMessage = "SAP API Gateway hostname cannot exceed 255 characters")]
+    public string SAPAPIGatewayHostname { get; set; } = string.Empty;
+    
+    [Required(ErrorMessage = "SAP Business One Web Client host is required")]
+    [StringLength(255, ErrorMessage = "SAP Business One Web Client host cannot exceed 255 characters")]
+    public string SAPBusinessOneWebClientHost { get; set; } = string.Empty;
+    
+    [Required(ErrorMessage = "Document code is required")]
+    [StringLength(50, ErrorMessage = "Document code cannot exceed 50 characters")]
+    public string DocumentCode { get; set; } = string.Empty;
 }

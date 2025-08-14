@@ -64,6 +64,7 @@ public class OrganizationService : IOrganizationService
 
             _logger.LogInformation("  Querying database for OrganizationId: {OrgGuid}", orgGuid);
             var organization = await _context.Organizations
+                .AsNoTracking() // Force fresh database query, bypass EF change tracking
                 .Where(o => o.OrganizationId == orgGuid)
                 .FirstOrDefaultAsync();
 
@@ -86,7 +87,7 @@ public class OrganizationService : IOrganizationService
         }
     }
 
-    public async Task<Organization> CreateOrganizationAsync(string name, string domain, string adminUserId)
+    public async Task<Organization> CreateOrganizationAsync(string name, string domain, string adminUserId, string adminEmail)
     {
         // Generate deterministic GUID from domain (same logic as GetByIdAsync)
         var domainBasedOrgId = domain.Replace(".", "_").ToLowerInvariant();
@@ -108,7 +109,7 @@ public class OrganizationService : IOrganizationService
                 OrganizationId = organizationId,
                 Name = name,
                 Domain = domain, // Store the original domain
-                AdminEmail = $"admin@{domain}",
+                AdminEmail = adminEmail,
                 DatabaseType = OrganizationDatabaseType.SQL,
                 StateCode = StateCode.Active,
                 StatusCode = StatusCode.Active,
@@ -118,13 +119,14 @@ public class OrganizationService : IOrganizationService
                 ModifiedBy = adminGuid,
                 OwnerId = adminGuid, // Set required OwnerId field
                 OwningUser = adminGuid, // Set owning user as well
-                // Set required configuration properties with defaults
+                // Set required configuration properties 
                 KeyVaultUri = $"https://{domain.Replace(".", "-")}-vault.vault.azure.net/",
                 KeyVaultSecretPrefix = domain.Replace(".", "-"),
-                SAPServiceLayerHostname = $"sap-{domain.Replace(".", "-")}.local",
-                SAPAPIGatewayHostname = $"api-{domain.Replace(".", "-")}.local", 
-                SAPBusinessOneWebClientHost = $"webclient-{domain.Replace(".", "-")}.local",
-                DocumentCode = domain.ToUpper().Replace(".", "_").Substring(0, Math.Min(10, domain.Length)),
+                // SAP fields should be null by default - only set when explicitly configured by OrgAdmin
+                SAPServiceLayerHostname = null,
+                SAPAPIGatewayHostname = null, 
+                SAPBusinessOneWebClientHost = null,
+                DocumentCode = null,
                 // Counters
                 UserCount = 0,
                 SecretCount = 0,
@@ -132,7 +134,7 @@ public class OrganizationService : IOrganizationService
                 Id = organizationId.ToString(),
                 AdminUserId = adminGuid.ToString(),
                 AdminUserName = $"Admin User",
-                AdminUserEmail = $"admin@{domain}",
+                AdminUserEmail = adminEmail,
                 CreatedDate = DateTime.UtcNow,
                 IsActive = true
             };
@@ -221,6 +223,8 @@ public class OrganizationService : IOrganizationService
                 existingOrg.SAPAPIGatewayHostname = organization.SAPAPIGatewayHostname;
                 existingOrg.SAPBusinessOneWebClientHost = organization.SAPBusinessOneWebClientHost;
                 existingOrg.DocumentCode = organization.DocumentCode;
+                existingOrg.OrganizationAgentTypeIds = organization.OrganizationAgentTypeIds;
+                existingOrg.M365GroupId = organization.M365GroupId;
                 existingOrg.StateCode = organization.StateCode;
                 existingOrg.StatusCode = organization.StatusCode;
                 existingOrg.ModifiedOn = DateTime.UtcNow;
@@ -274,6 +278,61 @@ public class OrganizationService : IOrganizationService
         {
             _logger.LogError(ex, "Failed to create guest user record for {Email}", guestUser.Email);
             return false;
+        }
+    }
+
+    public async Task<bool> UpdateOrganizationAgentTypesAsync(string organizationId, List<Guid> agentTypeIds)
+    {
+        try
+        {
+            Guid orgGuid;
+            if (!Guid.TryParse(organizationId, out orgGuid))
+            {
+                // Generate deterministic GUID from domain-based ID
+                using var md5 = System.Security.Cryptography.MD5.Create();
+                var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(organizationId));
+                orgGuid = new Guid(hash);
+            }
+
+            var existingOrg = await _context.Organizations
+                .Where(o => o.OrganizationId == orgGuid)
+                .FirstOrDefaultAsync();
+
+            if (existingOrg != null)
+            {
+                existingOrg.SetOrganizationAgentTypeIds(agentTypeIds);
+                existingOrg.ModifiedOn = DateTime.UtcNow;
+
+                await _context.SaveChangesAsync();
+                
+                _logger.LogInformation("Updated organization agent types for {OrganizationId}: {AgentTypeIds}", 
+                    organizationId, string.Join(", ", agentTypeIds));
+                return true;
+            }
+            else
+            {
+                _logger.LogWarning("Organization {OrganizationId} not found for agent type update", organizationId);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update organization agent types for {OrganizationId}", organizationId);
+            return false;
+        }
+    }
+
+    public async Task<List<Guid>> GetOrganizationAgentTypesAsync(string organizationId)
+    {
+        try
+        {
+            var organization = await GetByIdAsync(organizationId);
+            return organization?.GetOrganizationAgentTypeIds() ?? new List<Guid>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get organization agent types for {OrganizationId}", organizationId);
+            return new List<Guid>();
         }
     }
 

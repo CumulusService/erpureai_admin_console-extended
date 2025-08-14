@@ -3,15 +3,22 @@
 @rendermode InteractiveServer
 @using AdminConsole.Models
 @using AdminConsole.Services
+@using AdminConsole.Components.Shared
 @using System.Security.Cryptography
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Components.Authorization
 @inject IInvitationService InvitationService
 @inject IDataIsolationService DataIsolationService
 @inject IOrganizationService OrganizationService
 @inject IDatabaseCredentialService DatabaseCredentialService
 @inject IUserDatabaseAccessService UserDatabaseAccessService
+@inject IAgentTypeService AgentTypeService
 @inject ILogger<InviteUser> Logger
 @inject IJSRuntime JSRuntime
 @inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IBusinessDomainValidationService BusinessDomainValidationService
+@inject IOnboardedUserService OnboardedUserService
 @attribute [Authorize(Policy = "OrgAdminOrHigher")]
 
 <div class="container-fluid">
@@ -19,8 +26,8 @@
         <div class="col-12">
             <div class="d-flex justify-content-between align-items-center mb-4">
                 <div>
-                    <h2 class="mb-1">Invite User</h2>
-                    <p class="text-muted mb-0">Send invitation to join your organization</p>
+                    <h2 class="mb-1 admin-page-title">Invite User</h2>
+                    <p class="admin-page-subtitle mb-0">Send invitation to join your organization</p>
                 </div>
             </div>
 
@@ -42,8 +49,102 @@
 
             <div class="row">
                 <div class="col-md-8 col-lg-6">
-                    <div class="card">
+                    @* ADDITIVE: Optional user search before invitation - completely optional *@
+                    <div class="card mb-3">
                         <div class="card-header">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h6 class="card-title mb-0">
+                                    <i class="fas fa-search me-2"></i>
+                                    Quick User Search (Optional)
+                                </h6>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ToggleUserSearch">
+                                    @if (showUserSearch)
+                                    {
+                                        <i class="fas fa-chevron-up"></i>
+                                    }
+                                    else
+                                    {
+                                        <i class="fas fa-chevron-down"></i>
+                                    }
+                                </button>
+                            </div>
+                        </div>
+                        @if (showUserSearch)
+                        {
+                            <div class="card-body">
+                                <p class="text-muted small mb-3">
+                                    Search for existing users before sending invitations to avoid duplicates.
+                                </p>
+                                <div class="input-group mb-3">
+                                    <input type="text" class="form-control" placeholder="Search by email or name..." 
+                                           @bind="searchQuery" @bind:event="oninput" @onkeyup="OnSearchKeyUp" />
+                                    <button class="btn btn-outline-secondary" type="button" @onclick="SearchUsers">
+                                        <i class="fas fa-search"></i>
+                                    </button>
+                                </div>
+                                
+                                @if (isSearching)
+                                {
+                                    <div class="text-center py-2">
+                                        <div class="spinner-border spinner-border-sm" role="status"></div>
+                                        <span class="ms-2">Searching...</span>
+                                    </div>
+                                }
+                                else if (searchResults.Any())
+                                {
+                                    <div class="mb-3">
+                                        <h6 class="text-primary mb-2">Found @searchResults.Count user(s):</h6>
+                                        @foreach (var user in searchResults)
+                                        {
+                                            <div class="card mb-2">
+                                                <div class="card-body p-3">
+                                                    <div class="d-flex justify-content-between align-items-start">
+                                                        <div>
+                                                            <h6 class="mb-1">@user.FullName</h6>
+                                                            <p class="text-muted mb-1">@user.Email</p>
+                                                            <div>
+                                                                @if (user.IsDeleted)
+                                                                {
+                                                                    <span class="badge bg-dark">
+                                                                        <i class="fas fa-trash me-1"></i> Deleted
+                                                                    </span>
+                                                                }
+                                                                else if (user.StateCode == StateCode.Inactive)
+                                                                {
+                                                                    <span class="badge bg-secondary">
+                                                                        <i class="fas fa-user-times me-1"></i> Inactive
+                                                                    </span>
+                                                                }
+                                                                else if (user.StateCode == StateCode.Active)
+                                                                {
+                                                                    <span class="badge bg-success">
+                                                                        <i class="fas fa-check me-1"></i> Active
+                                                                    </span>
+                                                                }
+                                                            </div>
+                                                        </div>
+                                                        <button class="btn btn-sm btn-outline-primary" @onclick="() => PreFillFromUser(user)">
+                                                            <i class="fas fa-arrow-down me-1"></i> Use This User
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                                else if (!string.IsNullOrEmpty(searchQuery) && searchQuery.Length >= 3 && !isSearching)
+                                {
+                                    <div class="alert alert-info">
+                                        <i class="fas fa-info-circle me-2"></i>
+                                        No users found matching your search.
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header admin-card-header">
                             <h5 class="card-title mb-0">
                                 <i class="fas fa-user-plus me-2"></i>
                                 User Invitation Details
@@ -52,6 +153,15 @@
                         <div class="card-body">
                             <EditForm Model="invitationModel" OnValidSubmit="SendInvitationAsync">
                                 <DataAnnotationsValidator />
+                                
+                                <!-- Enhanced Unsaved Changes Tracking -->
+                                <UnsavedChangesTracker @ref="unsavedChangesTracker" 
+                                                     FormId="invite-user-form"
+                                                     TrackChanges="@hasFormChanges"
+                                                     Context="invitation"
+                                                     UserRole="@currentUserRole.ToString()"
+                                                     WarningMessage="You have unsaved invitation details. Are you sure you want to leave without sending the invitation?"
+                                                     OnUnsavedChangesChanged="OnUnsavedChangesChanged" />
                                 
                                 <div class="mb-3">
                                     <label for="email" class="form-label">
@@ -65,7 +175,8 @@
                                                  class="form-control" 
                                                  id="email" 
                                                  placeholder="user@yourdomain.com"
-                                                 @onblur="ValidateEmailDomain" />
+                                                 @onblur="ValidateEmailDomain"
+                                                 @onchange="OnInputChanged" />
                                     </div>
                                     <ValidationMessage For="@(() => invitationModel.Email)" />
                                     @if (!string.IsNullOrEmpty(domainValidationMessage))
@@ -82,6 +193,41 @@
                                             You can only invite users from your domain: <strong>@allowedDomain</strong>
                                         </div>
                                     }
+                                    @* ADDITIVE: Show existing user warning (purely informational) *@
+                                    @if (showExistingUserWarning && !string.IsNullOrEmpty(existingUserMessage))
+                                    {
+                                        <div class="alert alert-warning alert-dismissible mt-2" role="alert">
+                                            <i class="fas fa-user-check me-2"></i>
+                                            <strong>Existing User Found:</strong> @existingUserMessage
+                                            @if (existingUser != null)
+                                            {
+                                                <div class="mt-2 small">
+                                                    <strong>Current Status:</strong> 
+                                                    @if (existingUser.IsDeleted)
+                                                    {
+                                                        <span class="badge bg-secondary">Deleted</span>
+                                                    }
+                                                    else if (existingUser.StateCode == StateCode.Inactive)
+                                                    {
+                                                        <span class="badge bg-warning">Inactive</span>
+                                                    }
+                                                    else if (existingUser.StateCode == StateCode.Active)
+                                                    {
+                                                        <span class="badge bg-success">Active</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="badge bg-secondary">Unknown</span>
+                                                    }
+                                                    @if (!string.IsNullOrEmpty(existingUser.FullName) && existingUser.FullName != invitationModel.DisplayName)
+                                                    {
+                                                        <span class="ms-2">| Current Name: <strong>@existingUser.FullName</strong></span>
+                                                    }
+                                                </div>
+                                            }
+                                            <button type="button" class="btn-close" @onclick="() => showExistingUserWarning = false"></button>
+                                        </div>
+                                    }
                                 </div>
 
                                 <div class="mb-3">
@@ -95,7 +241,8 @@
                                         <InputText @bind-Value="invitationModel.DisplayName" 
                                                  class="form-control" 
                                                  id="displayName" 
-                                                 placeholder="Enter user's full name" />
+                                                 placeholder="Enter user's full name"
+                                                 @onchange="OnInputChanged" />
                                     </div>
                                     <ValidationMessage For="@(() => invitationModel.DisplayName)" />
                                 </div>
@@ -104,32 +251,38 @@
                                     <label for="agentTypes" class="form-label">
                                         Agent Types <span class="text-danger">*</span>
                                     </label>
-                                    <div class="form-check">
-                                        <InputCheckbox @bind-Value="selectedAgentTypes.SBOAgentAppv1" 
-                                                     class="form-check-input" 
-                                                     id="agentSBO" />
-                                        <label class="form-check-label" for="agentSBO">
-                                            SBO Agent App v1
-                                        </label>
-                                    </div>
-                                    <div class="form-check">
-                                        <InputCheckbox @bind-Value="selectedAgentTypes.Sales" 
-                                                     class="form-check-input" 
-                                                     id="agentSales" />
-                                        <label class="form-check-label" for="agentSales">
-                                            Sales Agent
-                                        </label>
-                                    </div>
-                                    <div class="form-check">
-                                        <InputCheckbox @bind-Value="selectedAgentTypes.Admin" 
-                                                     class="form-check-input" 
-                                                     id="agentAdmin" />
-                                        <label class="form-check-label" for="agentAdmin">
-                                            Admin Agent
-                                        </label>
-                                    </div>
+                                    @if (availableAgentTypes.Any())
+                                    {
+                                        @foreach (var agentType in availableAgentTypes)
+                                        {
+                                            <div class="form-check">
+                                                <input class="form-check-input" 
+                                                       type="checkbox" 
+                                                       id="agent_@agentType.Id" 
+                                                       @onchange="@((e) => { ToggleAgentTypeSelection(agentType.Id, (bool)e.Value!); OnInputChanged(); })" />
+                                                <label class="form-check-label" for="agent_@agentType.Id">
+                                                    <strong>@agentType.DisplayName</strong>
+                                                    @if (!string.IsNullOrEmpty(agentType.Description))
+                                                    {
+                                                        <br><small class="text-muted">@agentType.Description</small>
+                                                    }
+                                                    @if (!string.IsNullOrEmpty(agentType.AgentShareUrl))
+                                                    {
+                                                        <br><small class="text-info"><i class="fas fa-link me-1"></i>Share link will be included in invitation</small>
+                                                    }
+                                                </label>
+                                            </div>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <div class="alert alert-info">
+                                            <i class="fas fa-info-circle me-2"></i>
+                                            No agent types have been allocated to your organization. Please contact your SuperAdmin to configure agent types.
+                                        </div>
+                                    }
                                     <div class="form-text">
-                                        Select the types of agents this user will have access to.
+                                        Select the types of agents this user will have access to. Only agent types allocated by SuperAdmin to your organization are available.
                                     </div>
                                 </div>
 
@@ -145,7 +298,7 @@
                                                 <input class="form-check-input" 
                                                        type="checkbox" 
                                                        id="db_@database.Id" 
-                                                       @onchange="@((e) => ToggleDatabaseSelection(database.Id, (bool)e.Value!))" />
+                                                       @onchange="@((e) => { ToggleDatabaseSelection(database.Id, (bool)e.Value!); OnInputChanged(); })" />
                                                 <label class="form-check-label" for="db_@database.Id">
                                                     <strong>@database.FriendlyName</strong> - @database.DatabaseType (@database.DatabaseName)
                                                     @if (!string.IsNullOrEmpty(database.Description))
@@ -176,27 +329,36 @@
                                                  class="form-control" 
                                                  id="message" 
                                                  rows="3"
-                                                 placeholder="Add a personal message to the invitation..." />
+                                                 placeholder="Add a personal message to the invitation..."
+                                                 @onchange="OnInputChanged" />
                                     <div class="form-text">
                                         This message will be included in the invitation email.
                                     </div>
                                 </div>
 
                                 <div class="d-grid gap-2 d-md-flex justify-content-md-end">
-                                    <button type="button" class="btn btn-outline-secondary" @onclick="ClearForm">
-                                        <i class="fas fa-times me-1"></i>
-                                        Clear
-                                    </button>
-                                    <button type="submit" class="btn btn-primary" disabled="@(isLoading || !IsFormValid())">
+                                    <ActionButton Text="Clear Form"
+                                                IconClass="fas fa-times"
+                                                Type="ActionType.Secondary"
+                                                Size="ButtonSize.Normal"
+                                                OnClick="@(async () => { ClearForm(); await Task.CompletedTask; })"
+                                                IsDisabled="@isLoading"
+                                                FullDescription="Clear all form fields and start over"
+                                                ConsequenceText="Form reset"
+                                                ShowConsequence="false" />
+                                    
+                                    <button type="submit" class="btn btn-primary action-btn d-flex align-items-center" disabled="@(isLoading || !IsFormValid())">
                                         @if (isLoading)
                                         {
                                             <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                                            <span>Sending invitation...</span>
                                         }
                                         else
                                         {
-                                            <i class="fas fa-paper-plane me-1"></i>
+                                            <i class="fas fa-paper-plane me-2"></i>
+                                            <span>Send Invitation</span>
+                                            <small class="ms-2 opacity-75">(User gets access)</small>
                                         }
-                                        Send Invitation
                                     </button>
                                 </div>
                             </EditForm>
@@ -206,7 +368,7 @@
 
                 <div class="col-md-4 col-lg-6">
                     <div class="card">
-                        <div class="card-header">
+                        <div class="card-header admin-card-header">
                             <h5 class="card-title mb-0">
                                 <i class="fas fa-info-circle me-2"></i>
                                 Invitation Information
@@ -271,7 +433,8 @@
 
 @code {
     private InvitationModel invitationModel = new();
-    private SelectedAgentTypes selectedAgentTypes = new();
+    private List<AgentTypeEntity> availableAgentTypes = new();
+    private HashSet<Guid> selectedAgentTypeIds = new();
     private List<DatabaseCredential> availableDatabases = new();
     private HashSet<Guid> selectedDatabaseIds = new();
     private string errorMessage = string.Empty;
@@ -280,6 +443,21 @@
     private string allowedDomain = string.Empty;
     private bool isLoading = false;
     private UserRole currentUserRole = UserRole.User;
+    
+    // Enhanced unsaved changes tracking
+    private UnsavedChangesTracker? unsavedChangesTracker;
+    private bool hasFormChanges = false;
+    
+    // ADDITIVE: Enhanced user validation (purely informational - doesn't block existing functionality)
+    private string existingUserMessage = string.Empty;
+    private OnboardedUser? existingUser = null;
+    private bool showExistingUserWarning = false;
+    
+    // ADDITIVE: Optional user search functionality (completely optional feature)
+    private bool showUserSearch = false;
+    private string searchQuery = string.Empty;
+    private List<OnboardedUser> searchResults = new();
+    private bool isSearching = false;
 
     public class InvitationModel
     {
@@ -295,12 +473,6 @@
         public string PersonalMessage { get; set; } = string.Empty;
     }
 
-    public class SelectedAgentTypes
-    {
-        public bool SBOAgentAppv1 { get; set; } = true; // Default to true
-        public bool Sales { get; set; } = false;
-        public bool Admin { get; set; } = false;
-    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -318,6 +490,9 @@
                     allowedDomain = organization.Domain;
                 }
                 
+                // Load organization-assigned agent types
+                await LoadAvailableAgentTypes(currentUserOrgId);
+                
                 // Load available databases for the organization
                 Guid orgGuid;
                 if (!Guid.TryParse(currentUserOrgId, out orgGuid))
@@ -330,7 +505,7 @@
                     }
                     Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgId);
                 }
-                availableDatabases = await DatabaseCredentialService.GetByOrganizationAsync(orgGuid);
+                availableDatabases = await DatabaseCredentialService.GetActiveByOrganizationAsync(orgGuid);
             }
         }
         catch (Exception ex)
@@ -340,14 +515,69 @@
         }
     }
 
+    private async Task LoadAvailableAgentTypes(string currentUserOrgId)
+    {
+        try
+        {
+            // Get organization-allocated agent type IDs
+            var orgAgentTypeIds = await OrganizationService.GetOrganizationAgentTypesAsync(currentUserOrgId);
+            
+            if (orgAgentTypeIds.Any())
+            {
+                // Get the full agent type entities for the organization-allocated types
+                availableAgentTypes = await AgentTypeService.GetAgentTypesByIdsAsync(orgAgentTypeIds);
+            }
+            else
+            {
+                availableAgentTypes = new List<AgentTypeEntity>();
+                Logger.LogInformation("No agent types allocated to organization {OrgId}", currentUserOrgId);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading available agent types for organization {OrgId}", currentUserOrgId);
+            availableAgentTypes = new List<AgentTypeEntity>();
+        }
+    }
+
+    private void ToggleAgentTypeSelection(Guid agentTypeId, bool isSelected)
+    {
+        if (isSelected)
+        {
+            selectedAgentTypeIds.Add(agentTypeId);
+        }
+        else
+        {
+            selectedAgentTypeIds.Remove(agentTypeId);
+        }
+        StateHasChanged();
+    }
+
     private async Task ValidateEmailDomain()
     {
         domainValidationMessage = string.Empty;
+        // ADDITIVE: Clear existing user validation (doesn't affect domain validation)
+        existingUserMessage = string.Empty;
+        existingUser = null;
+        showExistingUserWarning = false;
         
         if (string.IsNullOrEmpty(invitationModel.Email) || !invitationModel.Email.Contains("@"))
         {
             return;
         }
+
+        // 🚫 CRITICAL: Business domain validation - Block private email domains
+        var businessDomainValidation = BusinessDomainValidationService.ValidateBusinessDomain(invitationModel.Email);
+        if (!businessDomainValidation.IsValid)
+        {
+            Logger.LogWarning("🚫 BLOCKED USER INVITATION: Business domain validation failed for {Email}. Reason: {Message}", 
+                invitationModel.Email, businessDomainValidation.Message);
+            domainValidationMessage = $"🚫 Business Email Required: {businessDomainValidation.Message}";
+            return;
+        }
+        
+        Logger.LogInformation("✅ BUSINESS DOMAIN VALIDATED: User email {Email} with domain {Domain} passed business validation", 
+            invitationModel.Email, businessDomainValidation.Domain);
 
         try
         {
@@ -374,12 +604,62 @@
             if (!canInvite && currentUserRole != UserRole.SuperAdmin)
             {
                 domainValidationMessage = $"You can only invite users from your domain ({allowedDomain}).";
+                return; // Exit early if domain validation fails
             }
+            
+            // ADDITIVE: Check for existing user (purely informational - doesn't block invitation)
+            await CheckForExistingUser(orgGuid);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error validating email domain for {Email}", invitationModel.Email);
             domainValidationMessage = "Error validating domain. Please try again.";
+        }
+    }
+    
+    /// <summary>
+    /// ADDITIVE: Checks for existing users and shows friendly warnings (doesn't block existing functionality)
+    /// </summary>
+    private async Task CheckForExistingUser(Guid orgGuid)
+    {
+        try
+        {
+            // Check if user already exists in this organization
+            existingUser = await OnboardedUserService.GetByEmailAsync(invitationModel.Email, orgGuid);
+            
+            if (existingUser != null)
+            {
+                showExistingUserWarning = true;
+                
+                // Determine user status and show appropriate message
+                if (existingUser.IsDeleted)
+                {
+                    existingUserMessage = $"User {invitationModel.Email} was previously deleted. Sending invitation will reactivate their account and restore access.";
+                }
+                else if (existingUser.StateCode == StateCode.Inactive)
+                {
+                    existingUserMessage = $"User {invitationModel.Email} is currently inactive. Sending invitation will reactivate their account.";
+                }
+                else if (existingUser.StateCode == StateCode.Active)
+                {
+                    existingUserMessage = $"User {invitationModel.Email} already exists and is active. Sending invitation will update their access permissions.";
+                }
+                else
+                {
+                    existingUserMessage = $"User {invitationModel.Email} already exists in the system. Sending invitation will update their access.";
+                }
+                
+                Logger.LogInformation("ADDITIVE: Found existing user {Email} with status: StateCode={StateCode}, IsDeleted={IsDeleted}", 
+                    invitationModel.Email, existingUser.StateCode, existingUser.IsDeleted);
+            }
+        }
+        catch (Exception ex)
+        {
+            // ADDITIVE: Don't break existing functionality if this check fails
+            Logger.LogWarning(ex, "ADDITIVE: Could not check for existing user {Email} - continuing with normal invitation flow", invitationModel.Email);
+            existingUserMessage = string.Empty;
+            existingUser = null;
+            showExistingUserWarning = false;
         }
     }
 
@@ -401,7 +681,7 @@
         return !string.IsNullOrEmpty(invitationModel.Email) &&
                !string.IsNullOrEmpty(invitationModel.DisplayName) &&
                selectedDatabaseIds.Any() &&
-               (selectedAgentTypes.SBOAgentAppv1 || selectedAgentTypes.Sales || selectedAgentTypes.Admin) &&
+               selectedAgentTypeIds.Any() &&
                string.IsNullOrEmpty(domainValidationMessage);
     }
 
@@ -422,15 +702,25 @@
                 return;
             }
 
-            // Build agent types list
-            var agentTypes = new List<LegacyAgentType>();
-            if (selectedAgentTypes.SBOAgentAppv1) agentTypes.Add(LegacyAgentType.SBOAgentAppv1);
-            if (selectedAgentTypes.Sales) agentTypes.Add(LegacyAgentType.Sales);
-            if (selectedAgentTypes.Admin) agentTypes.Add(LegacyAgentType.Admin);
+            // Build agent types list - pass selected agent type IDs
+            var agentTypeIdsList = selectedAgentTypeIds.ToList();
 
-            // Get current user ID for invitedBy parameter
-            var currentUser = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
-            var invitedBy = Guid.NewGuid(); // TODO: Get actual current user ID from claims
+            // Get current user information for audit trail and security
+            var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+            var currentUser = authState.User;
+            var currentUserEmail = currentUser.FindFirst("email")?.Value ?? 
+                                 currentUser.FindFirst("preferred_username")?.Value ?? 
+                                 currentUser.FindFirst("upn")?.Value;
+            var currentUserId = currentUser.FindFirst("oid")?.Value ?? 
+                              currentUser.FindFirst("sub")?.Value ?? 
+                              currentUser.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            // Parse current user ID for audit trail
+            Guid inviterGuid = Guid.Empty;
+            if (!string.IsNullOrEmpty(currentUserId) && !Guid.TryParse(currentUserId, out inviterGuid))
+            {
+                Logger.LogWarning("Could not parse current user ID {UserId} as GUID, using empty GUID", currentUserId);
+            }
             
             // Send invitation
             Guid orgGuid;
@@ -447,20 +737,60 @@
             var result = await InvitationService.InviteUserAsync(
                 orgGuid,
                 invitationModel.Email,
-                invitedBy,
-                agentTypes
+                inviterGuid, // Use actual current user ID
+                new List<LegacyAgentType>(), // Empty legacy types for backward compatibility
+                agentTypeIdsList, // Use selected agent type IDs
+                selectedDatabaseIds.ToList(), // Pass selected database IDs
+                UserRole.User, // 🔑 NEW: Explicitly set user role based on invitation flow
+                currentUserEmail // Current user email for self-invitation prevention
             );
 
             if (result.Success)
             {
-                // Note: In a real implementation, we would need to get the created user ID from the invitation result
-                // and then assign databases. For now, we'll just show a success message with database info.
+                // Mark form as successfully submitted
+                await OnFormSubmitted();
+                
+                // ADDITIVE: Enhanced success message to distinguish new vs updated vs reactivated users
+                var assignedAgentTypes = availableAgentTypes.Where(at => selectedAgentTypeIds.Contains(at.Id)).Select(at => at.DisplayName);
+                var agentTypeList = string.Join(", ", assignedAgentTypes);
                 var assignedDatabases = availableDatabases.Where(db => selectedDatabaseIds.Contains(db.Id)).Select(db => db.FriendlyName);
                 var databaseList = string.Join(", ", assignedDatabases);
                 
-                successMessage = $"Invitation sent successfully to {invitationModel.Email}. " +
-                               $"User will have access to: {databaseList}. " +
-                               "The user will receive an email with instructions to join your organization.";
+                // Determine the type of operation that occurred based on existing user status
+                string operationType;
+                string additionalInfo = "";
+                
+                if (existingUser != null)
+                {
+                    if (existingUser.IsDeleted)
+                    {
+                        operationType = "🔄 User account reactivated";
+                        additionalInfo = " The user's account has been restored with full access.";
+                    }
+                    else if (existingUser.StateCode == StateCode.Inactive)
+                    {
+                        operationType = "🔄 User account reactivated";
+                        additionalInfo = " The inactive user has been reactivated with updated permissions.";
+                    }
+                    else if (existingUser.StateCode == StateCode.Active)
+                    {
+                        operationType = "📝 Existing user updated";
+                        additionalInfo = " The user's access permissions have been updated.";
+                    }
+                    else
+                    {
+                        operationType = "📝 User account updated";
+                        additionalInfo = " The user's account has been updated with new permissions.";
+                    }
+                }
+                else
+                {
+                    operationType = "✅ New user invited";
+                    additionalInfo = " The user will receive an email with agent share links and instructions to join your organization.";
+                }
+                
+                successMessage = $"{operationType} successfully for {invitationModel.Email}. " +
+                               $"Agent types: {agentTypeList}. Database access: {databaseList}.{additionalInfo}";
                 
                 // Clear form after successful invitation
                 await Task.Delay(2000); // Show success message for 2 seconds
@@ -493,7 +823,7 @@
     private void ClearForm()
     {
         invitationModel = new InvitationModel();
-        selectedAgentTypes = new SelectedAgentTypes();
+        selectedAgentTypeIds.Clear();
         selectedDatabaseIds.Clear();
         ClearMessages();
         domainValidationMessage = string.Empty;
@@ -505,5 +835,147 @@
         errorMessage = string.Empty;
         successMessage = string.Empty;
         StateHasChanged();
+    }
+
+    // Enhanced unsaved changes tracking methods
+    private void OnInputChanged()
+    {
+        hasFormChanges = true;
+        unsavedChangesTracker?.MarkAsChanged();
+    }
+
+    private void OnUnsavedChangesChanged(bool hasChanges)
+    {
+        hasFormChanges = hasChanges;
+        StateHasChanged();
+    }
+
+    private async Task OnFormSubmitted()
+    {
+        hasFormChanges = false;
+        if (unsavedChangesTracker != null)
+        {
+            await unsavedChangesTracker.MarkAsSaved();
+        }
+    }
+    
+    // ADDITIVE: Optional user search methods (purely optional - doesn't interfere with existing functionality)
+    
+    /// <summary>
+    /// ADDITIVE: Toggles the visibility of the optional user search component
+    /// </summary>
+    private void ToggleUserSearch()
+    {
+        showUserSearch = !showUserSearch;
+        if (!showUserSearch)
+        {
+            // Clear search when hiding to save memory
+            searchQuery = string.Empty;
+            searchResults.Clear();
+        }
+        StateHasChanged();
+    }
+    
+    /// <summary>
+    /// ADDITIVE: Handles keyboard events in search box (Enter key to search)
+    /// </summary>
+    private async Task OnSearchKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && searchQuery.Length >= 3)
+        {
+            await SearchUsers();
+        }
+    }
+    
+    /// <summary>
+    /// ADDITIVE: Searches for existing users (optional feature - doesn't impact core functionality)
+    /// </summary>
+    private async Task SearchUsers()
+    {
+        if (string.IsNullOrEmpty(searchQuery) || searchQuery.Length < 3)
+        {
+            searchResults.Clear();
+            return;
+        }
+        
+        try
+        {
+            isSearching = true;
+            StateHasChanged();
+            
+            var currentUserOrgId = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
+            if (string.IsNullOrEmpty(currentUserOrgId))
+            {
+                Logger.LogWarning("ADDITIVE: Could not get current user organization for search");
+                return;
+            }
+            
+            Guid orgGuid;
+            if (!Guid.TryParse(currentUserOrgId, out orgGuid))
+            {
+                // Generate deterministic GUID from organization ID string
+                using (var md5 = System.Security.Cryptography.MD5.Create())
+                {
+                    var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(currentUserOrgId));
+                    orgGuid = new Guid(hash);
+                }
+            }
+            
+            // ADDITIVE: Get users and filter locally (since SearchAsync doesn't exist in the interface)
+            var allUsers = await OnboardedUserService.GetByOrganizationAsync(orgGuid);
+            
+            // Search by email or name (case insensitive)
+            searchResults = allUsers.Where(u => 
+                u.Email.Contains(searchQuery, StringComparison.OrdinalIgnoreCase) ||
+                (u.FullName ?? "").Contains(searchQuery, StringComparison.OrdinalIgnoreCase) ||
+                (u.Name ?? "").Contains(searchQuery, StringComparison.OrdinalIgnoreCase)
+            ).Take(10).ToList(); // Limit to 10 results for performance
+            
+            Logger.LogInformation("ADDITIVE: Search for '{SearchQuery}' found {Count} results", searchQuery, searchResults.Count);
+        }
+        catch (Exception ex)
+        {
+            // ADDITIVE: Don't break the page if search fails
+            Logger.LogWarning(ex, "ADDITIVE: User search failed for query '{SearchQuery}' - feature disabled for this session", searchQuery);
+            searchResults.Clear();
+        }
+        finally
+        {
+            isSearching = false;
+            StateHasChanged();
+        }
+    }
+    
+    /// <summary>
+    /// ADDITIVE: Pre-fills the invitation form with data from selected existing user
+    /// </summary>
+    private void PreFillFromUser(OnboardedUser user)
+    {
+        try
+        {
+            // Pre-fill the form with existing user data
+            invitationModel.Email = user.Email;
+            invitationModel.DisplayName = user.FullName ?? user.Name ?? "";
+            
+            // Clear any previous validation messages since we're starting fresh
+            existingUserMessage = string.Empty;
+            domainValidationMessage = string.Empty;
+            showExistingUserWarning = false;
+            
+            // Mark form as changed
+            OnInputChanged();
+            
+            // Collapse the search area since user made their choice
+            showUserSearch = false;
+            searchResults.Clear();
+            
+            Logger.LogInformation("ADDITIVE: Pre-filled form with data from existing user {Email}", user.Email);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            // ADDITIVE: Don't break functionality if pre-fill fails
+            Logger.LogWarning(ex, "ADDITIVE: Failed to pre-fill form from user {Email}", user.Email);
+        }
     }
 }

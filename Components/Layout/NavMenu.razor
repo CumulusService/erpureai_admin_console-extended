@@ -5,21 +5,19 @@
 
 <div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid d-flex justify-content-between align-items-center">
-        <a class="navbar-brand d-flex align-items-center" href="" style="max-width: 50%; min-width: 200px;">
-            <img src="company-logo.png" alt="Company Logo" class="me-2 company-logo" style="height: 32px; width: auto; flex-shrink: 0;" />
-            <span class="d-none d-md-inline text-truncate">ERPURE.AI Admin Console</span>
-            <span class="d-md-none d-sm-inline text-truncate">ERPURE.AI</span>
+        <a class="navbar-brand d-flex justify-content-center align-items-center py-3" href="" style="width: 100%;">
+            <img src="company-logo.png" alt="Company Logo" class="company-logo" style="height: 80px; width: auto; max-width: 230px;" />
         </a>
         
         <AuthorizeView>
             <Authorized>
                 <div class="d-flex align-items-center flex-wrap">
-                    <span class="text-light me-2 me-md-3 text-truncate" style="max-width: 200px;">
+                    <span class="text-primary me-2 me-md-3 text-truncate" style="max-width: 200px; color: #2036EE;">
                         <i class="fas fa-user-circle me-1"></i>
                         <span class="d-none d-md-inline">@context.User.Identity?.Name</span>
                         <span class="d-md-none">@(context.User.Identity?.Name?.Split('@')[0] ?? "User")</span>
                     </span>
-                    <button class="btn btn-outline-light btn-sm text-nowrap" @onclick="SignOut" title="Sign Out">
+                    <button class="btn btn-outline-primary btn-sm text-nowrap" @onclick="SignOut" title="Sign Out" style="border-color: #2036EE; color: #2036EE;">
                         <i class="fas fa-sign-out-alt"></i>
                         <span class="d-none d-lg-inline ms-1">Sign Out</span>
                     </button>
@@ -75,13 +73,13 @@
             </Authorized>
         </AuthorizeView>
 
-        <!-- Developer Section -->
+        <!-- Developer Section - Master User with Full System Access -->
         <AuthorizeView Policy="DevOnly">
             <Authorized>
                 <div class="nav-section px-3 py-2 mt-3">
                     <div class="nav-section-title">
-                        <i class="fas fa-code text-success me-2"></i>
-                        <small class="text-uppercase text-muted fw-bold">Developer</small>
+                        <i class="fas fa-crown text-success me-2"></i>
+                        <small class="text-uppercase text-muted fw-bold">Master Developer</small>
                     </div>
                 </div>
 
@@ -91,9 +89,45 @@
                     </NavLink>
                 </div>
 
+                <!-- System User Management -->
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="developer/system-users">
+                        <span class="fas fa-users-cog text-success" aria-hidden="true"></span> System Users
+                    </NavLink>
+                </div>
+
+                <!-- Agent Type Management -->
                 <div class="nav-item px-3">
                     <NavLink class="nav-link" href="developer/agent-types">
                         <span class="fas fa-robot text-success" aria-hidden="true"></span> Manage Agent Types
+                    </NavLink>
+                </div>
+
+                <!-- Organization Management (Master Access) -->
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="owner/organizations">
+                        <span class="fas fa-building text-success" aria-hidden="true"></span> All Organizations
+                    </NavLink>
+                </div>
+
+                <!-- Admin Management (Master Access) -->
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="owner/admins">
+                        <span class="fas fa-user-shield text-success" aria-hidden="true"></span> All Admins
+                    </NavLink>
+                </div>
+
+                <!-- Invite Admin (Master Access) -->
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="owner/invite-admin">
+                        <span class="fas fa-user-plus text-success" aria-hidden="true"></span> Invite Admin
+                    </NavLink>
+                </div>
+
+                <!-- Owner Dashboard (Master Access) -->
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="owner/dashboard">
+                        <span class="fas fa-chart-line text-success" aria-hidden="true"></span> System Overview
                     </NavLink>
                 </div>
             </Authorized>

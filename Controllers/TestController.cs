@@ -37,7 +37,7 @@ namespace AdminConsole.Controllers
                 _logger.LogInformation("Starting invitation process for {Email}", adminEmail);
 
                 // Step 1: Create organization
-                var organization = await _organizationService.CreateOrganizationAsync(orgName, orgDomain, "temp-id");
+                var organization = await _organizationService.CreateOrganizationAsync(orgName, orgDomain, "temp-id", adminEmail);
                 ViewBag.Step1 = $"✅ Created organization: {organization.OrganizationId}";
 
                 // Step 2: Create security group

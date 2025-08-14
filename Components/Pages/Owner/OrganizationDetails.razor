@@ -4,9 +4,14 @@
 @inject IOrganizationService OrganizationService
 @inject IOnboardedUserService OnboardedUserService
 @inject IKeyVaultService KeyVaultService
+@inject IModalService ModalService
+@inject IGraphService GraphService
+@inject IUserAccessValidationService UserAccessValidationService
+@inject IHttpContextAccessor HttpContextAccessor
 @inject NavigationManager Navigation
 @inject ILogger<OrganizationDetails> Logger
 @attribute [Authorize(Policy = "SuperAdminOnly")]
+@rendermode InteractiveServer
 
 <div class="container-fluid">
     <div class="row">
@@ -39,16 +44,16 @@
                         </button>
                         @if (organization.StateCode == StateCode.Active)
                         {
-                            <button type="button" class="btn btn-outline-warning" @onclick="() => ToggleOrganizationStatus(false)">
+                            <button type="button" class="btn btn-outline-warning" @onclick="() => ConfirmAndToggleOrganizationStatus(false)">
                                 <i class="fas fa-pause me-1"></i>
-                                Deactivate
+                                Deactivate Organization
                             </button>
                         }
                         else
                         {
-                            <button type="button" class="btn btn-outline-success" @onclick="() => ToggleOrganizationStatus(true)">
+                            <button type="button" class="btn btn-outline-success" @onclick="() => ConfirmAndToggleOrganizationStatus(true)">
                                 <i class="fas fa-play me-1"></i>
-                                Activate
+                                Activate Organization
                             </button>
                         }
                     }
@@ -367,6 +372,22 @@
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
     private bool isLoading = true;
+    
+    // Enhanced confirmation modal state
+    private bool showConfirmationModal = false;
+    private bool confirmationIsActivation = false;
+    private int confirmationUserCount = 0;
+    private bool isProcessingOrganization = false;
+    
+    // Result modal state
+    private bool showResultModal = false;
+    private bool resultOverallSuccess = false;
+    private bool resultIsActivation = false;
+    private int resultTotalUsersProcessed = 0;
+    private int resultSuccessCount = 0;
+    private int resultFailureCount = 0;
+    private List<UserOperationResult> resultSuccessfulOperations = new();
+    private List<UserOperationResult> resultFailedOperations = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -431,6 +452,54 @@
         Navigation.NavigateTo($"/owner/organizations/{OrganizationId}/edit");
     }
 
+    private async Task ConfirmAndToggleOrganizationStatus(bool activate)
+    {
+        try
+        {
+            ClearMessages();
+            
+            // Get user count to show impact
+            var organizationUsers = await OnboardedUserService.GetByOrganizationForSuperAdminAsync(OrganizationId);
+            var totalUsersCount = organizationUsers.Count;
+            
+            // Show enhanced confirmation modal
+            showConfirmationModal = true;
+            confirmationIsActivation = activate;
+            confirmationUserCount = totalUsersCount;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error during organization status confirmation for {OrganizationId}", OrganizationId);
+            errorMessage = "An error occurred while preparing the status change. Please try again.";
+            StateHasChanged();
+        }
+    }
+    
+    private async Task OnConfirmOrganizationStatusChange()
+    {
+        showConfirmationModal = false;
+        isProcessingOrganization = true;
+        StateHasChanged();
+        
+        await ToggleOrganizationStatus(confirmationIsActivation);
+        
+        isProcessingOrganization = false;
+        StateHasChanged();
+    }
+    
+    private void OnCancelOrganizationStatusChange()
+    {
+        showConfirmationModal = false;
+        StateHasChanged();
+    }
+    
+    private void CloseResultModal()
+    {
+        showResultModal = false;
+        StateHasChanged();
+    }
+
     private async Task ToggleOrganizationStatus(bool activate)
     {
         if (organization == null) return;
@@ -439,29 +508,213 @@
         {
             ClearMessages();
             
+            Logger.LogInformation("=== STARTING ORGANIZATION-WIDE {Action} for {OrgName} ({OrgId}) ===", 
+                activate ? "ACTIVATION" : "DEACTIVATION", organization.Name, OrganizationId);
+            
+            // CRITICAL SECURITY STEP 1: Handle all organization users in Azure AD and database
+            var (successCount, failureCount, successful, failed) = await ProcessOrganizationUsersAccess(activate);
+            
+            // STEP 2: Update organization status in database
             organization.StateCode = activate ? StateCode.Active : StateCode.Inactive;
             organization.StatusCode = activate ? StatusCode.Active : StatusCode.Inactive;
             organization.ModifiedOn = DateTime.UtcNow;
 
-            var success = await OrganizationService.UpdateOrganizationAsync(organization);
+            var orgSuccess = await OrganizationService.UpdateOrganizationAsync(organization);
             
-            if (success)
+            if (orgSuccess)
             {
-                successMessage = $"Organization '{organization.Name}' has been {(activate ? "activated" : "deactivated")} successfully.";
+                Logger.LogInformation("=== ORGANIZATION {Action} COMPLETED for {OrgName} ===", 
+                    activate ? "ACTIVATION" : "DEACTIVATION", organization.Name);
                 organization.SyncLegacyProperties();
+                
+                // Show detailed results modal
+                resultOverallSuccess = failureCount == 0;
+                resultIsActivation = activate;
+                resultTotalUsersProcessed = successCount + failureCount;
+                resultSuccessCount = successCount;
+                resultFailureCount = failureCount;
+                resultSuccessfulOperations = successful;
+                resultFailedOperations = failed;
+                showResultModal = true;
             }
             else
             {
-                errorMessage = $"Failed to {(activate ? "activate" : "deactivate")} organization. Please try again.";
+                errorMessage = $"Failed to {(activate ? "activate" : "deactivate")} organization in database. Some users may have been affected.";
+                Logger.LogError("Organization database update failed for {OrgId} during {Action}", 
+                    OrganizationId, activate ? "activation" : "deactivation");
             }
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error toggling organization status for {OrganizationId}", OrganizationId);
-            errorMessage = "An unexpected error occurred. Please try again.";
+            errorMessage = "An unexpected error occurred during organization status change. Please verify user access states manually.";
         }
 
         StateHasChanged();
+    }
+
+    /// <summary>
+    /// CRITICAL SECURITY METHOD: Processes all organization users during org activation/deactivation
+    /// This ensures ALL users are properly enabled/disabled in Azure AD AND database
+    /// </summary>
+    private async Task<(int successCount, int failureCount, List<UserOperationResult> successful, List<UserOperationResult> failed)> ProcessOrganizationUsersAccess(bool activate)
+    {
+        try
+        {
+            // Get all users in the organization
+            var organizationUsers = await OnboardedUserService.GetByOrganizationForSuperAdminAsync(OrganizationId);
+            Logger.LogInformation("Processing {UserCount} users for organization {Action}", 
+                organizationUsers.Count, activate ? "activation" : "deactivation");
+
+            var successCount = 0;
+            var failureCount = 0;
+            var successful = new List<UserOperationResult>();
+            var failed = new List<UserOperationResult>();
+            var currentUser = HttpContextAccessor.HttpContext?.User;
+            var modifiedBy = currentUser?.FindFirst("email")?.Value ?? "system";
+
+            // Process each user individually to ensure complete control
+            foreach (var user in organizationUsers)
+            {
+                try
+                {
+                    Logger.LogInformation("Processing user {Email} (ID: {UserId}) for {Action}", 
+                        user.Email, user.OnboardedUserId, activate ? "activation" : "deactivation");
+
+                    if (activate)
+                    {
+                        // REACTIVATION: Enable user in Azure AD and restore database access
+                        var azureObjectId = user.AzureObjectId ?? await OnboardedUserService.GetAzureObjectIdByEmailAsync(user.Email, OrganizationId);
+                        var azureSuccess = true; // Default to true if no Azure ObjectId (e.g., for invited but not yet signed-in users)
+                        
+                        if (!string.IsNullOrEmpty(azureObjectId))
+                        {
+                            // Enable Azure AD account
+                            azureSuccess = await GraphService.EnableUserAccountAsync(azureObjectId);
+                            if (azureSuccess)
+                            {
+                                Logger.LogInformation("✅ Azure AD account enabled for {Email}", user.Email);
+                            }
+                            else
+                            {
+                                Logger.LogWarning("❌ Failed to enable Azure AD account for {Email}", user.Email);
+                            }
+                        }
+
+                        // Restore database access
+                        var dbSuccess = await UserAccessValidationService.RestoreUserAccessAsync(user.Email, modifiedBy);
+                        
+                        // Track individual result
+                        var result = new UserOperationResult
+                        {
+                            UserEmail = user.Email,
+                            AzureSuccess = !string.IsNullOrEmpty(azureObjectId) && azureSuccess,
+                            DatabaseSuccess = dbSuccess,
+                            GroupsSuccess = true // Assume groups restored with database access
+                        };
+                        
+                        if (dbSuccess && (!string.IsNullOrEmpty(azureObjectId) ? azureSuccess : true))
+                        {
+                            successCount++;
+                            successful.Add(result);
+                            Logger.LogInformation("✅ Database access restored for {Email}", user.Email);
+                        }
+                        else
+                        {
+                            failureCount++;
+                            result.ErrorMessage = $"Database restore: {(dbSuccess ? "OK" : "Failed")}, Azure AD: {(string.IsNullOrEmpty(azureObjectId) ? "No Object ID" : azureSuccess ? "OK" : "Failed")}";
+                            failed.Add(result);
+                            Logger.LogError("❌ Failed to restore access for {Email}", user.Email);
+                        }
+                    }
+                    else
+                    {
+                        // DEACTIVATION: Disable user in Azure AD and revoke database access
+                        var azureObjectId = user.AzureObjectId ?? await OnboardedUserService.GetAzureObjectIdByEmailAsync(user.Email, OrganizationId);
+                        var azureSuccess = true; // Default to true if no Azure ObjectId (e.g., for invited but not yet signed-in users)
+                        
+                        if (!string.IsNullOrEmpty(azureObjectId))
+                        {
+                            // CRITICAL: Disable Azure AD account (not just remove from groups)
+                            azureSuccess = await GraphService.DisableUserAccountAsync(azureObjectId);
+                            if (azureSuccess)
+                            {
+                                Logger.LogInformation("✅ Azure AD account DISABLED for {Email}", user.Email);
+                            }
+                            else
+                            {
+                                Logger.LogWarning("❌ Failed to disable Azure AD account for {Email}", user.Email);
+                                
+                                // Fallback: Try comprehensive revocation if disable fails
+                                var fallbackSuccess = await GraphService.RevokeUserAccessAsync(azureObjectId);
+                                azureSuccess = fallbackSuccess;
+                                Logger.LogInformation(fallbackSuccess ? 
+                                    "✅ Fallback revocation succeeded for {Email}" : 
+                                    "❌ Fallback revocation failed for {Email}", user.Email);
+                            }
+                        }
+
+                        // Revoke database access
+                        var dbSuccess = await UserAccessValidationService.RevokeUserAccessAsync(user.Email, modifiedBy);
+                        
+                        // Track individual result
+                        var result = new UserOperationResult
+                        {
+                            UserEmail = user.Email,
+                            AzureSuccess = !string.IsNullOrEmpty(azureObjectId) && azureSuccess,
+                            DatabaseSuccess = dbSuccess,
+                            GroupsSuccess = true // Assume groups revoked with database access
+                        };
+                        
+                        if (dbSuccess && (!string.IsNullOrEmpty(azureObjectId) ? azureSuccess : true))
+                        {
+                            successCount++;
+                            successful.Add(result);
+                            Logger.LogInformation("✅ Database access revoked for {Email}", user.Email);
+                        }
+                        else
+                        {
+                            failureCount++;
+                            result.ErrorMessage = $"Database revoke: {(dbSuccess ? "OK" : "Failed")}, Azure AD: {(string.IsNullOrEmpty(azureObjectId) ? "No Object ID" : azureSuccess ? "OK" : "Failed")}";
+                            failed.Add(result);
+                            Logger.LogError("❌ Failed to revoke access for {Email}", user.Email);
+                        }
+                    }
+                }
+                catch (Exception userEx)
+                {
+                    failureCount++;
+                    var result = new UserOperationResult
+                    {
+                        UserEmail = user.Email,
+                        AzureSuccess = false,
+                        DatabaseSuccess = false,
+                        GroupsSuccess = false,
+                        ErrorMessage = $"Exception: {userEx.Message}"
+                    };
+                    failed.Add(result);
+                    Logger.LogError(userEx, "❌ Exception processing user {Email} during organization {Action}", 
+                        user.Email, activate ? "activation" : "deactivation");
+                }
+            }
+
+            Logger.LogInformation("Organization user processing complete: {SuccessCount} succeeded, {FailureCount} failed", 
+                successCount, failureCount);
+
+            if (failureCount > 0)
+            {
+                Logger.LogWarning("⚠️ {FailureCount} users failed during organization {Action}. Manual verification recommended.", 
+                    failureCount, activate ? "activation" : "deactivation");
+            }
+            
+            return (successCount, failureCount, successful, failed);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "❌ CRITICAL ERROR during organization user processing for {Action}", 
+                activate ? "activation" : "deactivation");
+            throw; // Re-throw to stop organization update if user processing fails
+        }
     }
 
     private void ClearMessages()
@@ -477,3 +730,31 @@
         return atIndex > 0 ? email.Substring(atIndex + 1) : string.Empty;
     }
 }
+
+@* Enhanced Organization Status Confirmation Modal *@
+@if (showConfirmationModal)
+{
+    <OrganizationStatusConfirmationModal 
+        OrganizationName="@(organization?.Name ?? "")"
+        UserCount="@confirmationUserCount"
+        IsActivation="@confirmationIsActivation"
+        IsProcessing="@isProcessingOrganization"
+        OnConfirm="@OnConfirmOrganizationStatusChange"
+        OnCancel="@OnCancelOrganizationStatusChange" />
+}
+
+@* Organization Status Results Modal *@
+@if (showResultModal)
+{
+    <OrganizationStatusResultModal 
+        OrganizationName="@(organization?.Name ?? "")"
+        IsActivation="@resultIsActivation"
+        OverallSuccess="@resultOverallSuccess"
+        TotalUsersProcessed="@resultTotalUsersProcessed"
+        SuccessCount="@resultSuccessCount"
+        FailureCount="@resultFailureCount"
+        SuccessfulOperations="@resultSuccessfulOperations"
+        FailedOperations="@resultFailedOperations"
+        OnClose="@CloseResultModal" />
+}
+

@@ -34,8 +34,11 @@ public interface IInvitationService
     /// <param name="invitedBy">ID of the user sending the invitation</param>
     /// <param name="agentTypes">Legacy agent types for backward compatibility</param>
     /// <param name="agentTypeIds">New database-driven agent type IDs for enhanced group assignment</param>
+    /// <param name="selectedDatabaseIds">Database credential IDs to assign to the user</param>
+    /// <param name="assignedRole">User role to assign (OrgAdmin, User, etc.)</param>
+    /// <param name="currentUserEmail">Current user's email for self-invitation prevention</param>
     /// <returns>The invitation result</returns>
-    Task<InvitationResult> InviteUserAsync(Guid organizationId, string emailToInvite, Guid invitedBy, List<LegacyAgentType> agentTypes, List<Guid> agentTypeIds);
+    Task<InvitationResult> InviteUserAsync(Guid organizationId, string emailToInvite, Guid invitedBy, List<LegacyAgentType> agentTypes, List<Guid> agentTypeIds, List<Guid> selectedDatabaseIds, UserRole assignedRole = UserRole.User, string? currentUserEmail = null);
     
     /// <summary>
     /// Gets all pending invitations for an organization

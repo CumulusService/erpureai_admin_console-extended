@@ -19,6 +19,9 @@ public class AdminConsoleDbContext : DbContext
     
     // New table for agent-based group assignments (additive)
     public DbSet<UserAgentTypeGroupAssignment> UserAgentTypeGroupAssignments { get; set; }
+    
+    // User revocation tracking (additive for security)
+    public DbSet<UserRevocationRecord> UserRevocationRecords { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -36,6 +39,7 @@ public class AdminConsoleDbContext : DbContext
             entity.Property(e => e.SAPAPIGatewayHostname).HasMaxLength(255);
             entity.Property(e => e.SAPBusinessOneWebClientHost).HasMaxLength(255);
             entity.Property(e => e.DocumentCode).HasMaxLength(50);
+            entity.Property(e => e.M365GroupId).HasMaxLength(50); // GUID string format
             entity.Property(e => e.DatabaseType).HasConversion<int>();
             entity.Property(e => e.StateCode).HasConversion<int>();
             entity.Property(e => e.StatusCode).HasConversion<int>();
@@ -95,6 +99,12 @@ public class AdminConsoleDbContext : DbContext
             entity.Property(e => e.ConnectionString).IsRequired().HasMaxLength(1000);
             entity.Property(e => e.DatabaseType).HasConversion<int>();
             entity.Property(e => e.OrganizationId).IsRequired();
+            
+            // SAP Configuration (optional database-level overrides)
+            entity.Property(e => e.SAPServiceLayerHostname).HasMaxLength(255);
+            entity.Property(e => e.SAPAPIGatewayHostname).HasMaxLength(255);
+            entity.Property(e => e.SAPBusinessOneWebClientHost).HasMaxLength(255);
+            entity.Property(e => e.DocumentCode).HasMaxLength(50);
         });
 
         // UserDatabaseAssignment configuration
@@ -170,6 +180,39 @@ public class AdminConsoleDbContext : DbContext
             
             // Configure relationships - remove foreign keys due to insufficient permissions
             entity.Ignore(e => e.AgentType);
+            entity.Ignore(e => e.Organization);
+        });
+
+        // UserRevocationRecord configuration (new table for security tracking)
+        modelBuilder.Entity<UserRevocationRecord>(entity =>
+        {
+            entity.HasKey(e => e.RevocationRecordId);
+            entity.Property(e => e.UserId).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.UserEmail).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.UserDisplayName).HasMaxLength(255);
+            entity.Property(e => e.RevokedBy).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.RestoredBy).HasMaxLength(255);
+            entity.Property(e => e.ErrorMessage).HasMaxLength(1000);
+            entity.Property(e => e.Status).HasConversion<int>();
+            
+            // Configure JSON columns
+            entity.Property(e => e.SecurityGroupsRemoved).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.M365GroupsRemoved).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.AppRolesRevoked).HasColumnType("nvarchar(max)");
+            entity.Property(e => e.AdditionalDetails).HasColumnType("nvarchar(max)");
+            
+            // Create indexes for efficient lookups
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.UserEmail);
+            entity.HasIndex(e => e.OrganizationId);
+            entity.HasIndex(e => e.Status);
+            entity.HasIndex(e => e.RevokedOn);
+            
+            // Create composite index for finding active revocations
+            entity.HasIndex(e => new { e.UserId, e.Status });
+            entity.HasIndex(e => new { e.OrganizationId, e.Status });
+            
+            // Remove foreign key relationship due to insufficient permissions
             entity.Ignore(e => e.Organization);
         });
     }

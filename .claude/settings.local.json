@@ -11,7 +11,19 @@
       "Bash(dotnet add package:*)",
       "Bash(dotnet ef migrations:*)",
       "Bash(dotnet tool install:*)",
-      "Bash(sqlcmd:*)"
+      "Bash(sqlcmd:*)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_take_screenshot",
+      "mcp__context7__get-library-docs",
+      "mcp__playwright__browser_evaluate",
+      "mcp__context7__resolve-library-id",
+      "Bash(curl:*)",
+      "Bash(timeout:*)",
+      "Bash(grep:*)",
+      "Bash(dotnet ef database:*)",
+      "Bash(find:*)"
     ],
     "deny": []
   }

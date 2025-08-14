@@ -1,0 +1,55 @@
+@page "/user"
+@using AdminConsole.Models
+@inject NavigationManager Navigation
+@inject IDataIsolationService DataIsolationService
+@inject ILogger<UserRedirect> Logger
+@rendermode InteractiveServer
+
+<PageTitle>Redirecting...</PageTitle>
+
+<div class="container-fluid d-flex justify-content-center align-items-center" style="min-height: 100vh;">
+    <div class="text-center">
+        <div class="spinner-border text-primary mb-3" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <h5 class="text-muted">Redirecting to your dashboard...</h5>
+    </div>
+</div>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await Task.Delay(500); // Brief delay to show loading state
+            
+            var userRole = DataIsolationService.GetCurrentUserRole();
+            Logger.LogInformation("User redirect - User role: {Role}", userRole);
+            
+            // Check if user has admin access
+            if (userRole == UserRole.User)
+            {
+                Logger.LogWarning("Regular user attempted to access admin console");
+                Navigation.NavigateTo("/Account/AccessDenied?reason=Regular users do not have access to the admin console", replace: true);
+                return;
+            }
+            
+            string redirectUrl = userRole switch
+            {
+                UserRole.SuperAdmin => "/owner/dashboard",
+                UserRole.Developer => "/developer/dashboard",
+                UserRole.OrgAdmin => "/admin/users",
+                _ => "/Account/AccessDenied?reason=Unknown user role"
+            };
+            
+            Logger.LogInformation("Redirecting user to: {Url}", redirectUrl);
+            Navigation.NavigateTo(redirectUrl, replace: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error during user redirect");
+            // Fallback to default page
+            Navigation.NavigateTo("/admin/users", replace: true);
+        }
+    }
+}

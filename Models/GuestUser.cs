@@ -7,6 +7,9 @@ namespace AdminConsole.Models;
 public class GuestUser
 {
     private readonly OnboardedUser _onboardedUser;
+    private string? _overrideInvitationStatus; // Field to override invitation status with real Azure AD status
+    private bool? _entraIdEnabled; // Field to store real Entra ID enabled status (separate from database IsActive)
+    private string? _userType; // Field to store actual user type from Azure AD
     
     public GuestUser() 
     {
@@ -69,12 +72,34 @@ public class GuestUser
     
     public string InvitationStatus 
     { 
-        get => _onboardedUser.GetInvitationStatus(); 
-        set { /* Status is computed from StateCode */ }
+        get => _overrideInvitationStatus ?? _onboardedUser.GetInvitationStatus(); 
+        set => _overrideInvitationStatus = value;
     }
     
     // Legacy property for backward compatibility
     public bool IsAdmin => Role == UserRole.OrgAdmin || Role == UserRole.SuperAdmin;
+    
+    // Additional properties needed for SystemUserManagementService
+    public string UserType 
+    { 
+        get => _userType ?? "Guest"; // Default to Guest for external users
+        set => _userType = value;
+    }
+    public bool IsEnabled 
+    { 
+        get => _entraIdEnabled ?? (_onboardedUser.IsActive && _onboardedUser.StateCode == StateCode.Active); 
+        set 
+        {
+            // If setting from Graph API (Entra ID), store in _entraIdEnabled
+            // If setting from database operations, update _onboardedUser.IsActive
+            _entraIdEnabled = value;
+        } 
+    }
+    public DateTime CreatedOn 
+    { 
+        get => _onboardedUser.CreatedOn; 
+        set => _onboardedUser.CreatedOn = value; 
+    }
     
     // Access to underlying OnboardedUser for full functionality
     public OnboardedUser OnboardedUser => _onboardedUser;

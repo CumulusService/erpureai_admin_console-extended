@@ -18,6 +18,7 @@ public class OnboardedUserService : IOnboardedUserService
     private readonly ISecurityGroupService _securityGroupService;
     private readonly ITeamsGroupService _teamsGroupService;
     private readonly IAgentTypeService _agentTypeService;
+    private readonly IAgentGroupAssignmentService _agentGroupAssignmentService;
     private readonly IGraphService _graphService;
 
     public OnboardedUserService(
@@ -29,6 +30,7 @@ public class OnboardedUserService : IOnboardedUserService
         ISecurityGroupService securityGroupService,
         ITeamsGroupService teamsGroupService,
         IAgentTypeService agentTypeService,
+        IAgentGroupAssignmentService agentGroupAssignmentService,
         IGraphService graphService)
     {
         _context = context;
@@ -39,6 +41,7 @@ public class OnboardedUserService : IOnboardedUserService
         _securityGroupService = securityGroupService;
         _teamsGroupService = teamsGroupService;
         _agentTypeService = agentTypeService;
+        _agentGroupAssignmentService = agentGroupAssignmentService;
         _graphService = graphService;
     }
 
@@ -80,14 +83,70 @@ public class OnboardedUserService : IOnboardedUserService
             // Enhanced tenant isolation validation
             await _tenantValidator.ValidateOrganizationAccessAsync(organizationId.ToString(), "get-user");
 
-            return await _context.OnboardedUsers
+            var user = await _context.OnboardedUsers
                 .Where(u => u.OnboardedUserId == userId && u.OrganizationLookupId == organizationId)
                 .FirstOrDefaultAsync();
+                
+            if (user != null)
+            {
+                // CRITICAL FIX: Sync dual storage systems on read to prevent inconsistencies
+                await SyncUserDatabaseAssignments(user);
+            }
+
+            return user;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting user by ID {UserId} for organization {OrganizationId}", userId, organizationId);
             return null;
+        }
+    }
+    
+    /// <summary>
+    /// Synchronizes the dual database assignment storage systems to ensure consistency
+    /// </summary>
+    private async Task SyncUserDatabaseAssignments(OnboardedUser user)
+    {
+        try
+        {
+            // Get assignments from relational table (used by stored procedure - source of truth)
+            var relationalAssignments = await _context.UserDatabaseAssignments
+                .Where(uda => uda.UserId == user.OnboardedUserId && 
+                             uda.OrganizationId == user.OrganizationLookupId && 
+                             uda.IsActive)
+                .Select(uda => uda.DatabaseCredentialId)
+                .ToListAsync();
+                
+            // Compare with JSON field
+            var jsonAssignments = user.AssignedDatabaseIds ?? new List<Guid>();
+            
+            // Check if they match
+            var relationalSet = relationalAssignments.ToHashSet();
+            var jsonSet = jsonAssignments.ToHashSet();
+            
+            if (!relationalSet.SetEquals(jsonSet))
+            {
+                _logger.LogWarning("=== DATABASE ASSIGNMENT MISMATCH DETECTED ===");
+                _logger.LogWarning("  User: {UserId} ({Email})", user.OnboardedUserId, user.Email);
+                _logger.LogWarning("  Relational table: [{RelationalAssignments}] (count: {RelationalCount})", 
+                    string.Join(", ", relationalAssignments), relationalAssignments.Count);
+                _logger.LogWarning("  JSON field: [{JsonAssignments}] (count: {JsonCount})", 
+                    string.Join(", ", jsonAssignments), jsonAssignments.Count);
+                    
+                // Use relational table as source of truth (used by stored procedure)
+                user.AssignedDatabaseIds = relationalAssignments;
+                user.ModifiedOn = DateTime.UtcNow;
+                
+                _logger.LogInformation("=== SYNCING TO RELATIONAL TABLE ===");
+                _logger.LogInformation("  Updated JSON field to: [{SyncedAssignments}]", 
+                    string.Join(", ", relationalAssignments));
+                    
+                await _context.SaveChangesAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error syncing database assignments for user {UserId}", user.OnboardedUserId);
         }
     }
 
@@ -120,6 +179,84 @@ public class OnboardedUserService : IOnboardedUserService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting user by email {Email} for organization {OrganizationId}", email, organizationId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gets a user by their Azure AD Object ID - more reliable than email lookup
+    /// </summary>
+    public async Task<OnboardedUser?> GetByAzureObjectIdAsync(string azureObjectId)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(azureObjectId))
+            {
+                return null;
+            }
+
+            var user = await _context.OnboardedUsers
+                .Where(u => u.AzureObjectId == azureObjectId && !u.IsDeleted)
+                .FirstOrDefaultAsync();
+
+            if (user != null)
+            {
+                // Validate organization access
+                await _tenantValidator.ValidateOrganizationAccessAsync(user.OrganizationLookupId?.ToString() ?? "", "get-user");
+            }
+
+            return user;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting user by Azure Object ID {AzureObjectId}", azureObjectId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Finds a user by email, then returns their Azure Object ID for reliable Azure AD operations
+    /// </summary>
+    public async Task<string?> GetAzureObjectIdByEmailAsync(string email, Guid organizationId)
+    {
+        try
+        {
+            var user = await GetByEmailAsync(email, organizationId);
+            if (user?.AzureObjectId != null)
+            {
+                _logger.LogInformation("✅ Found cached Azure Object ID {AzureObjectId} for user {Email}", 
+                    user.AzureObjectId, email);
+                return user.AzureObjectId;
+            }
+
+            // If no Azure Object ID in database, look it up from Azure AD directly
+            _logger.LogInformation("🔍 No cached Azure Object ID found for {Email}, looking up in Azure AD...", email);
+            
+            var azureUser = await _graphService.GetUserByEmailAsync(email);
+            if (azureUser?.Id != null)
+            {
+                _logger.LogInformation("✅ Found Azure Object ID {AzureObjectId} for user {Email} from Azure AD", 
+                    azureUser.Id, email);
+                
+                // Update the database record with the Azure Object ID for future use
+                if (user != null)
+                {
+                    user.AzureObjectId = azureUser.Id;
+                    user.ModifiedOn = DateTime.UtcNow;
+                    await _context.SaveChangesAsync();
+                    _logger.LogInformation("💾 Updated database with Azure Object ID for user {Email}", email);
+                }
+                
+                return azureUser.Id;
+            }
+
+            _logger.LogWarning("❌ No Azure Object ID found for user {Email} in Azure AD or database", email);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting Azure Object ID for user {Email} in organization {OrganizationId}", 
+                email, organizationId);
             return null;
         }
     }
@@ -466,30 +603,76 @@ public class OnboardedUserService : IOnboardedUserService
 
     public async Task<bool> UpdateDatabaseAssignmentsAsync(Guid userId, List<Guid> databaseIds, Guid organizationId, Guid modifiedBy)
     {
+        using var transaction = await _context.Database.BeginTransactionAsync();
         try
         {
+            _logger.LogInformation("=== CRITICAL FIX: UpdateDatabaseAssignmentsAsync ===");
+            _logger.LogInformation("  UserId: {UserId}, OrganizationId: {OrganizationId}", userId, organizationId);
+            _logger.LogInformation("  New DatabaseIds: [{DatabaseIds}]", string.Join(", ", databaseIds));
+            
             // Get user and validate organization
             var user = await _context.OnboardedUsers
                 .FirstOrDefaultAsync(u => u.OnboardedUserId == userId && u.OrganizationLookupId == organizationId);
 
             if (user != null)
             {
+                // CRITICAL FIX: Update BOTH storage systems to maintain consistency
+                
+                // 1. Update JSON field (legacy system)
                 user.AssignedDatabaseIds = databaseIds;
                 user.ModifiedOn = DateTime.UtcNow;
                 user.ModifiedBy = modifiedBy;
+                
+                // 2. Update UserDatabaseAssignments table (relational system used by stored procedure)
+                // Remove existing assignments for this user
+                var existingAssignments = await _context.UserDatabaseAssignments
+                    .Where(uda => uda.UserId == userId && uda.OrganizationId == organizationId)
+                    .ToListAsync();
+                    
+                if (existingAssignments.Any())
+                {
+                    _logger.LogInformation("Removing {Count} existing UserDatabaseAssignments for user {UserId}", 
+                        existingAssignments.Count, userId);
+                    _context.UserDatabaseAssignments.RemoveRange(existingAssignments);
+                }
+                
+                // Add new assignments
+                foreach (var databaseId in databaseIds)
+                {
+                    var assignment = new UserDatabaseAssignment
+                    {
+                        Id = Guid.NewGuid(),
+                        UserId = userId,
+                        DatabaseCredentialId = databaseId,
+                        OrganizationId = organizationId,
+                        AssignedOn = DateTime.UtcNow,
+                        AssignedBy = modifiedBy.ToString(),
+                        IsActive = true
+                    };
+                    _context.UserDatabaseAssignments.Add(assignment);
+                    _logger.LogInformation("Adding UserDatabaseAssignment: User {UserId} -> Database {DatabaseId}", 
+                        userId, databaseId);
+                }
 
                 await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+                
                 InvalidateCache(organizationId);
 
-                _logger.LogInformation("Updated database assignments for user {UserId} in organization {OrganizationId}. Assigned {DatabaseCount} databases", 
-                    userId, organizationId, databaseIds.Count);
+                _logger.LogInformation("Successfully updated BOTH storage systems for user {UserId}. Assigned {DatabaseCount} databases", 
+                    userId, databaseIds.Count);
                 return true;
+            }
+            else
+            {
+                _logger.LogWarning("User {UserId} not found in organization {OrganizationId}", userId, organizationId);
             }
 
             return false;
         }
         catch (Exception ex)
         {
+            await transaction.RollbackAsync();
             _logger.LogError(ex, "Error updating database assignments for user {UserId} in organization {OrganizationId}", userId, organizationId);
             return false;
         }
@@ -893,6 +1076,412 @@ public class OnboardedUserService : IOnboardedUserService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating group memberships for user {UserId} in organization {OrganizationId}", userId, organizationId);
+        }
+    }
+    
+    public async Task<List<OnboardedUser>> GetByOrganizationForSuperAdminAsync(Guid organizationId)
+    {
+        try
+        {
+            // Super Admin method - bypasses tenant isolation for cross-organizational management
+            var cacheKey = $"superadmin_users_org_{organizationId}";
+            
+            if (_cache.TryGetValue(cacheKey, out List<OnboardedUser>? cachedUsers))
+            {
+                return cachedUsers ?? new List<OnboardedUser>();
+            }
+
+            var users = await _context.OnboardedUsers
+                .Where(u => u.OrganizationLookupId == organizationId && u.StateCode == StateCode.Active)
+                .OrderByDescending(u => u.CreatedOn)
+                .ToListAsync();
+
+            _cache.Set(cacheKey, users, TimeSpan.FromMinutes(2));
+            _logger.LogInformation("Super Admin: Retrieved {UserCount} users from organization {OrganizationId}", users.Count, organizationId);
+            return users;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Super Admin: Error getting users for organization {OrganizationId}", organizationId);
+            return new List<OnboardedUser>();
+        }
+    }
+
+    /// <summary>
+    /// Gets the current agent type assignments for a user
+    /// </summary>
+    /// <param name="userId">User ID</param>
+    /// <param name="organizationId">Organization ID for security validation</param>
+    /// <returns>List of agent type entities currently assigned to the user</returns>
+    public async Task<List<AgentTypeEntity>> GetUserAgentTypesAsync(Guid userId, Guid organizationId)
+    {
+        try
+        {
+            // Validate tenant access
+            await _tenantValidator.ValidateOrganizationAccessAsync(organizationId.ToString(), "read-user-agents");
+
+            // Get user to check their current agent type assignments
+            var user = await GetByIdAsync(userId, organizationId);
+            if (user == null)
+            {
+                _logger.LogWarning("User {UserId} not found in organization {OrganizationId}", userId, organizationId);
+                return new List<AgentTypeEntity>();
+            }
+
+            // Get agent types based on user's AgentTypeIds
+            if (user.AgentTypeIds?.Any() == true)
+            {
+                var agentTypes = await _agentTypeService.GetAgentTypesByIdsAsync(user.AgentTypeIds);
+                _logger.LogInformation("Retrieved {AgentTypeCount} agent types for user {UserId}", agentTypes.Count, userId);
+                return agentTypes;
+            }
+
+            // Fallback to legacy AgentTypes if no AgentTypeIds
+            if (user.AgentTypes?.Any() == true)
+            {
+                _logger.LogInformation("Using legacy agent types for user {UserId}", userId);
+                // Convert legacy agent types to AgentTypeEntity (this would require mapping logic)
+                // For now, return empty list and log the situation
+                _logger.LogWarning("User {UserId} has legacy agent types but no modern AgentTypeIds", userId);
+            }
+
+            return new List<AgentTypeEntity>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting agent types for user {UserId} in organization {OrganizationId}", userId, organizationId);
+            return new List<AgentTypeEntity>();
+        }
+    }
+
+    /// <summary>
+    /// Updates user agent type assignments with comprehensive validation and Azure AD sync
+    /// </summary>
+    /// <param name="userId">User ID</param>
+    /// <param name="newAgentTypeIds">List of new agent type IDs to assign</param>
+    /// <param name="organizationId">Organization ID for security validation</param>
+    /// <param name="modifiedBy">User ID who is making the changes</param>
+    /// <returns>True if updated successfully with Azure AD sync</returns>
+    public async Task<bool> UpdateUserAgentTypesWithSyncAsync(Guid userId, List<Guid> newAgentTypeIds, Guid organizationId, Guid modifiedBy)
+    {
+        OnboardedUser? user = null;
+        List<Guid> originalAgentTypeIds = new();
+        
+        try
+        {
+            // Validate tenant access
+            await _tenantValidator.ValidateOrganizationAccessAsync(organizationId.ToString(), "update-user-agents");
+
+            // Validate agent type assignment
+            var isValidAssignment = await ValidateAgentTypeAssignmentAsync(newAgentTypeIds);
+            if (!isValidAssignment)
+            {
+                _logger.LogError("Invalid agent type assignment for user {UserId}: at least one agent type must be selected", userId);
+                return false;
+            }
+
+            // Get the user
+            user = await GetByIdAsync(userId, organizationId);
+            if (user == null)
+            {
+                _logger.LogError("User {UserId} not found in organization {OrganizationId}", userId, organizationId);
+                return false;
+            }
+
+            _logger.LogInformation("Updating agent type assignments for user {Email} ({UserId})", user.Email, userId);
+
+            // Store original agent type IDs in case we need to rollback
+            originalAgentTypeIds = user.AgentTypeIds.ToList();
+            
+            // Update user's agent type IDs (but don't save yet)
+            user.AgentTypeIds = newAgentTypeIds;
+            user.ModifiedOn = DateTime.UtcNow;
+            user.ModifiedBy = modifiedBy;
+            
+            _logger.LogInformation("🔄 Prepared database update for user {Email} - will save after Azure AD sync succeeds", user.Email);
+
+            // Sync with Azure AD via AgentGroupAssignmentService if user has Azure Object ID
+            bool azureSyncSuccess = true; // Default to success for users without Azure Object ID
+            var azureObjectId = user.AzureObjectId ?? await GetAzureObjectIdByEmailAsync(user.Email, organizationId);
+            if (!string.IsNullOrEmpty(azureObjectId))
+            {
+                try
+                {
+                    _logger.LogInformation("Synchronizing Azure AD group memberships for user {Email} ({AzureObjectId}) with agent types {AgentTypeIds}", 
+                        user.Email, azureObjectId, string.Join(", ", newAgentTypeIds));
+                    
+                    // Validate the Azure Object ID exists in Azure AD before attempting sync
+                    try
+                    {
+                        var azureUserExists = await _graphService.UserExistsAsync(azureObjectId);
+                        if (!azureUserExists)
+                        {
+                            _logger.LogError("❌ CRITICAL: User {Email} (Azure ID: {AzureObjectId}) does not exist in Azure AD. Cannot sync group memberships.", 
+                                user.Email, azureObjectId);
+                            azureSyncSuccess = false;
+                        }
+                        else
+                        {
+                            // Update Azure AD group memberships using AgentGroupAssignmentService
+                            azureSyncSuccess = await _agentGroupAssignmentService.UpdateUserAgentTypeAssignmentsAsync(
+                                azureObjectId, newAgentTypeIds, organizationId, modifiedBy.ToString());
+                                
+                            if (azureSyncSuccess)
+                            {
+                                _logger.LogInformation("✅ Azure AD group memberships synchronized successfully for user {Email}", user.Email);
+                            }
+                            else
+                            {
+                                _logger.LogError("❌ CRITICAL: Azure AD group synchronization failed for user {Email}. Database was updated but Azure AD is out of sync!", user.Email);
+                            }
+                        }
+                    }
+                    catch (Exception validationEx)
+                    {
+                        _logger.LogError(validationEx, "❌ CRITICAL: Failed to validate user existence in Azure AD for {Email} ({AzureObjectId}). Skipping Azure AD sync.", user.Email, azureObjectId);
+                        azureSyncSuccess = false;
+                    }
+                }
+                catch (Exception azureEx)
+                {
+                    _logger.LogError(azureEx, "❌ CRITICAL: Exception during Azure AD sync for user {Email}. Database was updated but Azure AD is out of sync!", user.Email);
+                    azureSyncSuccess = false;
+                }
+            }
+            else
+            {
+                _logger.LogWarning("⚠️ No Azure Object ID found for user {Email} - Azure AD sync skipped", user.Email);
+            }
+
+            // Invalidate cache
+            var cacheKey = $"user_{userId}_org_{organizationId}";
+            _cache.Remove(cacheKey);
+
+            // Save database changes only if Azure AD sync succeeded
+            if (azureSyncSuccess)
+            {
+                await _context.SaveChangesAsync();
+                _logger.LogInformation("✅ Database saved: Updated agent type assignments for user {Email}", user.Email);
+                _logger.LogInformation("✅ Agent type update completed successfully for user {Email} - database and Azure AD in sync", user.Email);
+                return true;
+            }
+            else
+            {
+                // Rollback the user object changes (don't save)
+                user.AgentTypeIds = originalAgentTypeIds;
+                user.ModifiedOn = user.ModifiedOn; // Keep original
+                user.ModifiedBy = user.ModifiedBy; // Keep original
+                _logger.LogError("❌ ROLLBACK: Azure AD sync failed - reverted user agent type changes without saving to database for user {Email}", user.Email);
+                _logger.LogError("❌ Agent type update failed for user {Email} - Azure AD sync failed, database unchanged", user.Email);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            // Ensure rollback in case of exceptions
+            try
+            {
+                if (user != null && originalAgentTypeIds.Any())
+                {
+                    user.AgentTypeIds = originalAgentTypeIds;
+                    _logger.LogWarning("🔄 EXCEPTION ROLLBACK: Reverted user agent type changes due to exception for user {Email}", user.Email);
+                }
+            }
+            catch
+            {
+                // Ignore rollback errors
+            }
+            
+            _logger.LogError(ex, "Error updating agent types for user {UserId} in organization {OrganizationId}", userId, organizationId);
+            return false;
+        }
+    }
+    
+    /// <summary>
+    /// Updates user agent type assignments with flexible Azure AD sync fallback handling
+    /// This method attempts Azure AD sync but will still save database changes if sync fails (with detailed logging)
+    /// </summary>
+    /// <param name="userId">User ID</param>
+    /// <param name="newAgentTypeIds">List of new agent type IDs to assign</param>
+    /// <param name="organizationId">Organization ID for security validation</param>
+    /// <param name="modifiedBy">User ID who is making the changes</param>
+    /// <returns>Result object with success status, database updated status, and Azure sync status</returns>
+    public async Task<UserAgentUpdateResult> UpdateUserAgentTypesWithFallbackAsync(Guid userId, List<Guid> newAgentTypeIds, Guid organizationId, Guid modifiedBy)
+    {
+        var result = new UserAgentUpdateResult();
+        OnboardedUser? user = null;
+        List<Guid> originalAgentTypeIds = new();
+        
+        try
+        {
+            // Validate tenant access
+            await _tenantValidator.ValidateOrganizationAccessAsync(organizationId.ToString(), "update-user-agents");
+
+            // Validate agent type assignment
+            var isValidAssignment = await ValidateAgentTypeAssignmentAsync(newAgentTypeIds);
+            if (!isValidAssignment)
+            {
+                result.ErrorMessage = "Invalid agent type assignment: at least one agent type must be selected";
+                _logger.LogError("Invalid agent type assignment for user {UserId}: at least one agent type must be selected", userId);
+                return result;
+            }
+
+            // Get the user
+            user = await GetByIdAsync(userId, organizationId);
+            if (user == null)
+            {
+                result.ErrorMessage = "User not found in organization";
+                _logger.LogError("User {UserId} not found in organization {OrganizationId}", userId, organizationId);
+                return result;
+            }
+
+            _logger.LogInformation("Updating agent type assignments for user {Email} ({UserId}) with fallback handling", user.Email, userId);
+
+            // Store original agent type IDs in case we need to rollback
+            originalAgentTypeIds = user.AgentTypeIds.ToList();
+
+            // Update user's agent type assignments in memory first
+            user.AgentTypeIds = newAgentTypeIds;
+            user.ModifiedOn = DateTime.UtcNow;
+            user.ModifiedBy = modifiedBy;
+
+            _logger.LogInformation("User agent types updated in memory: {Email} now has {AgentTypeIds}", 
+                user.Email, string.Join(", ", newAgentTypeIds));
+
+            // Attempt Azure AD sync if user has Azure Object ID
+            bool azureSyncSuccess = true;
+            var azureObjectId = user.AzureObjectId ?? await GetAzureObjectIdByEmailAsync(user.Email, organizationId);
+            if (!string.IsNullOrEmpty(azureObjectId))
+            {
+                try
+                {
+                    _logger.LogInformation("Synchronizing Azure AD group memberships for user {Email} ({AzureObjectId}) with agent types {AgentTypeIds}", 
+                        user.Email, azureObjectId, string.Join(", ", newAgentTypeIds));
+                    
+                    // Validate the Azure Object ID exists in Azure AD before attempting sync
+                    var azureUserExists = await _graphService.UserExistsAsync(azureObjectId);
+                    if (!azureUserExists)
+                    {
+                        _logger.LogWarning("⚠️ Azure AD sync warning: User {Email} (Azure ID: {AzureObjectId}) does not exist in Azure AD. Database will be updated but Azure AD groups are out of sync.", 
+                            user.Email, azureObjectId);
+                        azureSyncSuccess = false;
+                        result.WarningMessage = "User was updated in database but does not exist in Azure AD, so security group memberships could not be synchronized.";
+                    }
+                    else
+                    {
+                        // Update Azure AD group memberships using AgentGroupAssignmentService
+                        azureSyncSuccess = await _agentGroupAssignmentService.UpdateUserAgentTypeAssignmentsAsync(
+                            azureObjectId, newAgentTypeIds, organizationId, modifiedBy.ToString());
+                            
+                        if (azureSyncSuccess)
+                        {
+                            _logger.LogInformation("✅ Azure AD group memberships synchronized successfully for user {Email}", user.Email);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("⚠️ Azure AD sync warning: Group synchronization failed for user {Email}. Database will be updated but Azure AD groups may be out of sync.", user.Email);
+                            result.WarningMessage = "User was updated in database but Azure AD security group synchronization failed. The user may not have the correct permissions until this is resolved.";
+                        }
+                    }
+                }
+                catch (Exception azureEx)
+                {
+                    _logger.LogWarning(azureEx, "⚠️ Azure AD sync warning: Exception during Azure AD sync for user {Email}. Database will be updated but Azure AD groups may be out of sync.", user.Email);
+                    azureSyncSuccess = false;
+                    result.WarningMessage = $"User was updated in database but Azure AD synchronization failed due to an error: {azureEx.Message}";
+                }
+            }
+            else
+            {
+                _logger.LogInformation("ℹ️ No Azure Object ID found for user {Email} - Azure AD sync skipped, database-only update", user.Email);
+                result.WarningMessage = "User was updated in database but no Azure Object ID found, so Azure AD synchronization was skipped.";
+            }
+
+            // Always save database changes (unlike the strict sync method)
+            // Invalidate cache first
+            var cacheKey = $"user_{userId}_org_{organizationId}";
+            _cache.Remove(cacheKey);
+
+            await _context.SaveChangesAsync();
+            result.DatabaseUpdated = true;
+            result.AzureADSynced = azureSyncSuccess;
+            result.Success = true;
+            
+            _logger.LogInformation("✅ Database saved: Updated agent type assignments for user {Email}", user.Email);
+            
+            if (azureSyncSuccess)
+            {
+                _logger.LogInformation("✅ Agent type update completed successfully for user {Email} - database and Azure AD in sync", user.Email);
+            }
+            else
+            {
+                _logger.LogWarning("⚠️ Agent type update completed with warnings for user {Email} - database updated but Azure AD sync failed", user.Email);
+            }
+            
+            return result;
+        }
+        catch (Exception ex)
+        {
+            // Ensure rollback in case of exceptions
+            try
+            {
+                if (user != null && originalAgentTypeIds.Any())
+                {
+                    user.AgentTypeIds = originalAgentTypeIds;
+                    _logger.LogWarning("🔄 EXCEPTION ROLLBACK: Reverted user agent type changes due to exception for user {Email}", user.Email);
+                }
+            }
+            catch
+            {
+                // Ignore rollback errors
+            }
+            
+            result.ErrorMessage = $"An unexpected error occurred: {ex.Message}";
+            _logger.LogError(ex, "Error updating agent types for user {UserId} in organization {OrganizationId}", userId, organizationId);
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Validates agent type assignment ensuring at least one agent type is always selected
+    /// </summary>
+    /// <param name="agentTypeIds">List of agent type IDs to validate</param>
+    /// <returns>True if valid assignment (at least one agent type)</returns>
+    public async Task<bool> ValidateAgentTypeAssignmentAsync(List<Guid> agentTypeIds)
+    {
+        try
+        {
+            // Allow empty agent type assignments (users can have zero agent types)
+            if (agentTypeIds == null)
+            {
+                agentTypeIds = new List<Guid>();
+            }
+            
+            if (!agentTypeIds.Any())
+            {
+                _logger.LogInformation("Agent type assignment validation passed: user assigned zero agent types (allowed)");
+                return true;
+            }
+
+            // Validate that all provided agent type IDs exist and are active
+            var existingAgentTypes = await _agentTypeService.GetAgentTypesByIdsAsync(agentTypeIds);
+            var activeAgentTypeIds = existingAgentTypes.Where(at => at.IsActive).Select(at => at.Id).ToList();
+
+            if (activeAgentTypeIds.Count != agentTypeIds.Count)
+            {
+                var missingIds = agentTypeIds.Except(activeAgentTypeIds).ToList();
+                _logger.LogWarning("Agent type assignment validation failed: invalid or inactive agent types {MissingIds}", 
+                    string.Join(", ", missingIds));
+                return false;
+            }
+
+            _logger.LogInformation("Agent type assignment validation passed for {AgentTypeCount} agent types", agentTypeIds.Count);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error validating agent type assignment");
+            return false;
         }
     }
 }

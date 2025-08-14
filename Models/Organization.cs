@@ -23,14 +23,20 @@ public class Organization
     public string KeyVaultUri { get; set; } = string.Empty; // new_keyvaulturi
     public string KeyVaultSecretPrefix { get; set; } = string.Empty; // new_keyvaultsecretprefix
     
+    // MICROSOFT 365 INTEGRATION
+    public string? M365GroupId { get; set; } // Microsoft 365 Group Object ID (nullable for existing organizations)
+    
     // Database configuration
     public OrganizationDatabaseType DatabaseType { get; set; } = OrganizationDatabaseType.SQL; // new_databasetype (default: SQL)
     
-    // SAP Configuration
-    public string SAPServiceLayerHostname { get; set; } = string.Empty; // new_sapservicelayerhostname
-    public string SAPAPIGatewayHostname { get; set; } = string.Empty; // new_sapapigatewayhostname
-    public string SAPBusinessOneWebClientHost { get; set; } = string.Empty; // cr032_sapbusinessonewebclienthost
-    public string DocumentCode { get; set; } = string.Empty; // cr032_documentcode
+    // SAP Configuration - nullable to support proper empty states
+    public string? SAPServiceLayerHostname { get; set; } // new_sapservicelayerhostname
+    public string? SAPAPIGatewayHostname { get; set; } // new_sapapigatewayhostname
+    public string? SAPBusinessOneWebClientHost { get; set; } // cr032_sapbusinessonewebclienthost
+    public string? DocumentCode { get; set; } // cr032_documentcode
+    
+    // ORGANIZATION-LEVEL AGENT TYPE ALLOCATION (SuperAdmin responsibility)
+    public string OrganizationAgentTypeIds { get; set; } = string.Empty; // JSON array of agent type GUIDs allocated to organization
     
     // System fields (standard Dataverse fields)
     public DateTime CreatedOn { get; set; } = DateTime.UtcNow;
@@ -114,6 +120,33 @@ public class Organization
         var atIndex = AdminEmail.IndexOf('@');
         return atIndex > 0 ? AdminEmail.Substring(atIndex + 1) : string.Empty;
     }
+    
+    /// <summary>
+    /// Gets the list of agent type GUIDs allocated to this organization by SuperAdmin
+    /// </summary>
+    public List<Guid> GetOrganizationAgentTypeIds()
+    {
+        if (string.IsNullOrEmpty(OrganizationAgentTypeIds))
+            return new List<Guid>();
+            
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<List<Guid>>(OrganizationAgentTypeIds) ?? new List<Guid>();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return new List<Guid>();
+        }
+    }
+    
+    /// <summary>
+    /// Sets the list of agent type GUIDs allocated to this organization by SuperAdmin
+    /// </summary>
+    public void SetOrganizationAgentTypeIds(IEnumerable<Guid> agentTypeIds)
+    {
+        var agentTypeList = agentTypeIds?.ToList() ?? new List<Guid>();
+        OrganizationAgentTypeIds = System.Text.Json.JsonSerializer.Serialize(agentTypeList);
+    }
 }
 
 /// <summary>
@@ -146,6 +179,14 @@ public static class OrganizationExtensions
     public static string GetInvitationDomain(this Organization org)
     {
         return org.Domain;
+    }
+    
+    /// <summary>
+    /// Checks if the organization has an associated Microsoft 365 Group
+    /// </summary>
+    public static bool HasM365Group(this Organization org)
+    {
+        return !string.IsNullOrEmpty(org.M365GroupId) && Guid.TryParse(org.M365GroupId, out _);
     }
     
     /// <summary>

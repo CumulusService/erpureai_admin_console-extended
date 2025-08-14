@@ -1,9 +1,15 @@
 @page "/owner/admins"
 @using AdminConsole.Models
 @using AdminConsole.Services
+@using AdminConsole.Components.Shared
 @using System.Security.Claims
 @inject IOrganizationService OrganizationService
 @inject IGraphService GraphService
+@inject IUserAccessValidationService UserAccessValidationService
+@inject IOnboardedUserService OnboardedUserService
+@inject IAgentGroupAssignmentService AgentGroupAssignmentService
+@inject ITeamsGroupService TeamsGroupService
+@inject IModalService ModalService
 @inject NavigationManager Navigation
 @inject IHttpContextAccessor HttpContextAccessor
 @inject ILogger<ManageAdmins> Logger
@@ -14,17 +20,25 @@
 
 <div class="container-fluid">
     <div class="d-sm-flex align-items-center justify-content-between mb-4">
-        <h1 class="h3 mb-0 text-gray-800">
+        <h1 class="h3 mb-0 text-white">
             <i class="fas fa-user-shield text-warning me-2"></i>
             Manage Organization Admins
         </h1>
         <div class="d-flex gap-2">
+            <button class="btn btn-secondary btn-sm" @onclick="RefreshAdmins" disabled="@isLoadingAdmins">
+                @if (isLoadingAdmins)
+                {
+                    <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                }
+                else
+                {
+                    <i class="fas fa-sync-alt me-1"></i>
+                }
+                Refresh
+            </button>
             <a href="/owner/invite-admin" class="btn btn-primary btn-sm">
                 <i class="fas fa-plus"></i> Invite Admin
             </a>
-            <button class="btn btn-info btn-sm" @onclick="TestClick">
-                <i class="fas fa-bug"></i> Test Click
-            </button>
         </div>
     </div>
 
@@ -40,6 +54,7 @@
                         <option value="">All Statuses</option>
                         <option value="Accepted">Active</option>
                         <option value="PendingAcceptance">Pending</option>
+                        <option value="Disabled">Disabled</option>
                     </select>
                 </div>
                 <div class="col-md-4">
@@ -102,11 +117,19 @@
                                         </span>
                                     </td>
                                     <td>
-                                        @switch (admin.InvitationStatus)
+                                        @{
+                                            var userStatus = GetUserActualStatus(admin);
+                                        }
+                                        @switch (userStatus)
                                         {
-                                            case "Accepted":
+                                            case "Active":
                                                 <span class="badge bg-success">
                                                     <i class="fas fa-check me-1"></i> Active
+                                                </span>
+                                                break;
+                                            case "Disabled":
+                                                <span class="badge bg-danger">
+                                                    <i class="fas fa-user-slash me-1"></i> Disabled
                                                 </span>
                                                 break;
                                             case "PendingAcceptance":
@@ -114,9 +137,14 @@
                                                     <i class="fas fa-clock me-1"></i> Pending
                                                 </span>
                                                 break;
+                                            case "Inactive":
+                                                <span class="badge bg-secondary">
+                                                    <i class="fas fa-user-times me-1"></i> Inactive
+                                                </span>
+                                                break;
                                             default:
                                                 <span class="badge bg-secondary">
-                                                    @admin.InvitationStatus
+                                                    @userStatus
                                                 </span>
                                                 break;
                                         }
@@ -132,24 +160,65 @@
                                         </small>
                                     </td>
                                     <td>
-                                        <button class="btn btn-sm btn-primary me-1" @onclick="@(() => ViewAdminDetails(admin))">
-                                            <i class="fas fa-eye"></i>
-                                        </button>
-                                        <button class="btn btn-sm btn-info me-1" @onclick="@(() => ViewOrganization(admin.OrganizationId))">
-                                            <i class="fas fa-building"></i>
-                                        </button>
-                                        @if (admin.InvitationStatus == "PendingAcceptance")
-                                        {
-                                            <button class="btn btn-sm btn-warning me-1" @onclick="@(() => ResendInvitation(admin))">
-                                                <i class="fas fa-paper-plane"></i>
-                                            </button>
-                                        }
-                                        @if (admin.Role != UserRole.SuperAdmin)
-                                        {
-                                            <button class="btn btn-sm btn-danger" @onclick="@(() => ShowRevokeConfirmation(admin))">
-                                                <i class="fas fa-user-times"></i>
-                                            </button>
-                                        }
+                                        <div class="d-flex gap-2">
+                                            <ActionButton Text="View Details"
+                                                        IconClass="fas fa-eye"
+                                                        Type="ActionType.View"
+                                                        Size="ButtonSize.Small"
+                                                        OnClick="@(() => ViewAdminDetails(admin))"
+                                                        FullDescription="View detailed information about this administrator"
+                                                        ShowConsequence="false" />
+                                            
+                                            <ActionButton Text="View Organization"
+                                                        IconClass="fas fa-building"
+                                                        Type="ActionType.Info"
+                                                        Size="ButtonSize.Small"
+                                                        OnClick="@(() => ViewOrganization(admin.OrganizationId))"
+                                                        FullDescription="View the organization this admin belongs to"
+                                                        ShowConsequence="false" />
+                                            
+                                            @if (admin.InvitationStatus == "PendingAcceptance")
+                                            {
+                                                <ActionButton Text="Resend Invitation"
+                                                            IconClass="fas fa-paper-plane"
+                                                            Type="ActionType.Warning"
+                                                            Size="ButtonSize.Small"
+                                                            OnClick="@(() => ResendInvitation(admin))"
+                                                            IsLoading="@isLoadingAdmins"
+                                                            LoadingText="Sending..."
+                                                            FullDescription="Send another invitation email to this administrator"
+                                                            ConsequenceText="New email sent"
+                                                            ShowConsequence="true" />
+                                            }
+                                            
+
+                                            @if (admin.Role != UserRole.SuperAdmin)
+                                            {
+                                                var currentStatus = GetUserActualStatus(admin);
+                                                if (currentStatus == "Disabled" || currentStatus == "Inactive")
+                                                {
+                                                    <ActionButton Text="Reactivate Admin"
+                                                                IconClass="fas fa-user-check"
+                                                                Type="ActionType.Success"
+                                                                Size="ButtonSize.Small"
+                                                                OnClick="@(() => ShowReactivateConfirmation(admin))"
+                                                                FullDescription="Restore full administrator access to this user"
+                                                                ConsequenceText="Access restored"
+                                                                ShowConsequence="true" />
+                                                }
+                                                else if (currentStatus == "Active")
+                                                {
+                                                    <ActionButton Text="Revoke Access"
+                                                                IconClass="fas fa-user-times"
+                                                                Type="ActionType.Danger"
+                                                                Size="ButtonSize.Small"
+                                                                OnClick="@(() => ShowRevokeConfirmation(admin))"
+                                                                FullDescription="Remove all administrator access from this user"
+                                                                ConsequenceText="Removed"
+                                                                ShowConsequence="true" />
+                                                }
+                                            }
+                                        </div>
                                     </td>
                                 </tr>
                             }
@@ -266,44 +335,31 @@
 }
 
 <!-- Revoke Confirmation Modal -->
-@if (adminToRevoke != null && showRevokeModal)
-{
-    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title text-danger">
-                        <i class="fas fa-exclamation-triangle me-2"></i> Revoke Admin Access
-                    </h5>
-                    <button type="button" class="btn-close" @onclick="CloseRevokeModal"></button>
-                </div>
-                <div class="modal-body">
-                    <p>Are you sure you want to revoke admin access for <strong>@adminToRevoke.DisplayName</strong>?</p>
-                    <div class="alert alert-warning">
-                        <i class="fas fa-exclamation-triangle me-2"></i>
-                        This action will:
-                        <ul class="mb-0 mt-2">
-                            <li>Remove admin privileges for <strong>@adminToRevoke.OrganizationName</strong></li>
-                            <li>Revoke access to organization's users and secrets</li>
-                            <li>Remove the user from your Azure tenant</li>
-                            <li><strong>Cannot be undone</strong> - you'll need to re-invite them</li>
-                        </ul>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" @onclick="CloseRevokeModal">Cancel</button>
-                    <button type="button" class="btn btn-danger" @onclick="ConfirmRevokeAccess" disabled="@isRevokingAccess">
-                        @if (isRevokingAccess)
-                        {
-                            <span class="spinner-border spinner-border-sm me-2" role="status"></span>
-                        }
-                        <i class="fas fa-user-times me-1"></i> Revoke Access
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-}
+<ConfirmationModal IsVisible="@showRevokeModal"
+                   Title="Revoke Administrator Access"
+                   Message="@($"Are you sure you want to revoke administrator access for {adminToRevoke?.DisplayName}?")"
+                   DetailsText="@($"<strong>This action will:</strong><br/>• Remove admin privileges for <strong>{adminToRevoke?.OrganizationName}</strong><br/>• Revoke access to organization's users and secrets<br/>• Remove the user from Azure AD groups<br/>• Disable their account access")"
+                   ConsequenceText="This action cannot be easily undone - you'll need to re-invite and re-configure the user"
+                   Type="ConfirmationType.Danger"
+                   ConfirmText="Revoke Access"
+                   CancelText="Cancel"
+                   OnConfirm="ConfirmRevokeAccess"
+                   OnCancel="CloseRevokeModal"
+                   IsProcessing="@isRevokingAccess" />
+
+<!-- Reactivate Confirmation Modal -->
+<ConfirmationModal IsVisible="@showReactivateModal"
+                   Title="Reactivate Administrator Access"
+                   Message="@($"Are you sure you want to reactivate administrator access for {adminToReactivate?.DisplayName}?")"
+                   DetailsText="@($"<strong>This action will:</strong><br/>• Enable the user account in Azure Entra ID (if disabled)<br/>• Restore admin privileges for <strong>{adminToReactivate?.OrganizationName}</strong><br/>• Allow the user to access the admin console again<br/>• Restore all previous permissions and group memberships")"
+                   ConsequenceText="Make sure you trust this user before reactivating their access"
+                   Type="ConfirmationType.Warning"
+                   ConfirmText="Reactivate Access"
+                   CancelText="Cancel"
+                   OnConfirm="ConfirmReactivateAccess"
+                   OnCancel="CloseReactivateModal"
+                   IsProcessing="@isReactivatingAccess" />
+
 
 @code {
     private List<GuestUser> allAdmins = new();
@@ -314,9 +370,16 @@
     // Modal states
     private bool showAdminModal = false;
     private bool showRevokeModal = false;
+    private bool showReactivateModal = false;
     private GuestUser? selectedAdmin;
     private GuestUser? adminToRevoke;
+    private GuestUser? adminToReactivate;
     private bool isRevokingAccess = false;
+    private bool isReactivatingAccess = false;
+    private bool isLoadingAdmins = false;
+    
+    // Cache for database user status to avoid repeated lookups
+    private Dictionary<string, OnboardedUser?> userStatusCache = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -345,62 +408,107 @@
     {
         try
         {
-            // Load all guest users from Azure AD
-            var allGuestUsers = await GraphService.GetAllGuestUsersAsync();
-            
-            // Load organizations to match admins
+            // Check if user is authenticated before loading data
+            var currentUser = HttpContextAccessor.HttpContext?.User;
+            if (currentUser?.Identity?.IsAuthenticated != true)
+            {
+                Logger.LogWarning("Cannot load admins - user not authenticated");
+                allAdmins = new List<GuestUser>();
+                filteredAdmins = allAdmins;
+                return;
+            }
+
+            // Load organizations first for reference
             var organizations = (await OrganizationService.GetAllOrganizationsAsync()).ToList();
             
-            // Filter users who are organization admins or have admin roles
+            // For Super Admins: Load only organization administrators from database to avoid tenant isolation issues
+            // This prevents loading ALL guest users and trying to access cross-organizational data
             allAdmins = new List<GuestUser>();
             
-            foreach (var user in allGuestUsers)
+            foreach (var org in organizations)
             {
-                // Find matching organization by email domain
-                var userDomain = user.Email.Split('@').LastOrDefault();
-                var matchingOrg = organizations.FirstOrDefault(o => o.Domain.Equals(userDomain, StringComparison.OrdinalIgnoreCase));
-                
-                if (matchingOrg != null)
+                try
                 {
-                    user.OrganizationId = matchingOrg.Id;
-                    user.OrganizationName = matchingOrg.Name;
+                    // Super admin bypass: Use dedicated method that bypasses tenant isolation
+                    var orgUsers = await OnboardedUserService.GetByOrganizationForSuperAdminAsync(org.OrganizationId);
                     
-                    // Determine role based on authentication policies logic
-                    user.Role = DetermineUserRole(user.Email);
+                    // Debug: Log all users found in this organization
+                    Logger.LogInformation("DEBUG: Found {UserCount} users in organization {OrgName}: {UserEmails}", 
+                        orgUsers.Count, org.Name, string.Join(", ", orgUsers.Select(u => u.Email)));
                     
-                    allAdmins.Add(user);
+                    // Filter only users with admin roles (OrgAdmin)
+                    var adminUsers = orgUsers.Where(u => {
+                        var role = u.GetUserRole();
+                        Logger.LogInformation("DEBUG: User {Email} has role {Role} (AgentTypes: {AgentTypes}, AgentTypeIds: {AgentTypeIds}, IsActive: {IsActive})", 
+                            u.Email, role, string.Join(", ", u.AgentTypes), string.Join(", ", u.AgentTypeIds), u.IsActive);
+                        return role == UserRole.OrgAdmin;
+                    }).ToList();
+                    
+                    foreach (var adminUser in adminUsers)
+                    {
+                        var guestUser = new GuestUser(adminUser)
+                        {
+                            OrganizationId = org.Id,
+                            OrganizationName = org.Name,
+                            Role = UserRole.OrgAdmin
+                        };
+                        
+                        // CRITICAL FIX: Get real-time Azure AD invitation status instead of database status
+                        try
+                        {
+                            var realTimeStatus = await adminUser.GetRealTimeInvitationStatusAsync(GraphService);
+                            // Override the database-based status with real Azure AD status
+                            guestUser.InvitationStatus = realTimeStatus;
+                            
+                            Logger.LogDebug("Updated invitation status for {Email}: Database={DatabaseStatus}, Azure AD={AzureStatus}", 
+                                adminUser.Email, adminUser.GetInvitationStatus(), realTimeStatus);
+                        }
+                        catch (Exception statusEx)
+                        {
+                            Logger.LogWarning(statusEx, "Failed to get real-time invitation status for {Email}, using database status", adminUser.Email);
+                        }
+                        
+                        // Cache the database user for status display
+                        userStatusCache[guestUser.Email] = adminUser;
+                        
+                        allAdmins.Add(guestUser);
+                    }
+                    
+                    Logger.LogInformation("Loaded {AdminCount} org admins from organization {OrgName} (out of {TotalUsers} total users)", 
+                        adminUsers.Count, org.Name, orgUsers.Count);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Could not load admin users from organization {OrgName} ({OrgId})", org.Name, org.Id);
                 }
             }
             
-            // Add test data if no real data found to test UI functionality
-            if (!allAdmins.Any())
+            // Add super admin users (from erpure.ai domain) - these don't need database lookup
+            try
             {
-                allAdmins.Add(new GuestUser
-                {
-                    Id = "test-super-admin",
-                    DisplayName = "Test Super Admin",
-                    Email = "admin@erpure.ai",
-                    UserPrincipalName = "admin_erpure.ai#EXT#@tenant.onmicrosoft.com",
-                    Role = UserRole.SuperAdmin,
-                    OrganizationId = "erpure_ai",
-                    OrganizationName = "ERPURE.AI",
-                    InvitedDateTime = DateTime.UtcNow.AddDays(-30),
-                    InvitationStatus = "Accepted"
-                });
+                var allGuestUsers = await GraphService.GetAllGuestUsersAsync();
+                var superAdminUsers = allGuestUsers.Where(u => u.Email.EndsWith("@erpure.ai", StringComparison.OrdinalIgnoreCase));
                 
-                allAdmins.Add(new GuestUser
+                foreach (var superAdmin in superAdminUsers)
                 {
-                    Id = "test-org-admin",
-                    DisplayName = "Test Org Admin",
-                    Email = "admin@testcompany.com",
-                    UserPrincipalName = "admin_testcompany.com#EXT#@tenant.onmicrosoft.com",
-                    Role = UserRole.OrgAdmin,
-                    OrganizationId = "testcompany_com",
-                    OrganizationName = "Test Company",
-                    InvitedDateTime = DateTime.UtcNow.AddDays(-15),
-                    InvitationStatus = "Accepted"
-                });
+                    superAdmin.Role = UserRole.SuperAdmin;
+                    superAdmin.OrganizationId = "erpure_ai";
+                    superAdmin.OrganizationName = "ERPURE.AI";
+                    
+                    // Super admins don't need database status - they're always active
+                    userStatusCache[superAdmin.Email] = null;
+                    
+                    allAdmins.Add(superAdmin);
+                }
+                
+                Logger.LogDebug("Loaded {SuperAdminCount} super admin users", superAdminUsers.Count());
             }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Could not load super admin users from Azure AD");
+            }
+            
+            // No test data - show real admin users only
 
             filteredAdmins = allAdmins;
         }
@@ -420,7 +528,9 @@
              admin.DisplayName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
              admin.Email.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
              admin.OrganizationName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)) &&
-            (string.IsNullOrEmpty(statusFilter) || admin.InvitationStatus == statusFilter)
+            (string.IsNullOrEmpty(statusFilter) || 
+             (statusFilter == "Disabled" && GetUserActualStatus(admin) == "Disabled") ||
+             (statusFilter != "Disabled" && admin.InvitationStatus == statusFilter))
         ).ToList();
     }
 
@@ -459,13 +569,6 @@
         return UserRole.OrgAdmin;
     }
     
-    private void TestClick()
-    {
-        // Simple test to verify Blazor interactivity is working
-        searchTerm = "TEST CLICKED - " + DateTime.Now.ToString("HH:mm:ss");
-        StateHasChanged();
-    }
-
     private void ViewAdminDetails(GuestUser admin)
     {
         selectedAdmin = admin;
@@ -491,25 +594,45 @@
     {
         try
         {
-            // Create a new invitation since resend is not directly supported
-            var domain = admin.Email.Split('@').LastOrDefault();
-            var org = organizations?.FirstOrDefault(o => o.Domain.Equals(domain, StringComparison.OrdinalIgnoreCase));
+            Logger.LogInformation("Resending invitation to admin {AdminEmail} ({AdminId})", admin.Email, admin.Id);
             
-            if (org != null)
+            // Show loading state
+            isLoadingAdmins = true;
+            StateHasChanged();
+            
+            // Use Azure Object ID if available, fall back to email for invitations (email required for invitation operations)
+            var orgId = Guid.TryParse(admin.OrganizationId, out var parsedOrgId) ? parsedOrgId : Guid.Empty;
+            var azureObjectId = await OnboardedUserService.GetAzureObjectIdByEmailAsync(admin.Email, orgId);
+            var userIdForInvitation = !string.IsNullOrEmpty(azureObjectId) ? azureObjectId : admin.Email;
+            
+            Logger.LogInformation("Resending invitation using {IdType}: {UserId}", 
+                !string.IsNullOrEmpty(azureObjectId) ? "Azure Object ID" : "Email", userIdForInvitation);
+            
+            var result = await GraphService.ResendInvitationAsync(userIdForInvitation);
+            
+            if (result)
             {
-                var result = await GraphService.InviteGuestUserAsync(admin.Email, org.Name);
-                if (result.Success)
-                {
-                    // Update invitation status
-                    admin.InvitationStatus = "PendingAcceptance";
-                    StateHasChanged();
-                }
+                // Update invitation status to reflect resend
+                admin.InvitationStatus = "PendingAcceptance";
+                
+                // Update last invitation date display
+                admin.InvitedDateTime = DateTime.UtcNow;
+                
+                Logger.LogInformation("Successfully resent invitation to admin {AdminEmail}", admin.Email);
+            }
+            else
+            {
+                Logger.LogError("Failed to resend invitation to admin {AdminEmail}", admin.Email);
             }
         }
         catch (Exception ex)
         {
-            // Handle error silently for now
-            Logger.LogError(ex, "Error resending invitation to admin");
+            Logger.LogError(ex, "Error resending invitation to admin {AdminEmail}", admin.Email);
+        }
+        finally
+        {
+            isLoadingAdmins = false;
+            StateHasChanged();
         }
     }
 
@@ -531,28 +654,430 @@
     {
         if (adminToRevoke == null || isRevokingAccess) return;
 
+        // Store local reference to prevent race conditions
+        var adminRef = adminToRevoke;
+
         isRevokingAccess = true;
         try
         {
-            // Revoke user access using GraphService
-            var success = await GraphService.RevokeUserAccessAsync(adminToRevoke.Id);
+            Logger.LogInformation("Revoking access for admin {AdminEmail} (ID: {AdminId})", adminRef.Email, adminRef.Id);
+
+            // First, try to revoke user access using GraphService (removes from Azure AD groups)
+            // Look up Azure Object ID for reliable Azure AD operations
+            var orgId = Guid.TryParse(adminRef.OrganizationId, out var parsedOrgId) ? parsedOrgId : Guid.Empty;
+            var azureObjectId = await OnboardedUserService.GetAzureObjectIdByEmailAsync(adminRef.Email, orgId);
             
-            if (success)
+            bool graphSuccess = false;
+            if (!string.IsNullOrEmpty(azureObjectId))
             {
-                // Remove from local list and refresh
-                allAdmins.Remove(adminToRevoke);
+                Logger.LogInformation("🔍 Found Azure Object ID {AzureObjectId} for {AdminEmail}, using for GraphService operations", 
+                    azureObjectId, adminRef.Email);
+                graphSuccess = await GraphService.RevokeUserAccessAsync(azureObjectId);
+            }
+            else
+            {
+                Logger.LogWarning("❌ No Azure Object ID found for {AdminEmail}, skipping GraphService operations. User may only be revoked in database.", adminRef.Email);
+                graphSuccess = true; // Skip GraphService operations if no Azure Object ID available
+            }
+            
+            if (graphSuccess)
+            {
+                Logger.LogInformation("Successfully revoked Graph API access for {AdminEmail}", adminRef.Email);
+            }
+            else
+            {
+                Logger.LogWarning("Graph API revocation failed for {AdminEmail}, continuing with database revocation", adminRef.Email);
+            }
+
+            // CRITICAL FIX: Deactivate agent group assignments in database so they can be reactivated later
+            Logger.LogInformation("Step 2: Deactivating agent group assignments for {AdminEmail}", adminRef.Email);
+            var userIdForAgentGroups = !string.IsNullOrEmpty(azureObjectId) ? azureObjectId : adminRef.Email;
+            var agentGroupSuccess = await AgentGroupAssignmentService.DeactivateUserAgentGroupAssignmentsAsync(userIdForAgentGroups, orgId);
+            
+            if (agentGroupSuccess)
+            {
+                Logger.LogInformation("✅ Successfully deactivated agent group assignments for {AdminEmail}", adminRef.Email);
+            }
+            else
+            {
+                Logger.LogWarning("⚠️ Failed to deactivate some agent group assignments for {AdminEmail}", adminRef.Email);
+            }
+
+            // Always perform database-based revocation (this is the critical part that blocks app access)
+            var currentUser = HttpContextAccessor.HttpContext?.User;
+            var revokedByEmail = currentUser?.FindFirst("email")?.Value ?? "system";
+            
+            var databaseSuccess = await UserAccessValidationService.RevokeUserAccessAsync(adminRef.Email, revokedByEmail);
+            
+            if (databaseSuccess)
+            {
+                Logger.LogInformation("Successfully revoked database access for {AdminEmail}", adminRef.Email);
+                
+                // Update admin status instead of removing from list
+                // Update the status cache to reflect disabled state
+                if (userStatusCache.TryGetValue(adminRef.Email, out var cachedUser) && cachedUser != null)
+                {
+                    cachedUser.IsActive = false;
+                    cachedUser.StatusCode = StatusCode.Inactive;
+                    userStatusCache[adminRef.Email] = cachedUser;
+                }
+                
+                // Refresh the UI to show updated status
                 FilterAdmins();
                 CloseRevokeModal();
+                
+                // Show success message
+                Logger.LogInformation("Admin access revoked for {AdminEmail}. User is now disabled and can be reactivated if needed.", adminRef.Email);
+            }
+            else
+            {
+                Logger.LogError("Failed to revoke database access for {AdminEmail}. User may still be able to access the application!", adminRef.Email);
+                // TODO: Show error message to user
             }
         }
         catch (Exception ex)
         {
             // Handle error - could show toast notification
-            Logger.LogError(ex, "Error removing admin");
+            Logger.LogError(ex, "Error revoking admin access for {AdminEmail}", adminRef?.Email);
         }
         finally
         {
             isRevokingAccess = false;
         }
     }
+
+    private string GetUserActualStatus(GuestUser admin)
+    {
+        try
+        {
+            // Check cache first
+            if (userStatusCache.TryGetValue(admin.Email, out var cachedUser))
+            {
+                if (cachedUser == null)
+                {
+                    // User not found in database, fall back to invitation status
+                    return admin.InvitationStatus;
+                }
+                
+                // Return database status
+                if (cachedUser.IsDeleted)
+                    return "Deleted";
+                if (!cachedUser.IsActive || cachedUser.StatusCode != StatusCode.Active)
+                    return "Disabled";
+                return "Active";
+            }
+            
+            // If not cached, fall back to invitation status for now
+            // The cache will be populated during LoadAdmins
+            return admin.InvitationStatus == "Accepted" ? "Active" : admin.InvitationStatus;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error getting user status for {Email}", admin.Email);
+            return admin.InvitationStatus;
+        }
+    }
+
+    private void ShowReactivateConfirmation(GuestUser admin)
+    {
+        adminToReactivate = admin;
+        showReactivateModal = true;
+        StateHasChanged();
+    }
+
+    private void CloseReactivateModal()
+    {
+        adminToReactivate = null;
+        showReactivateModal = false;
+        isReactivatingAccess = false;
+    }
+
+    private async Task ConfirmReactivateAccess()
+    {
+        if (adminToReactivate == null || isReactivatingAccess) return;
+
+        // Store local reference to prevent race conditions
+        var adminRef = adminToReactivate;
+
+        // Check authentication before proceeding
+        var currentUser = HttpContextAccessor.HttpContext?.User;
+        if (currentUser?.Identity?.IsAuthenticated != true)
+        {
+            Logger.LogError("Cannot reactivate admin - current user not authenticated");
+            return;
+        }
+
+        isReactivatingAccess = true;
+        var restorationSteps = new List<string>();
+        var failedSteps = new List<string>();
+        
+        try
+        {
+            Logger.LogInformation("=== STARTING COMPLETE ADMIN REACTIVATION for {AdminEmail} (ID: {AdminId}) ===", adminRef.Email, adminRef.Id);
+
+            // Step 1: Get admin data from database and organization info
+            Logger.LogInformation("Step 1: Getting admin data from database");
+            var orgId = Guid.Empty;
+            var organization = organizations?.FirstOrDefault(o => o.Id == adminRef.OrganizationId);
+            if (organization != null)
+            {
+                orgId = organization.OrganizationId;
+            }
+            
+            Logger.LogInformation("DEBUG: Looking up admin {Email} in org {OrgId}", adminRef.Email, orgId);
+            var onboardedAdmin = await OnboardedUserService.GetByEmailAsync(adminRef.Email, orgId);
+            
+            if (onboardedAdmin == null)
+            {
+                Logger.LogError("Cannot reactivate - admin {AdminEmail} not found in database for org {OrgId}", adminRef.Email, orgId);
+                
+                // Try to find the user in any organization as a fallback
+                Logger.LogInformation("Attempting to find admin {Email} in any organization...", adminRef.Email);
+                try 
+                {
+                    var allOrgs = await OrganizationService.GetAllOrganizationsAsync();
+                    foreach (var org in allOrgs)
+                    {
+                        var foundUser = await OnboardedUserService.GetByEmailAsync(adminRef.Email, org.OrganizationId);
+                        if (foundUser != null)
+                        {
+                            Logger.LogWarning("Found admin {Email} in different org {FoundOrgId} instead of expected {ExpectedOrgId}", 
+                                adminRef.Email, org.OrganizationId, orgId);
+                            break;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Error during cross-org admin lookup");
+                }
+                
+                // Continue with basic reactivation for guest users
+                Logger.LogInformation("Continuing with basic guest user reactivation");
+            }
+            else
+            {
+                Logger.LogInformation("✅ Found admin {Email} in database with status: Active={IsActive}, StatusCode={StatusCode}", 
+                    adminRef.Email, onboardedAdmin.IsActive, onboardedAdmin.StatusCode);
+            }
+
+            // Step 2: Enable admin account in Azure Entra ID
+            Logger.LogInformation("Step 2: Enabling admin account in Azure Entra ID");
+            
+            // Use Azure Object ID for reliable Azure AD operations
+            Logger.LogInformation("🔍 Looking up Azure Object ID for {AdminEmail} in org {OrgId}", adminRef.Email, orgId);
+            var azureObjectId = await OnboardedUserService.GetAzureObjectIdByEmailAsync(adminRef.Email, orgId);
+            Logger.LogInformation("🔍 Azure Object ID lookup result: {AzureObjectId} (Length: {Length})", 
+                azureObjectId ?? "NULL", azureObjectId?.Length ?? 0);
+            
+            var graphSuccess = false;
+            
+            if (!string.IsNullOrEmpty(azureObjectId))
+            {
+                Logger.LogInformation("✅ Using Azure Object ID {AzureObjectId} for enabling {AdminEmail}", 
+                    azureObjectId, adminRef.Email);
+                graphSuccess = await GraphService.EnableUserAccountAsync(azureObjectId);
+            }
+            else
+            {
+                Logger.LogWarning("❌ No Azure Object ID found for {AdminEmail}, skipping GraphService EnableUserAccount operation. User may need manual Azure AD account activation.", adminRef.Email);
+                graphSuccess = true; // Skip GraphService operations if no Azure Object ID available
+            }
+            
+            if (graphSuccess)
+            {
+                Logger.LogInformation("✅ Successfully enabled Azure AD account for {AdminEmail}", adminRef.Email);
+                restorationSteps.Add("Azure AD account enabled");
+            }
+            else
+            {
+                Logger.LogWarning("❌ Azure AD account enable failed for {AdminEmail}, continuing with other steps", adminRef.Email);
+                failedSteps.Add("Azure AD account enable");
+            }
+
+            // Step 3: Restore Agent Type Security Group assignments (if admin is in database)
+            Logger.LogInformation("Step 3: Restoring agent type security group assignments");
+            if (onboardedAdmin != null && orgId != Guid.Empty && (onboardedAdmin.AgentTypeIds?.Any() == true || onboardedAdmin.AgentTypes?.Any() == true))
+            {
+                try
+                {
+                    // Use Azure Object ID for agent group assignments - skip if not available
+                    if (!string.IsNullOrEmpty(azureObjectId))
+                    {
+                        Logger.LogInformation("🔍 Using Azure Object ID {AzureObjectId} for agent group assignments", azureObjectId);
+                        // CRITICAL FIX: Use bidirectional sync instead of just reactivation to handle missing groups
+                        var agentGroupSuccess = await AgentGroupAssignmentService.SyncUserAgentGroupAssignmentsAsync(azureObjectId, orgId);
+                        
+                        if (agentGroupSuccess)
+                        {
+                            Logger.LogInformation("✅ Successfully synced agent group assignments for {AdminEmail}", adminRef.Email);
+                            restorationSteps.Add("Agent security groups synced and restored");
+                        }
+                        else
+                        {
+                            Logger.LogWarning("❌ Agent group restoration failed for {AdminEmail}", adminRef.Email);
+                            failedSteps.Add("Agent security groups");
+                        }
+                    }
+                    else
+                    {
+                        Logger.LogWarning("❌ No Azure Object ID found for {AdminEmail}, skipping agent group assignments", adminRef.Email);
+                        failedSteps.Add("Agent security groups (no Azure Object ID)");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "❌ Exception during agent group restoration for {AdminEmail}", adminRef.Email);
+                    failedSteps.Add("Agent security groups (exception)");
+                }
+            }
+            else
+            {
+                Logger.LogInformation("ℹ️ Admin {AdminEmail} has no agent types or not in database - skipping agent group restoration", adminRef.Email);
+            }
+
+            // Step 4: Add admin back to Microsoft 365/Teams group
+            Logger.LogInformation("Step 4: Adding admin to Microsoft 365/Teams group");
+            if (organization?.HasM365Group() == true && orgId != Guid.Empty)
+            {
+                try
+                {
+                    // Use Azure Object ID for Teams group assignments - skip if not available
+                    if (!string.IsNullOrEmpty(azureObjectId))
+                    {
+                        Logger.LogInformation("🔍 Using Azure Object ID {AzureObjectId} for Teams group assignment", azureObjectId);
+                        var teamsSuccess = await TeamsGroupService.AddUserToOrganizationTeamsGroupAsync(azureObjectId, orgId);
+                        
+                        if (teamsSuccess)
+                        {
+                            Logger.LogInformation("✅ Successfully added admin to Teams group for {AdminEmail}", adminRef.Email);
+                            restorationSteps.Add("Microsoft 365/Teams group restored");
+                        }
+                        else
+                        {
+                            Logger.LogWarning("❌ Teams group restoration failed for {AdminEmail}", adminRef.Email);
+                            failedSteps.Add("Microsoft 365/Teams group");
+                        }
+                    }
+                    else
+                    {
+                        Logger.LogWarning("❌ No Azure Object ID found for {AdminEmail}, skipping Teams group assignment", adminRef.Email);
+                        failedSteps.Add("Microsoft 365/Teams group (no Azure Object ID)");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "❌ Exception during Teams group restoration for {AdminEmail}", adminRef.Email);
+                    failedSteps.Add("Microsoft 365/Teams group (exception)");
+                }
+            }
+            else
+            {
+                Logger.LogInformation("ℹ️ Organization has no M365 group configured - skipping Teams group restoration");
+            }
+
+            // Step 5: Assign appropriate app role
+            Logger.LogInformation("Step 5: Assigning app role");
+            try
+            {
+                var userRole = adminRef.Role;
+                string appRoleName = userRole == UserRole.SuperAdmin ? "SuperAdmin" : "OrgAdmin";
+                
+                // Use Azure Object ID for app role assignment - skip if not available
+                if (!string.IsNullOrEmpty(azureObjectId))
+                {
+                    Logger.LogInformation("🔍 Using Azure Object ID {AzureObjectId} for app role assignment", azureObjectId);
+                    var appRoleSuccess = await GraphService.AssignAppRoleToUserAsync(azureObjectId, appRoleName);
+                    
+                    if (appRoleSuccess)
+                    {
+                        Logger.LogInformation("✅ Successfully assigned app role '{AppRole}' to {AdminEmail}", appRoleName, adminRef.Email);
+                        restorationSteps.Add($"App role '{appRoleName}' assigned");
+                    }
+                    else
+                    {
+                        Logger.LogWarning("❌ App role assignment failed for {AdminEmail}", adminRef.Email);
+                        failedSteps.Add($"App role '{appRoleName}'");
+                    }
+                }
+                else
+                {
+                    Logger.LogWarning("❌ No Azure Object ID found for {AdminEmail}, skipping app role assignment", adminRef.Email);
+                    failedSteps.Add($"App role '{appRoleName}' (no Azure Object ID)");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "❌ Exception during app role assignment for {AdminEmail}", adminRef.Email);
+                failedSteps.Add("App role assignment (exception)");
+            }
+
+            // Step 6: Update database status (if admin is in database)
+            Logger.LogInformation("Step 6: Updating database status");
+            var reactivatedByEmail = currentUser?.FindFirst("email")?.Value ?? "system";
+            
+            if (onboardedAdmin != null)
+            {
+                var databaseSuccess = await UserAccessValidationService.RestoreUserAccessAsync(adminRef.Email, reactivatedByEmail);
+                
+                if (databaseSuccess)
+                {
+                    Logger.LogInformation("✅ Successfully updated database status for {AdminEmail}", adminRef.Email);
+                    restorationSteps.Add("Database status updated");
+                }
+                else
+                {
+                    Logger.LogError("❌ Failed to update database status for {AdminEmail}. User may still be blocked!", adminRef.Email);
+                    failedSteps.Add("Database status update");
+                }
+            }
+            else
+            {
+                Logger.LogInformation("ℹ️ Admin not in database - skipping database status update");
+            }
+
+            // Step 7: Refresh UI and generate success message
+            await LoadAdmins();
+            FilterAdmins();
+            CloseReactivateModal();
+            
+            Logger.LogInformation("=== ADMIN REACTIVATION COMPLETED for {AdminEmail} === Success: {SuccessCount}, Failed: {FailedCount}", 
+                adminRef.Email, restorationSteps.Count, failedSteps.Count);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "=== CRITICAL ERROR during admin reactivation for {AdminEmail} ===", adminRef?.Email);
+        }
+        finally
+        {
+            isReactivatingAccess = false;
+        }
+    }
+
+    private async Task RefreshAdmins()
+    {
+        if (isLoadingAdmins) return;
+        
+        isLoadingAdmins = true;
+        try
+        {
+            // Clear cache to force fresh data
+            userStatusCache.Clear();
+            
+            await LoadAdmins();
+            FilterAdmins();
+            StateHasChanged();
+            
+            Logger.LogInformation("Admin list refreshed successfully - {AdminCount} admins loaded", allAdmins.Count);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error refreshing admin list");
+        }
+        finally
+        {
+            isLoadingAdmins = false;
+        }
+    }
+
 }

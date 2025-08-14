@@ -8,7 +8,7 @@
 
 <AuthorizeView>
     <Authorized>
-        <div class="container-fluid" style="min-height: 100vh; background: linear-gradient(135deg, #f8f9ff 0%, #e9ecff 100%);">
+        <div class="container-fluid" style="min-height: 100vh; background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);">
             <div class="row justify-content-center align-items-center" style="min-height: 100vh;">
                 <div class="col-md-10 col-lg-8 col-xl-6">
                     <div class="card shadow-lg border-0" style="border-radius: 20px; backdrop-filter: blur(10px);">
@@ -17,81 +17,113 @@
                                 <div class="d-flex justify-content-center mb-4">
                                     <img src="company-logo.png" alt="ERPURE.AI Logo" class="img-fluid" style="max-height: 60px; max-width: 250px;" />
                                 </div>
-                                <h1 class="fw-bold text-dark mb-3">Admin Console</h1>
-                                <p class="text-muted fs-5 mb-2">Welcome back, <strong>@context.User.Identity?.Name</strong></p>
-                                <p class="text-muted">Choose your dashboard to get started</p>
+                                <h1 class="fw-bold text-white mb-3">Admin Console</h1>
+                                <p class="text-light fs-5 mb-2">Welcome back, <strong>@context.User.Identity?.Name</strong></p>
+                                <p class="text-light">Choose your dashboard to get started</p>
                             </div>
                             
-                            <div class="row g-4">
-                                <!-- Super Admin Dashboard -->
-                                <AuthorizeView Policy="SuperAdminOnly">
-                                    <Authorized Context="superAdminContext">
-                                        <div class="col-12 col-md-6">
-                                            <div class="dashboard-card" @onclick="() => RedirectToRole(UserRole.SuperAdmin)">
-                                                <div class="card h-100 border-0 shadow-sm position-relative overflow-hidden" style="border-radius: 16px; cursor: pointer; transition: all 0.3s ease; background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);">
-                                                    <div class="card-body d-flex flex-column justify-content-center text-white p-4" style="min-height: 140px;">
-                                                        <div class="mb-3">
-                                                            <i class="fas fa-crown fa-3x opacity-75"></i>
+                            <!-- Check if user has any admin access -->
+                            <AuthorizeView Policy="OrgAdminOrHigher">
+                                <Authorized Context="adminContext">
+                                    <div class="row g-4">
+                                        <!-- Super Admin Dashboard -->
+                                        <AuthorizeView Policy="SuperAdminOnly">
+                                            <Authorized Context="superAdminContext">
+                                                <div class="col-12 col-md-6">
+                                                    <div class="dashboard-card" @onclick="() => RedirectToRole(UserRole.SuperAdmin)">
+                                                        <div class="card h-100 border-0 shadow-sm position-relative overflow-hidden" style="border-radius: 16px; cursor: pointer; transition: all 0.3s ease; background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);">
+                                                            <div class="card-body d-flex flex-column justify-content-center text-white p-4" style="min-height: 140px;">
+                                                                <div class="mb-3">
+                                                                    <i class="fas fa-crown fa-3x opacity-75"></i>
+                                                                </div>
+                                                                <h4 class="fw-bold mb-2">Super Admin</h4>
+                                                                <p class="mb-0 opacity-90">Manage Organizations & Admins</p>
+                                                            </div>
+                                                            <div class="position-absolute top-0 end-0 p-3">
+                                                                <i class="fas fa-arrow-right text-white opacity-50"></i>
+                                                            </div>
                                                         </div>
-                                                        <h4 class="fw-bold mb-2">Super Admin</h4>
-                                                        <p class="mb-0 opacity-90">Manage Organizations & Admins</p>
-                                                    </div>
-                                                    <div class="position-absolute top-0 end-0 p-3">
-                                                        <i class="fas fa-arrow-right text-white opacity-50"></i>
                                                     </div>
                                                 </div>
-                                            </div>
-                                        </div>
-                                    </Authorized>
-                                </AuthorizeView>
+                                            </Authorized>
+                                        </AuthorizeView>
 
-                                <!-- Developer Dashboard -->
-                                <AuthorizeView Policy="DevOnly">
-                                    <Authorized Context="devContext">
-                                        <div class="col-12 col-md-6">
-                                            <div class="dashboard-card" @onclick="() => RedirectToRole(UserRole.Developer)">
-                                                <div class="card h-100 border-0 shadow-sm position-relative overflow-hidden" style="border-radius: 16px; cursor: pointer; transition: all 0.3s ease; background: linear-gradient(135deg, #28a745 0%, #20c997 100%);">
-                                                    <div class="card-body d-flex flex-column justify-content-center text-white p-4" style="min-height: 140px;">
-                                                        <div class="mb-3">
-                                                            <i class="fas fa-code fa-3x opacity-75"></i>
+                                        <!-- Developer Dashboard -->
+                                        <AuthorizeView Policy="DevOnly">
+                                            <Authorized Context="devContext">
+                                                <div class="col-12 col-md-6">
+                                                    <div class="dashboard-card" @onclick="() => RedirectToRole(UserRole.Developer)">
+                                                        <div class="card h-100 border-0 shadow-sm position-relative overflow-hidden" style="border-radius: 16px; cursor: pointer; transition: all 0.3s ease; background: linear-gradient(135deg, #28a745 0%, #20c997 100%);">
+                                                            <div class="card-body d-flex flex-column justify-content-center text-white p-4" style="min-height: 140px;">
+                                                                <div class="mb-3">
+                                                                    <i class="fas fa-code fa-3x opacity-75"></i>
+                                                                </div>
+                                                                <h4 class="fw-bold mb-2">Developer</h4>
+                                                                <p class="mb-0 opacity-90">Manage Agent Types & System Config</p>
+                                                            </div>
+                                                            <div class="position-absolute top-0 end-0 p-3">
+                                                                <i class="fas fa-arrow-right text-white opacity-50"></i>
+                                                            </div>
                                                         </div>
-                                                        <h4 class="fw-bold mb-2">Developer</h4>
-                                                        <p class="mb-0 opacity-90">Manage Agent Types & System Config</p>
-                                                    </div>
-                                                    <div class="position-absolute top-0 end-0 p-3">
-                                                        <i class="fas fa-arrow-right text-white opacity-50"></i>
                                                     </div>
                                                 </div>
-                                            </div>
-                                        </div>
-                                    </Authorized>
-                                </AuthorizeView>
+                                            </Authorized>
+                                        </AuthorizeView>
 
-                                <!-- Organization Admin Dashboard -->
-                                <AuthorizeView Policy="OrgAdminOnly">
-                                    <Authorized Context="orgAdminContext">
-                                        <div class="col-12 col-md-6">
-                                            <div class="dashboard-card" @onclick="() => RedirectToRole(UserRole.OrgAdmin)">
-                                                <div class="card h-100 border-0 shadow-sm position-relative overflow-hidden" style="border-radius: 16px; cursor: pointer; transition: all 0.3s ease; background: linear-gradient(135deg, #4ecdc4 0%, #2eb8ae 100%);">
-                                                    <div class="card-body d-flex flex-column justify-content-center text-white p-4" style="min-height: 140px;">
-                                                        <div class="mb-3">
-                                                            <i class="fas fa-user-shield fa-3x opacity-75"></i>
+                                        <!-- Organization Admin Dashboard -->
+                                        <AuthorizeView Policy="OrgAdminOnly">
+                                            <Authorized Context="orgAdminContext">
+                                                <div class="col-12 col-md-6">
+                                                    <div class="dashboard-card" @onclick="() => RedirectToRole(UserRole.OrgAdmin)">
+                                                        <div class="card h-100 border-0 shadow-sm position-relative overflow-hidden" style="border-radius: 16px; cursor: pointer; transition: all 0.3s ease; background: linear-gradient(135deg, #4ecdc4 0%, #2eb8ae 100%);">
+                                                            <div class="card-body d-flex flex-column justify-content-center text-white p-4" style="min-height: 140px;">
+                                                                <div class="mb-3">
+                                                                    <i class="fas fa-user-shield fa-3x opacity-75"></i>
+                                                                </div>
+                                                                <h4 class="fw-bold mb-2">Organization Admin</h4>
+                                                                <p class="mb-0 opacity-90">Manage Users & Secrets</p>
+                                                            </div>
+                                                            <div class="position-absolute top-0 end-0 p-3">
+                                                                <i class="fas fa-arrow-right text-white opacity-50"></i>
+                                                            </div>
                                                         </div>
-                                                        <h4 class="fw-bold mb-2">Organization Admin</h4>
-                                                        <p class="mb-0 opacity-90">Manage Users & Secrets</p>
-                                                    </div>
-                                                    <div class="position-absolute top-0 end-0 p-3">
-                                                        <i class="fas fa-arrow-right text-white opacity-50"></i>
                                                     </div>
                                                 </div>
+                                            </Authorized>
+                                        </AuthorizeView>
+                                    </div>
+                                </Authorized>
+                                <NotAuthorized Context="noAccessContext">
+                                    <!-- Message for users without admin access -->
+                                    <div class="alert alert-warning border-0 shadow-sm mb-4" style="background: rgba(255, 193, 7, 0.15); border-radius: 16px;">
+                                        <div class="d-flex align-items-center mb-3">
+                                            <div class="rounded-circle bg-warning bg-opacity-20 d-flex align-items-center justify-content-center me-3" style="width: 50px; height: 50px;">
+                                                <i class="fas fa-exclamation-triangle text-warning fs-4"></i>
+                                            </div>
+                                            <div>
+                                                <h5 class="mb-1 text-warning fw-bold">Access Not Permitted</h5>
+                                                <p class="mb-0 text-muted">You don't have administrator access to this console.</p>
                                             </div>
                                         </div>
-                                    </Authorized>
-                                </AuthorizeView>
-                            </div>
+                                        <hr class="text-warning opacity-25 my-3">
+                                        <div class="text-muted">
+                                            <p class="mb-2"><strong>This application is for administrators only.</strong></p>
+                                            <p class="mb-3">If you need access to administrative functions, please contact your <strong>System Administrator</strong> in your organization.</p>
+                                            <div class="d-flex gap-3">
+                                                <a href="/Account/SignOut" class="btn btn-warning btn-sm">
+                                                    <i class="fas fa-sign-out-alt me-1"></i>Sign Out
+                                                </a>
+                                                <a href="mailto:support@erpure.ai" class="btn btn-outline-warning btn-sm">
+                                                    <i class="fas fa-envelope me-1"></i>Contact Support
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </NotAuthorized>
+                            </AuthorizeView>
                             
                             <div class="mt-5 pt-4">
-                                <small class="text-muted">
+                                <small class="text-light opacity-75">
                                     <i class="fas fa-shield-alt me-1"></i>
                                     Secure multi-tenant admin platform
                                 </small>

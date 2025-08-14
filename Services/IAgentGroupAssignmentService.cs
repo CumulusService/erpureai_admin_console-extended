@@ -44,4 +44,22 @@ public interface IAgentGroupAssignmentService
     /// Deactivates all agent group assignments for a user (used during soft delete)
     /// </summary>
     Task<bool> DeactivateUserAgentGroupAssignmentsAsync(string userId, Guid organizationId);
+    
+    /// <summary>
+    /// CRITICAL: Performs bidirectional sync between Azure AD and database for agent group assignments
+    /// Ensures consistency between what's in Azure AD and what's tracked in the database
+    /// </summary>
+    Task<bool> SyncUserAgentGroupAssignmentsAsync(string userId, Guid organizationId);
+    
+    /// <summary>
+    /// CRITICAL: Synchronizes agent group memberships for ALL users in an organization
+    /// Used when organization-level agent types or global security group IDs change
+    /// </summary>
+    Task<bool> SyncOrganizationAgentGroupAssignmentsAsync(Guid organizationId, string modifiedBy);
+    
+    /// <summary>
+    /// CRITICAL: Removes ALL users in an organization from a specific agent type's security group
+    /// Used when SuperAdmin unassigns an agent type from organization level
+    /// </summary>
+    Task<bool> RemoveAllUsersFromAgentTypeAsync(Guid organizationId, Guid agentTypeId, string modifiedBy);
 }

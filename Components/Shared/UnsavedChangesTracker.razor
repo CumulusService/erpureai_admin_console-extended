@@ -2,6 +2,7 @@
 @implements IDisposable
 @inject IJSRuntime JSRuntime
 @inject IUnsavedChangesService UnsavedChangesService
+@inject IModalService ModalService
 @inject NavigationManager Navigation
 
 @code {
@@ -9,9 +10,12 @@
     [Parameter] public string WarningMessage { get; set; } = "You have unsaved changes. Are you sure you want to leave without saving?";
     [Parameter] public bool TrackChanges { get; set; } = false;
     [Parameter] public EventCallback<bool> OnUnsavedChangesChanged { get; set; }
+    [Parameter] public string UserRole { get; set; } = "User";
+    [Parameter] public string Context { get; set; } = "Form";
 
     private bool _isInitialized = false;
     private bool _isDisposed = false;
+    private bool _enableEnhancedMode = true;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -41,25 +45,66 @@
     {
         try
         {
-            var shouldTrack = TrackChanges && UnsavedChangesService.HasUnsavedChanges();
-            System.Diagnostics.Debug.WriteLine($"UpdateJavaScriptState: TrackChanges={TrackChanges}, HasUnsavedChanges={UnsavedChangesService.HasUnsavedChanges()}, ShouldTrack={shouldTrack}");
+            // DISABLED: JavaScript unsaved changes detection completely removed
+            System.Diagnostics.Debug.WriteLine("UpdateJavaScriptState: DISABLED - no browser notifications");
             
-            if (shouldTrack)
-            {
-                await JSRuntime.InvokeVoidAsync("unsavedChanges.enable", WarningMessage);
-                System.Diagnostics.Debug.WriteLine("Called unsavedChanges.enable");
-            }
-            else
-            {
-                await JSRuntime.InvokeVoidAsync("unsavedChanges.disable");
-                System.Diagnostics.Debug.WriteLine("Called unsavedChanges.disable");
-            }
+            // Always disable JavaScript tracking to prevent browser notifications
+            await JSRuntime.InvokeVoidAsync("unsavedChanges.disable");
+            System.Diagnostics.Debug.WriteLine("Forced unsavedChanges.disable to prevent browser notifications");
         }
         catch (Exception ex)
         {
-            // Handle JavaScript interop errors gracefully
+            // Handle JavaScript interop errors gracefully and try fallback
             System.Diagnostics.Debug.WriteLine($"JavaScript interop error in UnsavedChangesTracker: {ex.Message}");
+            _enableEnhancedMode = false; // Disable enhanced mode on error
+            
+            // Try basic fallback
+            try
+            {
+                var shouldTrack = TrackChanges && UnsavedChangesService.HasUnsavedChanges();
+                if (shouldTrack)
+                {
+                    await JSRuntime.InvokeVoidAsync("unsavedChanges.enable", WarningMessage);
+                }
+                else
+                {
+                    await JSRuntime.InvokeVoidAsync("unsavedChanges.disable");
+                }
+            }
+            catch
+            {
+                // If even basic fallback fails, log and continue
+                System.Diagnostics.Debug.WriteLine("Even basic JavaScript fallback failed");
+            }
         }
+    }
+
+    private string GetContextualWarningMessage()
+    {
+        if (!string.IsNullOrEmpty(WarningMessage) && WarningMessage != "You have unsaved changes. Are you sure you want to leave without saving?")
+        {
+            return WarningMessage; // Use custom message if provided
+        }
+
+        // Generate contextual message based on role and context
+        var roleContext = UserRole.ToLowerInvariant() switch
+        {
+            "superadmin" => "admin configuration",
+            "orgadmin" => "organization settings",
+            "developer" => "agent configuration",
+            _ => "form data"
+        };
+
+        var actionContext = Context.ToLowerInvariant() switch
+        {
+            "invitation" => "invitation details",
+            "usermanagement" => "user management changes",
+            "settings" => "settings",
+            "agenttype" => "agent type configuration",
+            _ => "form changes"
+        };
+
+        return $"You have unsaved {actionContext}. Are you sure you want to leave without saving your {roleContext}?";
     }
 
     public async Task MarkAsChanged()
@@ -84,22 +129,42 @@
 
     public async Task<bool> ConfirmNavigation(string? customMessage = null)
     {
-        if (!UnsavedChangesService.HasUnsavedChanges())
-        {
-            return true;
-        }
+        // DISABLED: Browser notifications completely removed - always allow navigation
+        System.Diagnostics.Debug.WriteLine("ConfirmNavigation: Browser notifications DISABLED - allowing navigation");
+        return true;
 
         try
         {
-            var message = customMessage ?? WarningMessage;
-            return await JSRuntime.InvokeAsync<bool>("unsavedChanges.confirmNavigation", message);
+            // Use the modern modal service instead of JavaScript alerts
+            var result = await ModalService.ShowUnsavedChangesAsync(Context, UserRole);
+            
+            // If user chose to leave without saving, disable tracking
+            if (result)
+            {
+                await MarkAsSaved();
+            }
+            
+            return result;
         }
-        catch
+        catch (Exception ex)
         {
-            // Fallback for JavaScript interop issues
-            return true;
+            System.Diagnostics.Debug.WriteLine($"ConfirmNavigation error: {ex.Message}");
+            
+            // Fallback to JavaScript confirmation if modal service fails
+            try
+            {
+                var message = customMessage ?? GetContextualWarningMessage();
+                return await JSRuntime.InvokeAsync<bool>("unsavedChanges.confirmNavigation", message);
+            }
+            catch
+            {
+                // Ultimate fallback - assume user wants to stay for safety
+                System.Diagnostics.Debug.WriteLine("ConfirmNavigation: All confirmation methods failed, blocking navigation for safety");
+                return false;
+            }
         }
     }
+
 
     private async void HandleLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
     {
@@ -143,10 +208,17 @@
                 UnsavedChangesService.MarkFormAsSaved(FormId);
             }
 
-            // Update JavaScript state
+            // Update JavaScript state with force disable
             try
             {
-                _ = JSRuntime.InvokeVoidAsync("unsavedChanges.disable");
+                if (_enableEnhancedMode)
+                {
+                    _ = JSRuntime.InvokeVoidAsync("unsavedChanges.forceDisable");
+                }
+                else
+                {
+                    _ = JSRuntime.InvokeVoidAsync("unsavedChanges.disable");
+                }
             }
             catch
             {

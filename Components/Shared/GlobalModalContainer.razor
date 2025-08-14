@@ -1,0 +1,59 @@
+@using AdminConsole.Services
+@implements IDisposable
+@inject IModalService ModalService
+
+<ModernConfirmationModal @ref="confirmationModal"
+                        IsVisible="@isModalVisible"
+                        Title="@currentModalArgs?.Title"
+                        Message="@currentModalArgs?.Message"
+                        ConfirmText="@currentModalArgs?.ConfirmText"
+                        CancelText="@currentModalArgs?.CancelText"
+                        Icon="@currentModalArgs?.Icon"
+                        ConfirmIcon="@currentModalArgs?.ConfirmIcon"
+                        CancelIcon="@currentModalArgs?.CancelIcon"
+                        Type="@(currentModalArgs?.Type ?? ModernConfirmationModal.ModalType.Confirmation)"
+                        Size="@(currentModalArgs?.Size ?? ModernConfirmationModal.ModalSize.Medium)"
+                        ShowCancelButton="@(currentModalArgs?.ShowCancelButton ?? true)"
+                        OnResult="@HandleModalResult" />
+
+@code {
+    private ModernConfirmationModal? confirmationModal;
+    private bool isModalVisible = false;
+    private ModalEventArgs? currentModalArgs;
+
+    protected override void OnInitialized()
+    {
+        ModalService.ModalRequested += HandleModalRequested;
+    }
+
+    private async void HandleModalRequested(object? sender, ModalEventArgs e)
+    {
+        currentModalArgs = e;
+        isModalVisible = true;
+        
+        await InvokeAsync(() =>
+        {
+            StateHasChanged();
+        });
+    }
+
+    private async Task HandleModalResult(bool result)
+    {
+        isModalVisible = false;
+        
+        if (currentModalArgs?.CompletionSource != null)
+        {
+            currentModalArgs.CompletionSource.SetResult(result);
+        }
+        
+        currentModalArgs = null;
+        StateHasChanged();
+        
+        await Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        ModalService.ModalRequested -= HandleModalRequested;
+    }
+}

@@ -1,0 +1,308 @@
+@page "/examples/dialogs"
+@using AdminConsole.Services
+@inject IModalService ModalService
+
+<!-- Simple Test Modal -->
+@if (showDirectModal)
+{
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Simple Test Modal</h5>
+                </div>
+                <div class="modal-body">
+                    <p>This is a simple test modal to verify basic rendering works.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseSimpleModal">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="ConfirmSimpleModal">OK</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<PageTitle>Modern Dialog Examples</PageTitle>
+
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <h2 class="mb-4">Modern Dialog System Examples</h2>
+            <p class="text-muted mb-4">
+                These examples demonstrate the modern modal dialog system that replaces primitive JavaScript alerts.
+                All dialogs are responsive, accessible, and follow the application's design system.
+            </p>
+
+            <div class="row">
+                <!-- Basic Dialogs -->
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0">Basic Dialogs</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-success" @onclick="ShowDirectModal">
+                                    <i class="fas fa-wrench me-2"></i>
+                                    Direct Modal Test (Bypasses Service)
+                                </button>
+                                
+                                <button class="btn btn-primary" @onclick="ShowConfirmation">
+                                    <i class="fas fa-question-circle me-2"></i>
+                                    Basic Confirmation
+                                </button>
+                                
+                                <button class="btn btn-warning" @onclick="ShowWarning">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>
+                                    Warning Dialog
+                                </button>
+                                
+                                <button class="btn btn-danger" @onclick="ShowDanger">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>
+                                    Danger Confirmation
+                                </button>
+                                
+                                <button class="btn btn-info" @onclick="ShowInfo">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    Information
+                                </button>
+                                
+                                <button class="btn btn-success" @onclick="ShowSuccess">
+                                    <i class="fas fa-check-circle me-2"></i>
+                                    Success Message
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Specialized Dialogs -->
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0">Specialized Dialogs</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-outline-warning" @onclick="ShowUnsavedChanges">
+                                    <i class="fas fa-save me-2"></i>
+                                    Unsaved Changes (Form)
+                                </button>
+                                
+                                <button class="btn btn-outline-warning" @onclick="ShowUnsavedChangesAdmin">
+                                    <i class="fas fa-save me-2"></i>
+                                    Unsaved Changes (Admin)
+                                </button>
+                                
+                                <button class="btn btn-outline-danger" @onclick="ShowDeleteConfirmation">
+                                    <i class="fas fa-trash me-2"></i>
+                                    Delete Confirmation
+                                </button>
+                                
+                                <button class="btn btn-outline-info" @onclick="ShowNavigationWarning">
+                                    <i class="fas fa-route me-2"></i>
+                                    Navigation Warning
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Debug Display -->
+            <div class="mt-3">
+                <div class="alert alert-info" role="alert">
+                    <strong>Debug Info:</strong> Page loaded. Modal Service: @(ModalService != null ? "Available" : "NULL")
+                    <br />Last button click time: @DateTime.Now.ToString("HH:mm:ss")
+                </div>
+            </div>
+
+            <!-- Result Display -->
+            @if (!string.IsNullOrEmpty(lastResult))
+            {
+                <div class="mt-4">
+                    <div class="alert @(lastResultSuccess ? "alert-success" : "alert-secondary")" role="alert">
+                        <strong>Last Result:</strong> @lastResult
+                    </div>
+                </div>
+            }
+
+            <!-- Usage Examples -->
+            <div class="row mt-4">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0">Usage Examples</h5>
+                        </div>
+                        <div class="card-body">
+                            <h6>Basic Usage:</h6>
+                            <pre><code>@("@inject IModalService ModalService")
+
+// Simple confirmation
+var confirmed = await ModalService.ShowConfirmationAsync("Confirm Action", "Are you sure?");
+
+// Delete confirmation with context
+var shouldDelete = await ModalService.ShowDeleteConfirmationAsync("User Account", "user");
+
+// Unsaved changes with role context
+var shouldLeave = await ModalService.ShowUnsavedChangesAsync("form", "OrgAdmin");</code></pre>
+
+                            <h6 class="mt-4">Available Methods:</h6>
+                            <ul>
+                                <li><code>ShowConfirmationAsync(title, message, confirmText?, cancelText?)</code></li>
+                                <li><code>ShowWarningAsync(title, message, confirmText?, cancelText?)</code></li>
+                                <li><code>ShowDangerAsync(title, message, confirmText?, cancelText?)</code></li>
+                                <li><code>ShowInfoAsync(title, message, confirmText?)</code></li>
+                                <li><code>ShowSuccessAsync(title, message, confirmText?)</code></li>
+                                <li><code>ShowUnsavedChangesAsync(context?, userRole?)</code></li>
+                                <li><code>ShowDeleteConfirmationAsync(itemName, itemType?)</code></li>
+                                <li><code>ShowNavigationWarningAsync(fromPage, toPage)</code></li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string lastResult = "";
+    private bool lastResultSuccess = false;
+    private bool showDirectModal = false;
+    private ModernConfirmationModal? testModal;
+
+    private async Task ShowDirectModal()
+    {
+        showDirectModal = true;
+        StateHasChanged();
+        await Task.CompletedTask;
+    }
+
+    private async Task CloseSimpleModal()
+    {
+        showDirectModal = false;
+        lastResult = "Simple Modal: Cancelled";
+        lastResultSuccess = false;
+        StateHasChanged();
+        await Task.CompletedTask;
+    }
+
+    private async Task ConfirmSimpleModal()
+    {
+        showDirectModal = false;
+        lastResult = "Simple Modal: Confirmed";
+        lastResultSuccess = true;
+        StateHasChanged();
+        await Task.CompletedTask;
+    }
+
+    private async Task ShowConfirmation()
+    {
+        try
+        {
+            System.Diagnostics.Debug.WriteLine(">>> ShowConfirmation called");
+            Console.WriteLine(">>> ShowConfirmation called");
+            
+            var result = await ModalService.ShowConfirmationAsync(
+                "Confirm Action",
+                "Are you sure you want to proceed with this action?",
+                "Yes, Continue",
+                "Cancel"
+            );
+            
+            lastResult = $"Confirmation: {(result ? "Confirmed" : "Cancelled")}";
+            lastResultSuccess = result;
+            System.Diagnostics.Debug.WriteLine($">>> ShowConfirmation result: {result}");
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($">>> ShowConfirmation error: {ex}");
+            lastResult = $"Error: {ex.Message}";
+            lastResultSuccess = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ShowWarning()
+    {
+        var result = await ModalService.ShowWarningAsync(
+            "Warning",
+            "This action may have unintended consequences. Please review your settings before continuing.",
+            "Continue Anyway",
+            "Go Back"
+        );
+        
+        lastResult = $"Warning: {(result ? "Continued" : "Went Back")}";
+        lastResultSuccess = result;
+    }
+
+    private async Task ShowDanger()
+    {
+        var result = await ModalService.ShowDangerAsync(
+            "Dangerous Action",
+            "This action cannot be undone and may permanently affect your system.",
+            "I Understand, Proceed",
+            "Cancel"
+        );
+        
+        lastResult = $"Danger: {(result ? "Proceeded" : "Cancelled")}";
+        lastResultSuccess = result;
+    }
+
+    private async Task ShowInfo()
+    {
+        await ModalService.ShowInfoAsync(
+            "Information",
+            "Here is some important information about the current operation. Please read this carefully."
+        );
+        
+        lastResult = "Information: Acknowledged";
+        lastResultSuccess = true;
+    }
+
+    private async Task ShowSuccess()
+    {
+        await ModalService.ShowSuccessAsync(
+            "Operation Successful",
+            "Your operation has been completed successfully. All changes have been saved."
+        );
+        
+        lastResult = "Success: Acknowledged";
+        lastResultSuccess = true;
+    }
+
+    private async Task ShowUnsavedChanges()
+    {
+        var result = await ModalService.ShowUnsavedChangesAsync("form", "User");
+        
+        lastResult = $"Unsaved Changes (User/Form): {(result ? "Left Without Saving" : "Stayed to Save")}";
+        lastResultSuccess = !result; // Staying to save is the better outcome
+    }
+
+    private async Task ShowUnsavedChangesAdmin()
+    {
+        var result = await ModalService.ShowUnsavedChangesAsync("settings", "OrgAdmin");
+        
+        lastResult = $"Unsaved Changes (Admin/Settings): {(result ? "Left Without Saving" : "Stayed to Save")}";
+        lastResultSuccess = !result;
+    }
+
+    private async Task ShowDeleteConfirmation()
+    {
+        var result = await ModalService.ShowDeleteConfirmationAsync("John Doe's Account", "user account");
+        
+        lastResult = $"Delete Confirmation: {(result ? "Deleted" : "Cancelled")}";
+        lastResultSuccess = !result; // Not deleting is usually the safer outcome
+    }
+
+    private async Task ShowNavigationWarning()
+    {
+        var result = await ModalService.ShowNavigationWarningAsync("User Management", "Agent Settings");
+        
+        lastResult = $"Navigation Warning: {(result ? "Navigated Away" : "Stayed")}";
+        lastResultSuccess = result;
+    }
+}

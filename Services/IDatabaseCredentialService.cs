@@ -16,6 +16,13 @@ public interface IDatabaseCredentialService
     Task<List<DatabaseCredential>> GetByOrganizationAsync(Guid organizationId);
     
     /// <summary>
+    /// Gets only active database credentials for an organization
+    /// </summary>
+    /// <param name="organizationId">Organization ID</param>
+    /// <returns>List of active database credentials</returns>
+    Task<List<DatabaseCredential>> GetActiveByOrganizationAsync(Guid organizationId);
+    
+    /// <summary>
     /// Gets database credentials for a specific organization and database type
     /// </summary>
     /// <param name="organizationId">Organization ID</param>
@@ -98,6 +105,38 @@ public interface IDatabaseCredentialService
     /// <param name="modifiedBy">User ID who is updating the password</param>
     /// <returns>True if updated successfully</returns>
     Task<bool> UpdateSAPPasswordAsync(Guid credentialId, string newPassword, Guid organizationId, Guid modifiedBy);
+
+    /// <summary>
+    /// Gets effective SAP Service Layer hostname with database-level override and organization fallback
+    /// </summary>
+    /// <param name="credentialId">Database credential ID</param>
+    /// <param name="organizationId">Organization ID for security validation</param>
+    /// <returns>Effective SAP Service Layer hostname (database-level or organization fallback)</returns>
+    Task<string?> GetEffectiveSAPServiceLayerHostnameAsync(Guid credentialId, Guid organizationId);
+
+    /// <summary>
+    /// Gets effective SAP API Gateway hostname with database-level override and organization fallback
+    /// </summary>
+    /// <param name="credentialId">Database credential ID</param>
+    /// <param name="organizationId">Organization ID for security validation</param>
+    /// <returns>Effective SAP API Gateway hostname (database-level or organization fallback)</returns>
+    Task<string?> GetEffectiveSAPAPIGatewayHostnameAsync(Guid credentialId, Guid organizationId);
+
+    /// <summary>
+    /// Gets effective SAP Business One Web Client hostname with database-level override and organization fallback
+    /// </summary>
+    /// <param name="credentialId">Database credential ID</param>
+    /// <param name="organizationId">Organization ID for security validation</param>
+    /// <returns>Effective SAP Business One Web Client hostname (database-level or organization fallback)</returns>
+    Task<string?> GetEffectiveSAPBusinessOneWebClientHostAsync(Guid credentialId, Guid organizationId);
+
+    /// <summary>
+    /// Gets effective Document Code with database-level override and organization fallback
+    /// </summary>
+    /// <param name="credentialId">Database credential ID</param>
+    /// <param name="organizationId">Organization ID for security validation</param>
+    /// <returns>Effective Document Code (database-level or organization fallback)</returns>
+    Task<string?> GetEffectiveDocumentCodeAsync(Guid credentialId, Guid organizationId);
     
     /// <summary>
     /// Gets a specific database credential by ID

@@ -1,7 +1,9 @@
 using AdminConsole;
+using AdminConsole.Authorization;
 using AdminConsole.Components;
 using AdminConsole.Configuration;
 using AdminConsole.Middleware;
+using AdminConsole.Models;
 using AdminConsole.Services;
 using AdminConsole.Data;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -10,6 +12,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
+using AdminConsole.HealthChecks;
+using AdminConsole.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -35,8 +39,9 @@ builder.Services.AddDbContext<AdminConsoleDbContext>(options =>
     options.EnableSensitiveDataLogging(false);
 }, ServiceLifetime.Scoped);
 
-// Add authorization services
+// Add authorization services with database-driven role handlers
 builder.Services.AddAuthorizationCore();
+builder.Services.AddScoped<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, DatabaseRoleHandler>();
 
 // Add Microsoft Graph Service Client with Azure Identity
 builder.Services.AddSingleton<Microsoft.Graph.GraphServiceClient>(serviceProvider =>
@@ -55,91 +60,24 @@ builder.Services.AddSingleton<Microsoft.Graph.GraphServiceClient>(serviceProvide
     return new Microsoft.Graph.GraphServiceClient(clientSecretCredential);
 });
 
-// Add authorization policies for multi-tenant B2B
+// Add authorization policies for multi-tenant B2B with database-driven role checks
 builder.Services.AddAuthorization(options =>
 {
+    // NEW: Database-driven role policies (replaces hardcoded domain checks)
     options.AddPolicy("SuperAdminOnly", policy => 
-        policy.RequireAssertion(context => 
-        {
-            // Skip logging in policy to avoid BuildServiceProvider warning
-            ILogger? logger = null;
-            
-            logger?.LogInformation("SuperAdminOnly policy evaluation - User authenticated: {IsAuth}", 
-                context.User.Identity?.IsAuthenticated);
-            
-            if (context.User.Identity?.IsAuthenticated == true)
-            {
-                var email = context.User.FindFirst("email")?.Value ?? 
-                           context.User.FindFirst("preferred_username")?.Value ?? 
-                           context.User.FindFirst("upn")?.Value ?? 
-                           context.User.FindFirst("unique_name")?.Value ??
-                           context.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value;
-                
-                logger?.LogInformation("SuperAdminOnly policy - Email found: {Email}", email);
-                
-                var isErpureUser = email?.EndsWith("@erpure.ai") == true;
-                logger?.LogInformation("SuperAdminOnly policy - Is Erpure user: {IsErpure}", isErpureUser);
-                
-                return isErpureUser;
-            }
-            
-            logger?.LogWarning("SuperAdminOnly policy - User not authenticated");
-            return false;
-        }));
+        policy.RequireDatabaseRole(UserRole.SuperAdmin, allowHigherRoles: true)); // Allow Developer access too
     
     options.AddPolicy("OrgAdminOrHigher", policy => 
-        policy.RequireAssertion(context => 
-        {
-            if (context.User.Identity?.IsAuthenticated != true)
-            {
-                return false;
-            }
-            
-            // Check for Azure AD app roles first (preferred method)
-            if (context.User.IsInRole("OrgAdmin") || context.User.IsInRole("SuperAdmin"))
-            {
-                return true;
-            }
-            
-            // Fallback: Super Admins by email domain (for @erpure.ai users)
-            var email = context.User.FindFirst("email")?.Value ?? 
-                       context.User.FindFirst("preferred_username")?.Value ?? 
-                       context.User.FindFirst("upn")?.Value ?? 
-                       context.User.FindFirst("unique_name")?.Value ??
-                       context.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value;
-            
-            if (!string.IsNullOrEmpty(email))
-            {
-                var isSuperAdmin = email.EndsWith("@erpure.ai", StringComparison.OrdinalIgnoreCase);
-                if (isSuperAdmin)
-                {
-                    return true;
-                }
-            }
-            
-            // Deny access if no admin role or super admin email
-            return false;
-        }));
+        policy.RequireDatabaseRole(UserRole.OrgAdmin, allowHigherRoles: true));
         
     options.AddPolicy("OrgAdminOnly", policy => 
-        policy.RequireAssertion(context => 
-        {
-            if (context.User.Identity?.IsAuthenticated == true)
-            {
-                var email = context.User.FindFirst("email")?.Value ?? 
-                           context.User.FindFirst("preferred_username")?.Value ?? 
-                           context.User.FindFirst("upn")?.Value ?? 
-                           context.User.FindFirst("unique_name")?.Value ??
-                           context.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value;
-                
-                // Only show org admin section for non-erpure.ai users (actual org admins)
-                return email != null && !email.EndsWith("@erpure.ai");
-            }
-            return false;
-        }));
+        policy.RequireDatabaseRole(UserRole.OrgAdmin, allowHigherRoles: false));
     
+    options.AddPolicy("OrgUserOrHigher", policy => 
+        policy.RequireDatabaseRole(UserRole.User, allowHigherRoles: true));
+
     options.AddPolicy("DevOnly", policy => 
-        policy.RequireRole("DevRole"));
+        policy.RequireDatabaseRole(UserRole.Developer, allowHigherRoles: true));
         
     options.AddPolicy("AuthenticatedUser", policy => 
         policy.RequireAuthenticatedUser());
@@ -181,31 +119,99 @@ builder.Services.AddScoped<ITenantIsolationValidator, TenantIsolationValidator>(
 builder.Services.AddScoped<IDatabaseCredentialService, DatabaseCredentialService>();
 builder.Services.AddScoped<IUserDatabaseAccessService, UserDatabaseAccessService>();
 builder.Services.AddScoped<IOnboardedUserService, OnboardedUserService>();
+builder.Services.AddScoped<IDatabaseAssignmentCleanupService, DatabaseAssignmentCleanupService>();
 
 // New services for enhanced functionality (additive)
 builder.Services.AddScoped<IAgentGroupAssignmentService, AgentGroupAssignmentService>();
 builder.Services.AddScoped<IPowerShellExecutionService, PowerShellExecutionService>();
 builder.Services.AddScoped<IUnsavedChangesService, UnsavedChangesService>();
 
-// Add HTTP services for external API calls
-builder.Services.AddHttpClient();
+// User access validation service for security
+builder.Services.AddScoped<IUserAccessValidationService, UserAccessValidationService>();
+
+// Group repair service for fixing stale group IDs during reactivation
+builder.Services.AddScoped<IGroupRepairService, GroupRepairService>();
+
+// Enhanced validation and operation tracking services
+builder.Services.AddScoped<IStateValidationService, StateValidationService>();
+builder.Services.AddScoped<IOperationStatusService, OperationStatusService>();
+
+// Modern modal dialog system
+builder.Services.AddScoped<IModalService, ModalService>();
+
+// SuperAdmin role management and migration service
+builder.Services.AddScoped<ISuperAdminMigrationService, SuperAdminMigrationService>();
+
+// Business domain validation service for email invitations
+builder.Services.AddScoped<IBusinessDomainValidationService, BusinessDomainValidationService>();
+
+// System user management service for Master Developer functionality
+builder.Services.AddScoped<ISystemUserManagementService, SystemUserManagementService>();
+
+// Resilience service for external service retry policies and circuit breakers
+builder.Services.AddScoped<IResilienceService, ResilienceService>();
+
+// State synchronization validation service for database integrity
+builder.Services.AddSingleton<IStateSyncValidationService, StateSyncValidationService>();
+
+// Real-time state update notification service for UI synchronization
+builder.Services.AddScoped<IStateUpdateNotificationService, StateUpdateNotificationService>();
+
+// Orphaned resource detection service for database integrity maintenance
+builder.Services.AddSingleton<IOrphanedResourceDetectionService, OrphanedResourceDetectionService>();
+
+// Orphaned resource cleanup service for maintenance
+// Orphaned resource cleanup service removed (compilation errors)
+
+// Add HTTP services for external API calls with proper resource management
+builder.Services.AddHttpClient("DefaultHttpClient", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.Add("User-Agent", "AdminConsole/1.0");
+});
+
+// Add named HTTP clients for specific services
+builder.Services.AddHttpClient("GraphAPI", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(45);
+    client.BaseAddress = new Uri("https://graph.microsoft.com/");
+    client.DefaultRequestHeaders.Add("User-Agent", "AdminConsole-GraphAPI/1.0");
+});
+
+builder.Services.AddHttpClient("KeyVault", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.Add("User-Agent", "AdminConsole-KeyVault/1.0");
+});
+
 builder.Services.AddHttpContextAccessor();
 
-// Add memory cache for performance
+// Add memory cache for performance with centralized configuration
 builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<ICacheConfigurationService, CacheConfigurationService>();
+
+// Add health checks for monitoring external dependencies
+builder.Services.AddHealthChecks()
+    .AddDbContextCheck<AdminConsoleDbContext>("database")
+    .AddCheck<GraphApiHealthCheck>("graph_api")
+    .AddCheck<KeyVaultHealthCheck>("key_vault");
 
 // Add MVC and Razor components
 builder.Services.AddControllersWithViews();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// Configure SignalR for Blazor Server stability
+// Configure SignalR for Blazor Server stability and large-scale users
 builder.Services.AddSignalR(options =>
 {
-    options.ClientTimeoutInterval = TimeSpan.FromMinutes(5);
+    // Optimized for large number of simultaneous users
+    options.ClientTimeoutInterval = TimeSpan.FromMinutes(10);  // Increased for stability
     options.KeepAliveInterval = TimeSpan.FromSeconds(15);
     options.HandshakeTimeout = TimeSpan.FromSeconds(30);
-    options.MaximumReceiveMessageSize = 32 * 1024;
+    options.MaximumReceiveMessageSize = 64 * 1024;  // Increased for larger payloads
+    options.StreamBufferCapacity = 10;  // Reasonable buffer for streaming
+    options.MaximumParallelInvocationsPerClient = 2;  // Prevent client overload
+    options.EnableDetailedErrors = builder.Environment.IsDevelopment();  // Only in dev
 });
 
 // Add Blazor authentication services
@@ -230,8 +236,11 @@ else
 // Add authentication middleware BEFORE authorization
 app.UseAuthentication();
 
+// Add user access validation middleware after authentication but before authorization
+app.UseMiddleware<UserAccessValidationMiddleware>();
+
 // Add data isolation middleware after authentication but before authorization
-// app.UseDataIsolation(); // Temporarily disabled for testing
+app.UseDataIsolation();
 
 app.UseAuthorization();
 
@@ -248,6 +257,9 @@ app.MapControllers();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
+// Map SignalR hub for real-time UI updates
+app.MapHub<StateUpdateHub>("/stateupdatehub");
+
 // Temporary debug endpoint to check AgentTypes data
 app.MapGet("/debug/agenttypes", async (IAgentTypeService agentTypeService) =>
 {
@@ -261,7 +273,7 @@ app.MapGet("/debug/agenttypes", async (IAgentTypeService agentTypeService) =>
         at.AgentShareUrl,
         at.IsActive
     }), new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-});
+}).RequireAuthorization("SuperAdminOnly");
 
 // Temporary debug endpoint to fix the Admin agent type
 app.MapPost("/debug/fix-admin-agent", async (IAgentTypeService agentTypeService) =>
@@ -297,7 +309,7 @@ app.MapPost("/debug/fix-admin-agent", async (IAgentTypeService agentTypeService)
             adminAgent.IsActive
         }
     });
-});
+}).RequireAuthorization("SuperAdminOnly");
 
 // Test endpoint to directly test group assignment and Teams creation
 app.MapPost("/debug/test-services", async (IAgentGroupAssignmentService agentService, ITeamsGroupService teamsService, IGraphService graphService) =>
@@ -345,7 +357,7 @@ app.MapPost("/debug/test-services", async (IAgentGroupAssignmentService agentSer
     }
     
     return Results.Json(results, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-});
+}).RequireAuthorization("SuperAdminOnly");
 
 // Simple test endpoint to verify logging works
 app.MapGet("/debug/test-logging", (ILogger<Program> logger) =>
@@ -355,7 +367,105 @@ app.MapGet("/debug/test-logging", (ILogger<Program> logger) =>
     logger.LogWarning("This is a warning level log message");
     
     return Results.Json(new { message = "Logging test completed - check console" });
-});
+}).RequireAuthorization("SuperAdminOnly");
+
+// Test endpoint for user access validation
+app.MapPost("/debug/test-user-access", async (IUserAccessValidationService accessService, HttpContext context) =>
+{
+    var userId = context.User.FindFirst("oid")?.Value ?? "";
+    var email = context.User.FindFirst("email")?.Value ?? "";
+    
+    var result = await accessService.ValidateUserAccessAsync(userId, email);
+    
+    return Results.Json(new { 
+        userId = userId,
+        email = email,
+        hasAccess = result.HasAccess,
+        reason = result.Reason,
+        userFound = result.User != null,
+        organizationFound = result.Organization != null
+    }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+}).RequireAuthorization("SuperAdminOnly");
+
+// Test endpoint to manually revoke a user
+app.MapPost("/debug/revoke-user", async (IUserAccessValidationService accessService, HttpContext context) =>
+{
+    var userEmail = context.Request.Query["email"].ToString();
+    if (string.IsNullOrEmpty(userEmail))
+    {
+        return Results.BadRequest("Email parameter required");
+    }
+    
+    var revokedBy = context.User.FindFirst("email")?.Value ?? "system";
+    var success = await accessService.RevokeUserAccessAsync(userEmail, revokedBy);
+    
+    return Results.Json(new { 
+        success = success,
+        userEmail = userEmail,
+        revokedBy = revokedBy,
+        message = success ? "User access revoked successfully" : "Failed to revoke user access"
+    });
+}).RequireAuthorization("SuperAdminOnly");
+
+// Orphaned resource cleanup endpoint removed (compilation errors)
+
+// Test endpoint to check Graph permissions
+app.MapGet("/debug/check-permissions", async (IGraphService graphService) =>
+{
+    var permissionStatus = await graphService.CheckUserManagementPermissionsAsync();
+    
+    return Results.Json(new {
+        canDisableUsers = permissionStatus.CanDisableUsers,
+        canDeleteUsers = permissionStatus.CanDeleteUsers,
+        canManageGroups = permissionStatus.CanManageGroups,
+        missingPermissions = permissionStatus.MissingPermissions,
+        errorMessages = permissionStatus.ErrorMessages,
+        recommendations = new[]
+        {
+            permissionStatus.CanDisableUsers ? "✅ User disable capability confirmed" : "❌ Cannot disable users - check Azure App Registration permissions",
+            "Required permissions: User.ReadWrite.All or Directory.ReadWrite.All",
+            "Make sure to grant admin consent for the application"
+        }
+    }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+}).RequireAuthorization("SuperAdminOnly");
+
+// Test endpoint to disable/enable a user account
+app.MapPost("/debug/disable-user", async (IGraphService graphService, HttpContext context) =>
+{
+    var userId = context.Request.Query["userId"].ToString();
+    var action = context.Request.Query["action"].ToString().ToLower(); // "disable" or "enable"
+    
+    if (string.IsNullOrEmpty(userId))
+    {
+        return Results.BadRequest("userId parameter required");
+    }
+    
+    bool success;
+    string message;
+    
+    if (action == "enable")
+    {
+        success = await graphService.EnableUserAccountAsync(userId);
+        message = success ? "User account enabled successfully" : "Failed to enable user account";
+    }
+    else
+    {
+        success = await graphService.DisableUserAccountAsync(userId);
+        message = success ? "User account DISABLED in Azure Entra ID - user cannot authenticate" : "Failed to disable user account";
+    }
+    
+    return Results.Json(new {
+        success = success,
+        userId = userId,
+        action = action,
+        message = message,
+        securityNote = success && action == "disable" ? 
+            "🔒 CRITICAL: User is now completely blocked from authentication in Azure Entra ID" :
+            success && action == "enable" ?
+            "🔓 User account is now enabled and can authenticate" :
+            "❌ Operation failed - check logs for details"
+    });
+}).RequireAuthorization("SuperAdminOnly");
 
 // Test endpoint to diagnose exact permission issue
 app.MapPost("/debug/test-permissions", async (IGraphService graphService) =>
@@ -399,6 +509,62 @@ app.MapPost("/debug/test-permissions", async (IGraphService graphService) =>
         await File.AppendAllTextAsync(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEST: CRITICAL ERROR: {ex.Message}\n");
         return Results.Json(new { error = ex.Message });
     }
+}).RequireAuthorization("SuperAdminOnly");
+
+// Test endpoint for business domain validation
+app.MapPost("/debug/test-business-domain", (IBusinessDomainValidationService validationService, HttpContext context) =>
+{
+    var email = context.Request.Query["email"].ToString();
+    if (string.IsNullOrEmpty(email))
+    {
+        return Results.BadRequest("Email parameter required");
+    }
+    
+    var validation = validationService.ValidateBusinessDomain(email);
+    
+    return Results.Json(new
+    {
+        email = email,
+        isValid = validation.IsValid,
+        message = validation.Message,
+        domain = validation.Domain,
+        failureType = validation.FailureType?.ToString(),
+        blockedDomains = validationService.GetBlockedPrivateDomains().Take(10), // Show first 10 for testing
+        totalBlockedDomains = validationService.GetBlockedPrivateDomains().Count
+    }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+}).RequireAuthorization("SuperAdminOnly");
+
+// Map health check endpoints for monitoring
+app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json";
+        var response = new
+        {
+            status = report.Status.ToString(),
+            duration = report.TotalDuration,
+            checks = report.Entries.Select(entry => new
+            {
+                name = entry.Key,
+                status = entry.Value.Status.ToString(),
+                duration = entry.Value.Duration,
+                description = entry.Value.Description,
+                data = entry.Value.Data,
+                exception = entry.Value.Exception?.Message
+            })
+        };
+        await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(response, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+    }
 });
+
+// Simple health check endpoint for load balancers
+app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready")
+});
+
+// Detailed health check endpoint for monitoring systems (requires authentication)
+app.MapHealthChecks("/health/detailed").RequireAuthorization("SuperAdminOnly");
 
 app.Run();

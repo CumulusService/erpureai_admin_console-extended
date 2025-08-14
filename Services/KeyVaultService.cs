@@ -1,6 +1,7 @@
 using Azure.Security.KeyVault.Secrets;
 using Azure.Identity;
 using Azure.Core;
+using Azure;
 using Microsoft.Extensions.Caching.Memory;
 using AdminConsole.Models;
 
@@ -14,7 +15,7 @@ public class KeyVaultService : IKeyVaultService
     private readonly ITenantIsolationValidator _tenantValidator;
     private readonly ILogger<KeyVaultService> _logger;
     private readonly IMemoryCache _cache;
-    private readonly TimeSpan _cacheExpiry = TimeSpan.FromMinutes(15);
+    private readonly ICacheConfigurationService _cacheConfig;
 
     public KeyVaultService(
         SecretClient? secretClient,
@@ -22,7 +23,8 @@ public class KeyVaultService : IKeyVaultService
         IDataIsolationService dataIsolationService,
         ITenantIsolationValidator tenantValidator,
         ILogger<KeyVaultService> logger, 
-        IMemoryCache cache)
+        IMemoryCache cache,
+        ICacheConfigurationService cacheConfig)
     {
         _secretClient = secretClient;
         _organizationService = organizationService;
@@ -30,6 +32,7 @@ public class KeyVaultService : IKeyVaultService
         _tenantValidator = tenantValidator;
         _logger = logger;
         _cache = cache;
+        _cacheConfig = cacheConfig;
     }
 
     public async Task<string?> GetSecretAsync(string secretName, string organizationId)
@@ -69,7 +72,7 @@ public class KeyVaultService : IKeyVaultService
                 // Verify organization tag matches
                 if (ValidateOrganizationTag(secret.Value.Properties.Tags, organizationId))
                 {
-                    _cache.Set(cacheKey, secret.Value.Value, _cacheExpiry);
+                    _cache.Set(cacheKey, secret.Value.Value, _cacheConfig.StaticCacheTTL);
                     return secret.Value.Value;
                 }
                 else
@@ -183,20 +186,118 @@ public class KeyVaultService : IKeyVaultService
             var tenantSecretName = pathSegments[1]; // Use the existing tenant secret name from URI
             _logger.LogInformation("  Using existing tenant secret name from URI: {TenantSecretName}", tenantSecretName);
             
+            // 🔧 CRITICAL: Get existing secret to preserve all tags
+            _logger.LogInformation("  Retrieving existing secret to preserve tags...");
+            KeyVaultSecret? existingSecret = null;
+            try
+            {
+                existingSecret = await _secretClient.GetSecretAsync(tenantSecretName);
+                _logger.LogInformation("  Retrieved existing secret with {TagCount} tags", existingSecret.Properties.Tags.Count);
+            }
+            catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+            {
+                _logger.LogWarning("  Existing secret not found - creating with basic tags only");
+            }
+            
             // Create new version of existing secret (same secret name, new version)
             var secretOptions = new KeyVaultSecret(tenantSecretName, secretValue);
             
-            // Add organization and metadata tags
-            secretOptions.Properties.Tags.Add("org", organizationId);
-            secretOptions.Properties.Tags.Add("type", "tenant-secret");
-            secretOptions.Properties.Tags.Add("updated", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"));
-            secretOptions.Properties.Tags.Add("secretName", secretName); // Original secret name for queries
+            // 🔧 PRESERVE ALL EXISTING TAGS
+            if (existingSecret?.Properties.Tags != null)
+            {
+                _logger.LogInformation("  Preserving {TagCount} existing tags from current version", existingSecret.Properties.Tags.Count);
+                
+                // 🔍 DETAILED TAG DEBUGGING
+                _logger.LogInformation("  === EXISTING SECRET TAG DETAILS ===");
+                foreach (var existingTag in existingSecret.Properties.Tags)
+                {
+                    var tagValue = existingTag.Value?.Length > 100 ? $"{existingTag.Value[..100]}..." : existingTag.Value;
+                    _logger.LogInformation("    EXISTING TAG: {TagKey} = '{TagValue}' (Length: {Length})", 
+                        existingTag.Key, tagValue, existingTag.Value?.Length ?? 0);
+                    
+                    secretOptions.Properties.Tags.Add(existingTag.Key, existingTag.Value);
+                }
+                
+                _logger.LogInformation("  === NEW SECRET TAG VERIFICATION ===");
+                foreach (var newTag in secretOptions.Properties.Tags)
+                {
+                    var tagValue = newTag.Value?.Length > 100 ? $"{newTag.Value[..100]}..." : newTag.Value;
+                    _logger.LogInformation("    NEW TAG: {TagKey} = '{TagValue}' (Length: {Length})", 
+                        newTag.Key, tagValue, newTag.Value?.Length ?? 0);
+                }
+                _logger.LogInformation("  === END TAG VERIFICATION ({NewTagCount} tags total) ===", secretOptions.Properties.Tags.Count);
+            }
+            else
+            {
+                // Fallback: Add basic organization and metadata tags only if no existing tags
+                _logger.LogInformation("  No existing tags found - adding basic tags");
+                secretOptions.Properties.Tags.Add("org", organizationId);
+                secretOptions.Properties.Tags.Add("type", "tenant-secret");
+                secretOptions.Properties.Tags.Add("secretName", secretName); // Original secret name for queries
+            }
             
-            // Note: Enabled status and other metadata will be set by caller if needed
-            // This allows the method to be used for both password updates and metadata sync
+            // Always update the 'updated' timestamp
+            secretOptions.Properties.Tags["updated"] = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+            _logger.LogInformation("  Updated 'updated' timestamp tag");
 
             _logger.LogInformation("  Calling Azure Key Vault SetSecretAsync to create new version...");
-            var newVersionResponse = await _secretClient.SetSecretAsync(secretOptions);
+            
+            Response<KeyVaultSecret>? newVersionResponse = null;
+            try
+            {
+                newVersionResponse = await _secretClient.SetSecretAsync(secretOptions);
+            }
+            catch (Azure.RequestFailedException ex) when (ex.Status == 409 && ex.ErrorCode == "Conflict")
+            {
+                // If secret is deleted but recoverable, purge it and retry
+                if (ex.Message.Contains("deleted but recoverable"))
+                {
+                    _logger.LogWarning("Secret {TenantSecretName} is in deleted but recoverable state. Auto-purging and retrying...", tenantSecretName);
+                    
+                    // Extract secret name from tenant secret name for the purge operation
+                    var secretNameForPurge = secretName; // Use original secret name
+                    var purgeSuccess = await PurgeDeletedSecretAsync(secretNameForPurge, organizationId);
+                    
+                    if (purgeSuccess)
+                    {
+                        _logger.LogInformation("Successfully purged deleted secret, retrying update with exponential backoff...");
+                        
+                        // Retry with exponential backoff (Azure purge can take time)
+                        for (int attempt = 1; attempt <= 3; attempt++)
+                        {
+                            var delay = TimeSpan.FromSeconds(2 * Math.Pow(2, attempt - 1)); // 2s, 4s, 8s
+                            _logger.LogInformation("Attempt {Attempt}/3: Waiting {Delay}s for Azure purge to complete...", attempt, delay.TotalSeconds);
+                            await Task.Delay(delay);
+                            
+                            try
+                            {
+                                newVersionResponse = await _secretClient.SetSecretAsync(secretOptions);
+                                _logger.LogInformation("Successfully updated secret after auto-purge on attempt {Attempt}", attempt);
+                                break; // Success - exit retry loop
+                            }
+                            catch (Azure.RequestFailedException retryEx) when (retryEx.Status == 409 && retryEx.Message.Contains("currently being deleted"))
+                            {
+                                if (attempt == 3)
+                                {
+                                    _logger.LogError("Secret still being deleted after 3 attempts (total {TotalSeconds}s). Azure purge is taking longer than expected.", (2 + 4 + 8));
+                                    throw new InvalidOperationException($"Secret {tenantSecretName} is still being deleted by Azure after {(2 + 4 + 8)}s. Please retry the operation in a few minutes.", retryEx);
+                                }
+                                _logger.LogWarning("Attempt {Attempt} failed - secret still being deleted, will retry...", attempt);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogError("Failed to purge deleted secret {TenantSecretName}. Manual intervention required.", tenantSecretName);
+                        throw new InvalidOperationException($"Cannot update deleted secret {tenantSecretName}. Auto-purge failed. Please manually purge the secret from Key Vault.", ex);
+                    }
+                }
+                else
+                {
+                    throw; // Re-throw if it's a different conflict error
+                }
+            }
+            
             _logger.LogInformation("  Successfully created new version of secret {TenantSecretName}", tenantSecretName);
             
             // Get the new version URI from the response
@@ -241,50 +342,117 @@ public class KeyVaultService : IKeyVaultService
             var tenantSecretName = await GenerateTenantSecretName(secretName, organizationId);
             _logger.LogInformation("  Step 2: Generated tenant secret name: {TenantSecretName}", tenantSecretName);
             
-            _logger.LogInformation("  Step 3: Creating Key Vault secret object...");
+            // 🔧 CRITICAL: Check if secret already exists to preserve tags
+            _logger.LogInformation("  Step 3: Checking if secret already exists to preserve tags...");
+            KeyVaultSecret? existingSecret = null;
+            bool isUpdatingExistingSecret = false;
+            try
+            {
+                existingSecret = await _secretClient.GetSecretAsync(tenantSecretName);
+                isUpdatingExistingSecret = true;
+                _logger.LogInformation("  Found existing secret with {TagCount} tags - will preserve them", existingSecret.Properties.Tags.Count);
+            }
+            catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+            {
+                _logger.LogInformation("  Secret does not exist - creating new secret with default tags");
+            }
+            
+            _logger.LogInformation("  Step 4: Creating Key Vault secret object...");
             var secretOptions = new KeyVaultSecret(tenantSecretName, secretValue);
             
-            // Add organization and metadata tags
-            secretOptions.Properties.Tags.Add("org", organizationId);
-            secretOptions.Properties.Tags.Add("type", "tenant-secret");
-            secretOptions.Properties.Tags.Add("created", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"));
-            secretOptions.Properties.Tags.Add("secretName", secretName); // Original secret name for queries
-            secretOptions.Properties.Tags.Add("isActive", "true"); // New secrets are active by default
-            _logger.LogInformation("  Added isActive tag: true (new secrets are active by default)");
+            // 🔧 PRESERVE ALL EXISTING TAGS if updating, otherwise create default tags
+            if (isUpdatingExistingSecret && existingSecret?.Properties.Tags != null)
+            {
+                _logger.LogInformation("  Preserving {TagCount} existing tags from current version", existingSecret.Properties.Tags.Count);
+                
+                // 🔍 DETAILED TAG DEBUGGING
+                _logger.LogInformation("  === EXISTING SECRET TAG DETAILS (SetSecretAsync) ===");
+                foreach (var existingTag in existingSecret.Properties.Tags)
+                {
+                    var tagValue = existingTag.Value?.Length > 100 ? $"{existingTag.Value[..100]}..." : existingTag.Value;
+                    _logger.LogInformation("    EXISTING TAG: {TagKey} = '{TagValue}' (Length: {Length})", 
+                        existingTag.Key, tagValue, existingTag.Value?.Length ?? 0);
+                    
+                    secretOptions.Properties.Tags.Add(existingTag.Key, existingTag.Value);
+                }
+                
+                // Update the 'updated' timestamp for existing secrets
+                secretOptions.Properties.Tags["updated"] = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                _logger.LogInformation("  Updated 'updated' timestamp tag for existing secret");
+                
+                _logger.LogInformation("  === NEW SECRET TAG VERIFICATION (SetSecretAsync) ===");
+                foreach (var newTag in secretOptions.Properties.Tags)
+                {
+                    var tagValue = newTag.Value?.Length > 100 ? $"{newTag.Value[..100]}..." : newTag.Value;
+                    _logger.LogInformation("    NEW TAG: {TagKey} = '{TagValue}' (Length: {Length})", 
+                        newTag.Key, tagValue, newTag.Value?.Length ?? 0);
+                }
+                _logger.LogInformation("  === END TAG VERIFICATION ({NewTagCount} tags total) ===", secretOptions.Properties.Tags.Count);
+            }
+            else
+            {
+                // Add default organization and metadata tags for new secrets
+                _logger.LogInformation("  Adding default tags for new secret");
+                secretOptions.Properties.Tags.Add("org", organizationId);
+                secretOptions.Properties.Tags.Add("type", "tenant-secret");
+                secretOptions.Properties.Tags.Add("created", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"));
+                secretOptions.Properties.Tags.Add("secretName", secretName); // Original secret name for queries
+                secretOptions.Properties.Tags.Add("isActive", "true"); // New secrets are active by default
+                _logger.LogInformation("  Added isActive tag: true (new secrets are active by default)");
+            }
 
-            _logger.LogInformation("  Step 4: Calling Azure Key Vault SetSecretAsync...");
+            _logger.LogInformation("  Step 5: Calling Azure Key Vault SetSecretAsync...");
             try
             {
                 await _secretClient.SetSecretAsync(secretOptions);
-                _logger.LogInformation("  Step 4: Azure Key Vault call succeeded");
+                _logger.LogInformation("  Step 5: Azure Key Vault call succeeded");
             }
             catch (Azure.RequestFailedException ex) when (ex.Status == 409 && ex.ErrorCode == "Conflict")
             {
-                _logger.LogWarning("Secret {TenantSecretName} is in deleted-but-recoverable state. Attempting to recover and update...", tenantSecretName);
-                try
+                // If creating a new secret encounters a deleted secret, auto-purge and retry
+                if (ex.Message.Contains("deleted but recoverable"))
                 {
-                    // Try to recover the deleted secret first
-                    var recoveryOperation = await _secretClient.StartRecoverDeletedSecretAsync(tenantSecretName);
-                    _logger.LogInformation("Secret recovery initiated. Waiting for recovery to complete...");
+                    _logger.LogWarning("Secret {TenantSecretName} is in deleted but recoverable state during creation. Auto-purging and retrying...", tenantSecretName);
                     
-                    // Wait for recovery to complete (with timeout)
-                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-                    await recoveryOperation.WaitForCompletionAsync(cts.Token);
-                    _logger.LogInformation("Secret recovery completed");
+                    var purgeSuccess = await PurgeDeletedSecretAsync(secretName, organizationId);
                     
-                    // Now try to set the secret again
-                    await _secretClient.SetSecretAsync(secretOptions);
-                    _logger.LogInformation("Successfully recovered and updated secret {TenantSecretName}", tenantSecretName);
+                    if (purgeSuccess)
+                    {
+                        _logger.LogInformation("Successfully purged deleted secret, retrying creation with exponential backoff...");
+                        
+                        // Retry with exponential backoff (Azure purge can take time)
+                        for (int attempt = 1; attempt <= 3; attempt++)
+                        {
+                            var delay = TimeSpan.FromSeconds(2 * Math.Pow(2, attempt - 1)); // 2s, 4s, 8s
+                            _logger.LogInformation("Attempt {Attempt}/3: Waiting {Delay}s for Azure purge to complete...", attempt, delay.TotalSeconds);
+                            await Task.Delay(delay);
+                            
+                            try
+                            {
+                                await _secretClient.SetSecretAsync(secretOptions);
+                                _logger.LogInformation("Successfully created secret after auto-purge on attempt {Attempt}", attempt);
+                                break; // Success - exit retry loop
+                            }
+                            catch (Azure.RequestFailedException retryEx) when (retryEx.Status == 409 && retryEx.Message.Contains("currently being deleted"))
+                            {
+                                if (attempt == 3)
+                                {
+                                    _logger.LogError("Secret still being deleted after 3 attempts (total {TotalSeconds}s). Azure purge is taking longer than expected.", (2 + 4 + 8));
+                                    throw new InvalidOperationException($"Secret {tenantSecretName} is still being deleted by Azure after {(2 + 4 + 8)}s. Please retry the operation in a few minutes.", retryEx);
+                                }
+                                _logger.LogWarning("Attempt {Attempt} failed - secret still being deleted, will retry...", attempt);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogError("Failed to purge deleted secret {TenantSecretName}. Manual intervention required.", tenantSecretName);
+                        throw new InvalidOperationException($"Cannot create secret {tenantSecretName}. Auto-purge failed. Please manually purge the secret from Key Vault.", ex);
+                    }
                 }
-                catch (OperationCanceledException)
+                else
                 {
-                    _logger.LogError("Secret recovery timed out after 30 seconds for {TenantSecretName}", tenantSecretName);
-                    throw new InvalidOperationException($"Secret recovery timed out. Please try again later.");
-                }
-                catch (Exception recoveryEx)
-                {
-                    _logger.LogError(recoveryEx, "Failed to recover and update secret {TenantSecretName}", tenantSecretName);
-                    throw;
+                    throw; // Re-throw if it's a different conflict error
                 }
             }
             
@@ -300,6 +468,74 @@ public class KeyVaultService : IKeyVaultService
             _logger.LogError(ex, "Failed to set secret {SecretName} for organization {OrganizationId}", secretName, organizationId);
             return false;
         }
+    }
+
+    public async Task<bool> SetSecretWithTagsAsync(string secretName, string secretValue, string organizationId, Dictionary<string, string> additionalTags)
+    {
+        _logger.LogInformation("=== Key Vault SetSecretWithTagsAsync Debug ===");
+        _logger.LogInformation("  SecretName: {SecretName}", secretName);
+        _logger.LogInformation("  OrganizationId: {OrganizationId}", organizationId);
+        _logger.LogInformation("  AdditionalTags: {TagCount}", additionalTags.Count);
+        
+        if (!IsKeyVaultAvailable() || _secretClient == null)
+        {
+            _logger.LogError("Key Vault is not available - cannot store secret {SecretName} for organization {OrganizationId}", secretName, organizationId);
+            return false;
+        }
+
+        try
+        {
+            // Enhanced tenant isolation validation
+            _logger.LogInformation("  Step 1: Validating tenant access...");
+            await _tenantValidator.ValidateSecretAccessAsync(secretName, organizationId, "write");
+            _logger.LogInformation("  Step 1: Tenant validation passed");
+            
+            _logger.LogInformation("  Step 2: Generating tenant secret name...");
+            var tenantSecretName = await GenerateTenantSecretName(secretName, organizationId);
+            _logger.LogInformation("  Step 2: Generated tenant secret name: {TenantSecretName}", tenantSecretName);
+            
+            _logger.LogInformation("  Step 3: Creating Key Vault secret object with ALL tags...");
+            var secretOptions = new KeyVaultSecret(tenantSecretName, secretValue);
+            
+            // Add standard organization and metadata tags
+            secretOptions.Properties.Tags.Add("org", organizationId);
+            secretOptions.Properties.Tags.Add("type", "tenant-secret");
+            secretOptions.Properties.Tags.Add("created", DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"));
+            secretOptions.Properties.Tags.Add("secretName", secretName);
+            secretOptions.Properties.Tags.Add("isActive", "true");
+            
+            // Add ALL additional tags in the same operation
+            _logger.LogInformation("  Adding {TagCount} additional tags:", additionalTags.Count);
+            foreach (var tag in additionalTags)
+            {
+                secretOptions.Properties.Tags.Add(tag.Key, tag.Value);
+                var tagValue = tag.Value?.Length > 100 ? $"{tag.Value[..100]}..." : tag.Value;
+                _logger.LogInformation("    Added tag: {TagKey} = '{TagValue}' (Length: {Length})", 
+                    tag.Key, tagValue, tag.Value?.Length ?? 0);
+            }
+            
+            _logger.LogInformation("  Total tags to be set: {TotalTagCount}", secretOptions.Properties.Tags.Count);
+
+            _logger.LogInformation("  Step 4: Calling Azure Key Vault SetSecretAsync with ALL tags...");
+            await _secretClient.SetSecretAsync(secretOptions);
+            _logger.LogInformation("  Step 4: Azure Key Vault call succeeded with all tags");
+
+            _logger.LogInformation("🎉 Successfully created secret {SecretName} with {TagCount} total tags in SINGLE operation", 
+                secretName, secretOptions.Properties.Tags.Count);
+            
+            // Clear any cached values for this secret
+            var cacheKey = $"secret_{organizationId}_{secretName}";
+            _cache.Remove(cacheKey);
+            
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to store secret {SecretName} with tags for organization {OrganizationId}", secretName, organizationId);
+            return false;
+        }
+
+        return false;
     }
 
     public async Task<IEnumerable<string>> GetSecretNamesAsync(string organizationId)
@@ -334,7 +570,7 @@ public class KeyVaultService : IKeyVaultService
                 }
             }
             
-            _cache.Set(cacheKey, secretNames, _cacheExpiry);
+            _cache.Set(cacheKey, secretNames, _cacheConfig.StaticCacheTTL);
             return secretNames;
         }
         catch (Exception ex)
@@ -618,6 +854,52 @@ public class KeyVaultService : IKeyVaultService
     }
 
     /// <summary>
+    /// Purges a deleted secret completely from Key Vault (removes it from soft-delete state)
+    /// </summary>
+    public async Task<bool> PurgeSecretAsync(string exactSecretName)
+    {
+        _logger.LogInformation("=== PurgeSecretAsync ===");
+        _logger.LogInformation("  ExactSecretName: {ExactSecretName}", exactSecretName);
+        
+        if (!IsKeyVaultAvailable() || _secretClient == null)
+        {
+            _logger.LogError("Key Vault is not available - cannot purge secret {ExactSecretName}", exactSecretName);
+            return false;
+        }
+
+        try
+        {
+            _logger.LogInformation("  Starting secret purge operation...");
+            await _secretClient.PurgeDeletedSecretAsync(exactSecretName);
+            _logger.LogInformation("✅ Successfully purged secret: {ExactSecretName}", exactSecretName);
+            return true;
+        }
+        catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+        {
+            _logger.LogWarning("Secret {ExactSecretName} not found for purging (404) - may not be in soft-deleted state or already purged. Response: {Response}", 
+                exactSecretName, ex.Message);
+            return false; // Changed to false - 404 during purge might indicate an issue
+        }
+        catch (Azure.RequestFailedException ex) when (ex.Status == 403)
+        {
+            _logger.LogWarning("Insufficient permissions to purge secret {ExactSecretName} - requires 'purge' permission. Status: {Status}", 
+                exactSecretName, ex.Status);
+            return false;
+        }
+        catch (Azure.RequestFailedException ex)
+        {
+            _logger.LogError("Azure request failed when purging secret {ExactSecretName}. Status: {Status}, Error: {Error}", 
+                exactSecretName, ex.Status, ex.Message);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error when purging secret {ExactSecretName}", exactSecretName);
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Gets secret properties (including enabled status) directly from Key Vault
     /// </summary>
     public async Task<(string? Value, bool? IsEnabled)> GetSecretWithPropertiesAsync(string exactSecretName)
@@ -846,4 +1128,92 @@ public class KeyVaultService : IKeyVaultService
             return (false, $"Key Vault connectivity test failed: {ex.Message}");
         }
     }
+
+    /// <summary>
+    /// Gets a secret value along with its tags for consolidated secret access
+    /// </summary>
+    public async Task<(string? SecretValue, Dictionary<string, string>? Tags)> GetSecretWithTagsAsync(string secretName, string organizationId)
+    {
+        if (!IsKeyVaultAvailable() || _secretClient == null)
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            // Enhanced tenant isolation validation with security compliance
+            await _tenantValidator.ValidateSecretAccessAsync(secretName, organizationId, "read");
+
+            // Validate organization exists
+            var organization = await _organizationService.GetByIdAsync(organizationId);
+            if (organization == null)
+            {
+                _logger.LogWarning("Organization {OrganizationId} not found when retrieving secret with tags {SecretName}", 
+                    organizationId, secretName);
+                return (null, null);
+            }
+
+            // Generate tenant-specific secret name
+            var tenantSecretName = await GenerateTenantSecretName(secretName, organizationId);
+            
+            var secret = await _secretClient.GetSecretAsync(tenantSecretName);
+            
+            if (secret?.Value != null)
+            {
+                // Verify organization tag matches
+                if (ValidateOrganizationTag(secret.Value.Properties.Tags, organizationId))
+                {
+                    // Convert IDictionary<string, string> to Dictionary<string, string>
+                    var tags = new Dictionary<string, string>();
+                    foreach (var kvp in secret.Value.Properties.Tags)
+                    {
+                        tags[kvp.Key] = kvp.Value;
+                    }
+                    
+                    return (secret.Value.Value, tags);
+                }
+                else
+                {
+                    _logger.LogWarning("Organization tag mismatch for secret {SecretName}, expected {OrganizationId}", 
+                        tenantSecretName, organizationId);
+                }
+            }
+        }
+        catch (Azure.RequestFailedException ex) when (ex.Status == 404)
+        {
+            _logger.LogInformation("Secret {SecretName} not found for organization {OrganizationId}", secretName, organizationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to retrieve secret with tags {SecretName} for organization {OrganizationId}", secretName, organizationId);
+        }
+
+        return (null, null);
+    }
+
+    public async Task<bool> PurgeDeletedSecretAsync(string secretName, string organizationId)
+    {
+        try
+        {
+            _logger.LogWarning("Attempting to purge deleted secret {SecretName} for organization {OrganizationId}", secretName, organizationId);
+            
+            if (!IsKeyVaultAvailable() || _secretClient == null)
+            {
+                _logger.LogError("Key Vault is not available - cannot purge deleted secret {SecretName} for organization {OrganizationId}", secretName, organizationId);
+                return false;
+            }
+            
+            var tenantSecretName = await GenerateTenantSecretName(secretName, organizationId);
+            await _secretClient.PurgeDeletedSecretAsync(tenantSecretName);
+            
+            _logger.LogInformation("Successfully purged deleted secret {SecretName}", tenantSecretName);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to purge deleted secret {SecretName} for organization {OrganizationId}", secretName, organizationId);
+            return false;
+        }
+    }
+
 }

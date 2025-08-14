@@ -16,6 +16,7 @@ public class DatabaseCredentialService : IDatabaseCredentialService
     private readonly AdminConsoleDbContext _context;
     private readonly IKeyVaultService _keyVaultService;
     private readonly IDataIsolationService _dataIsolationService;
+    private readonly IOrganizationService _organizationService;
     private readonly ILogger<DatabaseCredentialService> _logger;
     private readonly IMemoryCache _cache;
 
@@ -23,12 +24,14 @@ public class DatabaseCredentialService : IDatabaseCredentialService
         AdminConsoleDbContext context,
         IKeyVaultService keyVaultService,
         IDataIsolationService dataIsolationService,
+        IOrganizationService organizationService,
         ILogger<DatabaseCredentialService> logger,
         IMemoryCache cache)
     {
         _context = context;
         _keyVaultService = keyVaultService;
         _dataIsolationService = dataIsolationService;
+        _organizationService = organizationService;
         _logger = logger;
         _cache = cache;
     }
@@ -134,6 +137,21 @@ public class DatabaseCredentialService : IDatabaseCredentialService
         _logger.LogInformation("  OrganizationId: {OrganizationId}", organizationId);
         _logger.LogInformation("  CreatedBy: {CreatedBy}", createdBy);
         
+        // CRITICAL DEBUG: Check if SAP configuration fields are received
+        _logger.LogInformation("  SAP Configuration Fields DEBUG:");
+        _logger.LogInformation("    SAPServiceLayerHostname: '{SAPServiceLayerHostname}'", model.SAPServiceLayerHostname ?? "NULL");
+        _logger.LogInformation("    SAPAPIGatewayHostname: '{SAPAPIGatewayHostname}'", model.SAPAPIGatewayHostname ?? "NULL");
+        _logger.LogInformation("    SAPBusinessOneWebClientHost: '{SAPBusinessOneWebClientHost}'", model.SAPBusinessOneWebClientHost ?? "NULL");
+        _logger.LogInformation("    DocumentCode: '{DocumentCode}'", model.DocumentCode ?? "NULL");
+        
+        // Validate HANA consistency before creating
+        var (isValid, errorMessage) = model.ValidateHANAConsistency();
+        if (!isValid)
+        {
+            _logger.LogError("HANA validation failed for credential: {Error}", errorMessage);
+            throw new ArgumentException(errorMessage);
+        }
+        
         try
         {
             var credential = new DatabaseCredential
@@ -154,75 +172,73 @@ public class DatabaseCredentialService : IDatabaseCredentialService
                 Encrypt = model.Encrypt,
                 SSLValidateCertificate = model.SSLValidateCertificate,
                 TrustServerCertificate = model.TrustServerCertificate,
+                
+                // SAP Configuration fields (now mandatory)
+                SAPServiceLayerHostname = model.SAPServiceLayerHostname ?? string.Empty,
+                SAPAPIGatewayHostname = model.SAPAPIGatewayHostname ?? string.Empty,
+                SAPBusinessOneWebClientHost = model.SAPBusinessOneWebClientHost ?? string.Empty,
+                DocumentCode = model.DocumentCode ?? string.Empty,
+                
+                // Set SAPServiceLayerDBSchema based on database type
+                SAPServiceLayerDBSchema = model.DatabaseType == DatabaseType.HANA 
+                    ? model.CurrentSchema 
+                    : model.DatabaseName,
+                
                 CreatedOn = DateTime.UtcNow,
                 ModifiedOn = DateTime.UtcNow,
                 CreatedBy = createdBy,
                 ModifiedBy = createdBy
             };
 
-            // Generate secret name and store password in Key Vault
-            var passwordSecretName = credential.GeneratePasswordSecretName();
-            _logger.LogInformation("  Generated password secret name: {PasswordSecretName}", passwordSecretName);
-            
-            _logger.LogInformation("  Calling KeyVaultService.SetSecretAsync...");
-            var keyVaultResult = await _keyVaultService.SetSecretAsync(passwordSecretName, model.SAPPassword, organizationId.ToString());
-            _logger.LogInformation("  KeyVaultService.SetSecretAsync returned: {Result}", keyVaultResult);
-            
-            if (!keyVaultResult)
-            {
-                _logger.LogError("Failed to store password in Key Vault for credential {FriendlyName}", model.FriendlyName);
-                throw new InvalidOperationException("Failed to store password in Key Vault. Please check that the Key Vault is accessible and your service principal has the required permissions (Secret Officer role).");
-            }
+            // CRITICAL DEBUG: Verify credential entity has SAP fields populated
+            _logger.LogInformation("  Created credential entity SAP fields:");
+            _logger.LogInformation("    Entity.SAPServiceLayerHostname: '{SAPServiceLayerHostname}'", credential.SAPServiceLayerHostname);
+            _logger.LogInformation("    Entity.SAPAPIGatewayHostname: '{SAPAPIGatewayHostname}'", credential.SAPAPIGatewayHostname);
+            _logger.LogInformation("    Entity.SAPBusinessOneWebClientHost: '{SAPBusinessOneWebClientHost}'", credential.SAPBusinessOneWebClientHost);
+            _logger.LogInformation("    Entity.DocumentCode: '{DocumentCode}'", credential.DocumentCode);
 
-            // Get the secret URI and store it instead of the secret name
-            _logger.LogInformation("  Retrieving password secret URI...");
-            var passwordSecretUri = await _keyVaultService.GetSecretIdentifierAsync(passwordSecretName, organizationId.ToString());
-            if (passwordSecretUri != null)
-            {
-                credential.PasswordSecretName = passwordSecretUri;
-                _logger.LogInformation("  Stored password secret URI: {PasswordSecretUri}", passwordSecretUri);
-            }
-            else
-            {
-                _logger.LogWarning("  Failed to retrieve password secret URI, storing secret name as fallback");
-                credential.PasswordSecretName = passwordSecretName;
-            }
+            // Skip creating separate password secret - we'll use consolidated secret approach only
+            _logger.LogInformation("  Skipping separate password secret creation - using consolidated secret approach");
+            credential.PasswordSecretName = string.Empty; // Will be retrieved from consolidated secret
 
-            // Generate connection string secret name and store full connection string in Key Vault
-            var connectionStringSecretName = credential.GenerateConnectionStringSecretName();
+            // Skip creating separate connection string secret - consolidated secret will contain connection string as tag
+            _logger.LogInformation("  Skipping separate connection string secret creation - using consolidated secret approach");
             var fullConnectionString = credential.BuildConnectionStringTemplate().Replace("{password}", model.DatabasePassword);
+            _logger.LogInformation("  Built connection string (length: {Length}) for consolidated secret", fullConnectionString.Length);
             
-            _logger.LogInformation("  Generated connection string secret name: {SecretName}", connectionStringSecretName);
-            _logger.LogInformation("  Built connection string (length: {Length}): {ConnectionString}", 
-                fullConnectionString.Length, 
-                fullConnectionString.Replace(model.DatabasePassword ?? "", "***PASSWORD***"));
-            
-            _logger.LogInformation("  Calling KeyVaultService.SetSecretAsync for connection string...");
-            var connectionStringResult = await _keyVaultService.SetSecretAsync(connectionStringSecretName, fullConnectionString, organizationId.ToString());
-            _logger.LogInformation("  KeyVaultService.SetSecretAsync for connection string returned: {Result}", connectionStringResult);
-            
-            if (!connectionStringResult)
-            {
-                _logger.LogError("Failed to store connection string in Key Vault for credential {FriendlyName}", model.FriendlyName);
-                throw new InvalidOperationException("Failed to store connection string in Key Vault. Please check that the Key Vault is accessible and your service principal has the required permissions (Secret Officer role).");
-            }
+            // Keep connection string empty in database for security (deprecated field) 
+            credential.ConnectionString = string.Empty;
+            credential.ConnectionStringSecretName = string.Empty; // Will be retrieved from consolidated secret tags
 
-            // Get the connection string secret URI and store it instead of the secret name
-            _logger.LogInformation("  Retrieving connection string secret URI...");
-            var connectionStringSecretUri = await _keyVaultService.GetSecretIdentifierAsync(connectionStringSecretName, organizationId.ToString());
-            if (connectionStringSecretUri != null)
+            // Create consolidated secret (NEW APPROACH) - SAP password as value, connection string as tag
+            var consolidatedSecretName = credential.GenerateConsolidatedSecretName();
+            _logger.LogInformation("  Generated consolidated secret name: {ConsolidatedSecretName}", consolidatedSecretName);
+            
+            _logger.LogInformation("  Calling KeyVaultService.SetSecretAsync for consolidated secret...");
+            var consolidatedKeyVaultResult = await CreateConsolidatedSecretAsync(consolidatedSecretName, model.SAPPassword, fullConnectionString, organizationId.ToString(), credential);
+            _logger.LogInformation("  KeyVaultService.SetSecretAsync for consolidated secret returned: {Result}", consolidatedKeyVaultResult);
+            
+            if (consolidatedKeyVaultResult)
             {
-                credential.ConnectionStringSecretName = connectionStringSecretUri;
-                _logger.LogInformation("  Stored connection string secret URI: {ConnectionStringSecretUri}", connectionStringSecretUri);
+                // Get the consolidated secret URI and store it
+                _logger.LogInformation("  Retrieving consolidated secret URI...");
+                var consolidatedSecretUri = await _keyVaultService.GetSecretIdentifierAsync(consolidatedSecretName, organizationId.ToString());
+                if (consolidatedSecretUri != null)
+                {
+                    credential.ConsolidatedSecretName = consolidatedSecretUri;
+                    _logger.LogInformation("  Stored consolidated secret URI: {ConsolidatedSecretUri}", consolidatedSecretUri);
+                }
+                else
+                {
+                    _logger.LogWarning("  Failed to retrieve consolidated secret URI, storing secret name as fallback");
+                    credential.ConsolidatedSecretName = consolidatedSecretName;
+                }
             }
             else
             {
-                _logger.LogWarning("  Failed to retrieve connection string secret URI, storing secret name as fallback");
-                credential.ConnectionStringSecretName = connectionStringSecretName;
+                _logger.LogWarning("Failed to store consolidated secret in Key Vault for credential {FriendlyName} - continuing with separate secrets only", model.FriendlyName);
+                credential.ConsolidatedSecretName = string.Empty;
             }
-
-            // Keep connection string empty in database for security (deprecated field)
-            credential.ConnectionString = string.Empty;
 
             _context.DatabaseCredentials.Add(credential);
             await _context.SaveChangesAsync();
@@ -309,6 +325,18 @@ public class DatabaseCredentialService : IDatabaseCredentialService
             existingCredential.Encrypt = model.Encrypt;
             existingCredential.SSLValidateCertificate = model.SSLValidateCertificate;
             existingCredential.TrustServerCertificate = model.TrustServerCertificate;
+            
+            // Update SAP Configuration fields
+            existingCredential.SAPServiceLayerHostname = model.SAPServiceLayerHostname ?? string.Empty;
+            existingCredential.SAPAPIGatewayHostname = model.SAPAPIGatewayHostname ?? string.Empty;
+            existingCredential.SAPBusinessOneWebClientHost = model.SAPBusinessOneWebClientHost ?? string.Empty;
+            existingCredential.DocumentCode = model.DocumentCode ?? string.Empty;
+            
+            // Update SAPServiceLayerDBSchema based on database type
+            existingCredential.SAPServiceLayerDBSchema = model.DatabaseType == DatabaseType.HANA 
+                ? model.CurrentSchema 
+                : model.DatabaseName;
+            
             existingCredential.ModifiedOn = DateTime.UtcNow;
             existingCredential.ModifiedBy = modifiedBy;
 
@@ -350,54 +378,150 @@ public class DatabaseCredentialService : IDatabaseCredentialService
             {
                 _logger.LogInformation("Updating connection string in Key Vault with new database password");
                 
-                // Ensure ConnectionStringSecretName exists (for backward compatibility)
-                if (string.IsNullOrEmpty(existingCredential.ConnectionStringSecretName))
-                {
-                    var connectionStringSecretName = existingCredential.GenerateConnectionStringSecretName();
-                    var initialConnectionString = existingCredential.BuildConnectionStringTemplate().Replace("{password}", model.DatabasePassword);
-                    
-                    // Create new connection string secret for legacy records
-                    var createResult = await _keyVaultService.SetSecretAsync(connectionStringSecretName, initialConnectionString, organizationId.ToString());
-                    if (!createResult)
-                    {
-                        _logger.LogError("Failed to create connection string in Key Vault for credential {FriendlyName}", model.FriendlyName);
-                        throw new InvalidOperationException("Failed to create connection string in Key Vault. Please check that the Key Vault is accessible and your service principal has the required permissions (Secret Officer role).");
-                    }
-                    
-                    // Get the new URI and store it
-                    var newConnectionStringUri = await _keyVaultService.GetSecretIdentifierAsync(connectionStringSecretName, organizationId.ToString());
-                    if (newConnectionStringUri != null)
-                    {
-                        existingCredential.ConnectionStringSecretName = newConnectionStringUri;
-                        _logger.LogInformation("Created new connection string secret URI: {ConnectionStringSecretUri}", newConnectionStringUri);
-                    }
-                }
-                else
-                {
-                    // Use URI-based update to create new version of existing secret
-                    var fullConnectionString = existingCredential.BuildConnectionStringTemplate().Replace("{password}", model.DatabasePassword);
-                    var (success, newVersionUri) = await _keyVaultService.UpdateSecretByUriAsync(existingCredential.ConnectionStringSecretName, fullConnectionString, organizationId.ToString());
-                    
-                    if (!success)
-                    {
-                        _logger.LogError("Failed to update connection string in Key Vault for credential {FriendlyName}", model.FriendlyName);
-                        throw new InvalidOperationException("Failed to update connection string in Key Vault. Please check that the Key Vault is accessible and your service principal has the required permissions (Secret Officer role).");
-                    }
-
-                    // Update to the new version URI in SQL database
-                    if (!string.IsNullOrEmpty(newVersionUri))
-                    {
-                        existingCredential.ConnectionStringSecretName = newVersionUri;
-                        _logger.LogInformation("Updated connection string secret to new version URI: {NewVersionUri}", newVersionUri);
-                    }
-                }
-
-                _logger.LogInformation("Connection string updated successfully in Key Vault (new version created for existing secret)");
+                // Skip separate connection string secret updates - using consolidated secret approach only
+                _logger.LogInformation("Using consolidated secret approach - skipping separate connection string secret operations");
             }
             else
             {
                 _logger.LogInformation("No database password provided - keeping existing connection string");
             }
+
+            // Update consolidated secret if passwords are provided and consolidated secret exists
+            if ((!string.IsNullOrEmpty(model.SAPPassword) || !string.IsNullOrEmpty(model.DatabasePassword)) 
+                && !string.IsNullOrEmpty(existingCredential.ConsolidatedSecretName))
+            {
+                _logger.LogInformation("Updating consolidated secret in Key Vault for credential {FriendlyName}", model.FriendlyName);
+                
+                try
+                {
+                    // Get current SAP password if not provided in update
+                    string currentSAPPassword = model.SAPPassword;
+                    if (string.IsNullOrEmpty(currentSAPPassword))
+                    {
+                        try
+                        {
+                            currentSAPPassword = await GetSAPPasswordAsync(existingCredential.Id, organizationId);
+                            if (string.IsNullOrEmpty(currentSAPPassword))
+                            {
+                                // Check if this is a new credential with no secrets created yet
+                                if (string.IsNullOrEmpty(existingCredential.ConsolidatedSecretName) && string.IsNullOrEmpty(existingCredential.PasswordSecretName))
+                                {
+                                    _logger.LogInformation("New credential with no existing secrets detected. Creating consolidated secret for the first time during update.");
+                                    // Use the provided SAP password from the update (this is likely the first real SAP password)
+                                    if (!string.IsNullOrEmpty(model.SAPPassword))
+                                    {
+                                        currentSAPPassword = model.SAPPassword;
+                                        _logger.LogInformation("Using SAP password from update request for new consolidated secret creation");
+                                    }
+                                    else
+                                    {
+                                        _logger.LogError("Cannot create consolidated secret for new credential - no SAP password provided in update");
+                                        throw new InvalidOperationException("Unable to retrieve current SAP password and no new SAP password provided. Please provide a SAP password to create the consolidated secret.");
+                                    }
+                                }
+                                else
+                                {
+                                    _logger.LogError("GetSAPPasswordAsync returned null or empty for credential {CredentialId}", existingCredential.Id);
+                                    throw new InvalidOperationException("Unable to retrieve current SAP password. Please provide a new SAP password to update the consolidated secret.");
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogInformation("Retrieved current SAP password from existing secret");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to retrieve current SAP password for credential {CredentialId}", existingCredential.Id);
+                            _logger.LogWarning("Skipping consolidated secret update due to SAP password retrieval failure. Separate secrets will still be updated.");
+                            // Skip consolidated secret update but continue with separate secret updates
+                            goto SkipConsolidatedUpdate;
+                        }
+                    }
+                    
+                    // Build connection string with current or new database password
+                    string connectionString;
+                    if (!string.IsNullOrEmpty(model.DatabasePassword))
+                    {
+                        connectionString = existingCredential.BuildConnectionStringTemplate().Replace("{password}", model.DatabasePassword);
+                        _logger.LogInformation("Built connection string with new database password");
+                    }
+                    else
+                    {
+                        try
+                        {
+                            connectionString = await BuildConnectionStringAsync(existingCredential.Id, organizationId);
+                            if (string.IsNullOrEmpty(connectionString))
+                            {
+                                // Check if this is a new credential with no secrets created yet
+                                if (string.IsNullOrEmpty(existingCredential.ConsolidatedSecretName) && string.IsNullOrEmpty(existingCredential.ConnectionStringSecretName))
+                                {
+                                    _logger.LogInformation("New credential with no existing connection string secret detected. Building connection string from template during update.");
+                                    // Use the provided database password from the update to build connection string
+                                    if (!string.IsNullOrEmpty(model.DatabasePassword))
+                                    {
+                                        connectionString = existingCredential.BuildConnectionStringTemplate().Replace("{password}", model.DatabasePassword);
+                                        _logger.LogInformation("Built connection string using database password from update request for new consolidated secret creation");
+                                    }
+                                    else
+                                    {
+                                        _logger.LogError("Cannot build connection string for new credential - no database password provided in update");
+                                        throw new InvalidOperationException("Unable to retrieve current connection string and no new database password provided. Please provide a database password to create the consolidated secret.");
+                                    }
+                                }
+                                else
+                                {
+                                    _logger.LogError("BuildConnectionStringAsync returned null or empty for credential {CredentialId}", existingCredential.Id);
+                                    throw new InvalidOperationException("Unable to retrieve current connection string. Please provide a new database password to update the consolidated secret.");
+                                }
+                            }
+                            else
+                            {
+                                _logger.LogInformation("Retrieved current connection string from existing secret");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed to build current connection string for credential {CredentialId}", existingCredential.Id);
+                            _logger.LogWarning("Skipping consolidated secret update due to connection string build failure. Separate secrets will still be updated.");
+                            // Skip consolidated secret update but continue with separate secret updates
+                            goto SkipConsolidatedUpdate;
+                        }
+                    }
+                    
+                    // Update consolidated secret with new version (using metadata update to include tags)
+                    var (success, newVersionUri) = await _keyVaultService.UpdateSecretMetadataByUriAsync(
+                        existingCredential.ConsolidatedSecretName, 
+                        currentSAPPassword, 
+                        organizationId.ToString(),
+                        true, // enabled
+                        new Dictionary<string, string> { { "connectionString", connectionString } });
+                        
+                    if (success && !string.IsNullOrEmpty(newVersionUri))
+                    {
+                        existingCredential.ConsolidatedSecretName = newVersionUri;
+                        _logger.LogInformation("Updated consolidated secret to new version URI: {NewVersionUri}", newVersionUri);
+                    }
+                    else if (!success)
+                    {
+                        _logger.LogError("Failed to update consolidated secret in Key Vault for credential {FriendlyName}", model.FriendlyName);
+                        throw new InvalidOperationException("Failed to update consolidated secret in Key Vault. Please check that the Key Vault is accessible and your service principal has the required permissions (Secret Officer role).");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error updating consolidated secret for credential {FriendlyName}", model.FriendlyName);
+                    _logger.LogWarning("Consolidated secret update failed, but separate secret updates succeeded. System will continue to function using separate secrets.");
+                    // Don't throw - let separate secret updates work
+                }
+            }
+            else if (!string.IsNullOrEmpty(existingCredential.ConsolidatedSecretName))
+            {
+                _logger.LogInformation("No password updates provided - consolidated secret remains unchanged");
+            }
+            
+            SkipConsolidatedUpdate:
+            // Continue with database save even if consolidated secret update failed
 
             await _context.SaveChangesAsync();
 
@@ -453,6 +577,8 @@ public class DatabaseCredentialService : IDatabaseCredentialService
 
     public async Task<bool> HardDeleteAsync(Guid credentialId, Guid organizationId)
     {
+        // Use transaction to ensure atomic operations
+        using var transaction = await _context.Database.BeginTransactionAsync();
         try
         {
             var credential = await _context.DatabaseCredentials
@@ -466,9 +592,16 @@ public class DatabaseCredentialService : IDatabaseCredentialService
                 return false;
             }
 
-            // Remove from Key Vault first - delete both password and connection string secrets
+            // Remove from Key Vault first - delete password, connection string, and consolidated secrets
             bool passwordDeleted = true;
             bool connectionStringDeleted = true;
+            bool consolidatedSecretDeleted = true;
+            
+            // DEBUG: Log all secret names that will be attempted for deletion
+            _logger.LogInformation("=== Key Vault Secret Deletion Debug Info ===");
+            _logger.LogInformation("  PasswordSecretName: '{PasswordSecretName}'", credential.PasswordSecretName ?? "NULL");
+            _logger.LogInformation("  ConnectionStringSecretName: '{ConnectionStringSecretName}'", credential.ConnectionStringSecretName ?? "NULL");
+            _logger.LogInformation("  ConsolidatedSecretName: '{ConsolidatedSecretName}'", credential.ConsolidatedSecretName ?? "NULL");
             
             // Delete SAP password secret
             try
@@ -480,8 +613,14 @@ public class DatabaseCredentialService : IDatabaseCredentialService
                 if (tenantSecretName != null)
                 {
                     _logger.LogInformation("Extracted tenant secret name: {TenantSecretName}", tenantSecretName);
-                    await _keyVaultService.DeleteSecretByExactNameAsync(tenantSecretName);
-                    _logger.LogInformation("Successfully deleted Key Vault password secret {TenantSecretName} for credential {CredentialId}", 
+                    var deleteResult = await _keyVaultService.DeleteSecretByExactNameAsync(tenantSecretName);
+                    if (deleteResult)
+                    {
+                        // Also purge the legacy secret
+                        await Task.Delay(1000);
+                        await _keyVaultService.PurgeSecretAsync(tenantSecretName);
+                    }
+                    _logger.LogInformation("Successfully deleted and purged Key Vault password secret {TenantSecretName} for credential {CredentialId}", 
                         tenantSecretName, credentialId);
                 }
                 else
@@ -509,8 +648,14 @@ public class DatabaseCredentialService : IDatabaseCredentialService
                     if (tenantSecretName != null)
                     {
                         _logger.LogInformation("Extracted tenant secret name: {TenantSecretName}", tenantSecretName);
-                        await _keyVaultService.DeleteSecretByExactNameAsync(tenantSecretName);
-                        _logger.LogInformation("Successfully deleted Key Vault connection string secret {TenantSecretName} for credential {CredentialId}", 
+                        var deleteResult = await _keyVaultService.DeleteSecretByExactNameAsync(tenantSecretName);
+                        if (deleteResult)
+                        {
+                            // Also purge the legacy secret
+                            await Task.Delay(1000);
+                            await _keyVaultService.PurgeSecretAsync(tenantSecretName);
+                        }
+                        _logger.LogInformation("Successfully deleted and purged Key Vault connection string secret {TenantSecretName} for credential {CredentialId}", 
                             tenantSecretName, credentialId);
                     }
                     else
@@ -531,9 +676,124 @@ public class DatabaseCredentialService : IDatabaseCredentialService
                 _logger.LogInformation("No connection string secret to delete for credential {CredentialId}", credentialId);
             }
 
-            if (!passwordDeleted || !connectionStringDeleted)
+            // Delete consolidated secret (NEW approach)
+            if (!string.IsNullOrEmpty(credential.ConsolidatedSecretName))
+            {
+                try
+                {
+                    _logger.LogInformation("Attempting to delete consolidated secret: {ConsolidatedSecretName}", credential.ConsolidatedSecretName);
+                    
+                    // Extract just the secret name from the full URI/name
+                    var secretName = ExtractSecretNameFromConsolidatedSecretName(credential.ConsolidatedSecretName);
+                    if (secretName == null)
+                    {
+                        _logger.LogWarning("Could not extract secret name from consolidated secret: {ConsolidatedSecretName}", credential.ConsolidatedSecretName);
+                        consolidatedSecretDeleted = false;
+                    }
+                    else
+                    {
+                    
+                    _logger.LogInformation("Extracted secret name: {SecretName}", secretName);
+                    
+                    // DEBUG: Check if secret exists before deletion
+                    try
+                    {
+                        var (value, isEnabled) = await _keyVaultService.GetSecretWithPropertiesAsync(secretName);
+                        _logger.LogInformation("DEBUG: Secret exists before deletion - Value: {HasValue}, Enabled: {IsEnabled}", 
+                            !string.IsNullOrEmpty(value), isEnabled);
+                    }
+                    catch (Exception debugEx)
+                    {
+                        _logger.LogInformation("DEBUG: Could not check secret before deletion: {Error}", debugEx.Message);
+                    }
+                    
+                    var deletionResult = await _keyVaultService.DeleteSecretByExactNameAsync(secretName);
+                    _logger.LogInformation("Key Vault deletion result: {Result} for secret {SecretName}", 
+                        deletionResult, secretName);
+                    
+                    // If deletion succeeded, also purge the secret to completely remove it
+                    if (deletionResult)
+                    {
+                        _logger.LogInformation("Attempting to purge secret completely: {SecretName}", secretName);
+                        await Task.Delay(3000); // Wait for Azure to process the deletion
+                        
+                        var purgeResult = await _keyVaultService.PurgeSecretAsync(secretName);
+                        _logger.LogInformation("Key Vault purge result: {Result} for secret {SecretName}", 
+                            purgeResult, secretName);
+                        
+                        if (!purgeResult)
+                        {
+                            _logger.LogWarning("Purge failed for secret {SecretName} - secret may still be in soft-deleted state", secretName);
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Deletion failed for secret {SecretName} - skipping purge attempt", secretName);
+                    }
+                    
+                    // DEBUG: Check if secret still exists after deletion and purging
+                    try
+                    {
+                        await Task.Delay(1000); // Wait a bit for Azure propagation
+                        var (value, isEnabled) = await _keyVaultService.GetSecretWithPropertiesAsync(secretName);
+                        _logger.LogWarning("DEBUG: Secret still exists after deletion+purge - Value: {HasValue}, Enabled: {IsEnabled}", 
+                            !string.IsNullOrEmpty(value), isEnabled);
+                    }
+                    catch (Exception debugEx)
+                    {
+                        _logger.LogInformation("DEBUG: Secret properly deleted and purged (could not retrieve): {Error}", debugEx.Message);
+                    }
+                    
+                    _logger.LogInformation("Successfully deleted Key Vault consolidated secret {SecretName} for credential {CredentialId}", 
+                        secretName, credentialId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    consolidatedSecretDeleted = false;
+                    _logger.LogError(ex, "Failed to delete Key Vault consolidated secret. Name: {SecretName}, Error: {Error}", 
+                        credential.ConsolidatedSecretName, ex.Message);
+                }
+            }
+            else
+            {
+                _logger.LogInformation("No consolidated secret to delete for credential {CredentialId}", credentialId);
+            }
+
+            if (!passwordDeleted || !connectionStringDeleted || !consolidatedSecretDeleted)
             {
                 _logger.LogWarning("Some Key Vault secrets could not be deleted for credential {CredentialId}, but continuing with database deletion", credentialId);
+            }
+
+            // CRITICAL FIX: Clean up all related data before deleting credential
+            _logger.LogInformation("Cleaning up related data for credential {CredentialId}", credentialId);
+            
+            // 1. Remove all UserDatabaseAssignments for this credential
+            var userAssignments = await _context.UserDatabaseAssignments
+                .Where(uda => uda.DatabaseCredentialId == credentialId && uda.OrganizationId == organizationId)
+                .ToListAsync();
+                
+            if (userAssignments.Any())
+            {
+                _logger.LogInformation("Removing {Count} UserDatabaseAssignments for credential {CredentialId}", 
+                    userAssignments.Count, credentialId);
+                _context.UserDatabaseAssignments.RemoveRange(userAssignments);
+                
+                // 2. Remove credential ID from OnboardedUsers.AssignedDatabaseIds JSON arrays
+                var affectedUserIds = userAssignments.Select(ua => ua.UserId).Distinct().ToList();
+                var affectedUsers = await _context.OnboardedUsers
+                    .Where(u => affectedUserIds.Contains(u.OnboardedUserId) && u.OrganizationId == organizationId)
+                    .ToListAsync();
+                    
+                foreach (var user in affectedUsers)
+                {
+                    if (user.AssignedDatabaseIds.Contains(credentialId))
+                    {
+                        user.AssignedDatabaseIds.Remove(credentialId);
+                        _logger.LogInformation("Removed credential {CredentialId} from user {UserId} AssignedDatabaseIds", 
+                            credentialId, user.OnboardedUserId);
+                    }
+                }
             }
 
             // Remove from database
@@ -543,6 +803,9 @@ public class DatabaseCredentialService : IDatabaseCredentialService
             InvalidateCache(organizationId);
             InvalidateActiveCache(organizationId);
 
+            // Commit the transaction
+            await transaction.CommitAsync();
+            
             _logger.LogInformation("Hard deleted database credential {CredentialId} for organization {OrganizationId}", 
                 credentialId, organizationId);
 
@@ -550,6 +813,8 @@ public class DatabaseCredentialService : IDatabaseCredentialService
         }
         catch (Exception ex)
         {
+            // Rollback transaction on any error
+            await transaction.RollbackAsync();
             _logger.LogError(ex, "Error hard deleting database credential {CredentialId}", credentialId);
             return false;
         }
@@ -793,10 +1058,67 @@ public class DatabaseCredentialService : IDatabaseCredentialService
                 return null;
             }
 
-            // Extract secret name from URI (backward compatibility)
-            var passwordSecretName = KeyVaultService.ExtractSecretNameFromUri(credential.PasswordSecretName) ?? credential.PasswordSecretName;
+            // Log what's actually stored in the database
+            _logger.LogInformation("Database credential fields - ConsolidatedSecretName: '{ConsolidatedSecretName}', PasswordSecretName: '{PasswordSecretName}'", 
+                credential.ConsolidatedSecretName, credential.PasswordSecretName);
+
+            // Try consolidated secret first (new approach) - only if we have a consolidated secret name in database
+            if (!string.IsNullOrEmpty(credential.ConsolidatedSecretName))
+            {
+                var consolidatedSecretName = KeyVaultService.ExtractSecretNameFromUri(credential.ConsolidatedSecretName) ?? credential.ConsolidatedSecretName;
+                _logger.LogInformation("Attempting to get SAP password from existing consolidated secret: {ConsolidatedSecretName}", consolidatedSecretName);
+                
+                // If the secret name already has the service prefix (from URI extraction), use it directly without going through KeyVault prefix generation
+                string? sapPassword = null;
+                if (consolidatedSecretName.StartsWith("cumulus-service-com-"))
+                {
+                    _logger.LogInformation("Consolidated secret name already has service prefix, calling KeyVault directly");
+                    // Use the KeyVault client directly to bypass prefix generation
+                    try
+                    {
+                        var secret = await _keyVaultService.GetSecretByExactNameAsync(consolidatedSecretName);
+                        sapPassword = secret;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to get secret directly by exact name: {SecretName}", consolidatedSecretName);
+                    }
+                }
+                else
+                {
+                    // Let KeyVault service add the prefix (for tenant-scoped names)
+                    sapPassword = await _keyVaultService.GetSecretAsync(consolidatedSecretName, organizationId.ToString());
+                }
+                
+                if (sapPassword != null)
+                {
+                    _logger.LogInformation("Successfully retrieved SAP password from consolidated secret for credential {CredentialId}", credentialId);
+                    return sapPassword;
+                }
+                _logger.LogWarning("Failed to get SAP password from consolidated secret, falling back to separate secret for credential {CredentialId}", credentialId);
+            }
+            else
+            {
+                _logger.LogInformation("No consolidated secret name in database, will try separate password secret for credential {CredentialId}", credentialId);
+            }
+
+            // Fallback to separate password secret (backward compatibility)
+            _logger.LogInformation("Getting SAP password from separate secret for credential {CredentialId}", credentialId);
             
-            return await _keyVaultService.GetSecretAsync(passwordSecretName, organizationId.ToString());
+            if (!string.IsNullOrEmpty(credential.PasswordSecretName))
+            {
+                // Extract the actual secret name from URI if it's a URI
+                var passwordSecretName = KeyVaultService.ExtractSecretNameFromUri(credential.PasswordSecretName) ?? credential.PasswordSecretName;
+                _logger.LogInformation("Using existing password secret name from database: {PasswordSecretName}", passwordSecretName);
+                return await _keyVaultService.GetSecretAsync(passwordSecretName, organizationId.ToString());
+            }
+            else
+            {
+                // Generate password secret name as last resort (for very old credentials) - KeyVault service will add prefix
+                var passwordSecretName = credential.GeneratePasswordSecretName();
+                _logger.LogInformation("No password secret name in database, generated tenant-scoped name: {PasswordSecretName} for credential {CredentialId}", passwordSecretName, credentialId);
+                return await _keyVaultService.GetSecretAsync(passwordSecretName, organizationId.ToString());
+            }
         }
         catch (Exception ex)
         {
@@ -827,22 +1149,52 @@ public class DatabaseCredentialService : IDatabaseCredentialService
                 throw new InvalidOperationException($"Cannot update password for inactive credential '{credential.FriendlyName}'. Please activate the credential first.");
             }
 
-            _logger.LogInformation("Updating Key Vault secret by URI {SecretUri}", credential.PasswordSecretName);
-            var (success, newVersionUri) = await _keyVaultService.UpdateSecretByUriAsync(credential.PasswordSecretName, newPassword, organizationId.ToString());
-            if (!success)
+            // 🔧 Handle both consolidated secrets (new format) and legacy URIs (old format)
+            bool useConsolidatedSecret = !string.IsNullOrEmpty(credential.ConsolidatedSecretName);
+            
+            if (useConsolidatedSecret)
             {
-                _logger.LogError("Failed to update password in Key Vault for credential {CredentialId}", credentialId);
-                throw new InvalidOperationException("Failed to update password in Key Vault. The secret may be in an invalid state or Key Vault permissions may be insufficient.");
-            }
+                // NEW FORMAT: Use consolidated secret URI (same as legacy format)
+                _logger.LogInformation("Updating consolidated Key Vault secret by URI {SecretUri}", credential.ConsolidatedSecretName);
+                
+                var (success, newVersionUri) = await _keyVaultService.UpdateSecretByUriAsync(credential.ConsolidatedSecretName, newPassword, organizationId.ToString());
+                if (!success)
+                {
+                    _logger.LogError("Failed to update password in Key Vault consolidated secret {SecretUri} for credential {CredentialId}", 
+                        credential.ConsolidatedSecretName, credentialId);
+                    throw new InvalidOperationException("Failed to update password in Key Vault. The secret may be in an invalid state or Key Vault permissions may be insufficient.");
+                }
 
-            // Update to the new version URI in SQL database
-            if (!string.IsNullOrEmpty(newVersionUri))
+                // Update to the new version URI in SQL database 
+                if (!string.IsNullOrEmpty(newVersionUri))
+                {
+                    credential.ConsolidatedSecretName = newVersionUri;
+                    _logger.LogInformation("Updated consolidated secret to new version URI: {NewVersionUri}", newVersionUri);
+                }
+                
+                _logger.LogInformation("SAP password updated successfully in consolidated Key Vault secret (new version created)");
+            }
+            else
             {
-                credential.PasswordSecretName = newVersionUri;
-                _logger.LogInformation("Updated SAP password secret to new version URI: {NewVersionUri}", newVersionUri);
-            }
+                // OLD FORMAT: Use legacy password secret URI (backward compatibility)
+                _logger.LogInformation("Updating legacy Key Vault secret by URI {SecretUri}", credential.PasswordSecretName);
+                
+                var (success, newVersionUri) = await _keyVaultService.UpdateSecretByUriAsync(credential.PasswordSecretName, newPassword, organizationId.ToString());
+                if (!success)
+                {
+                    _logger.LogError("Failed to update password in Key Vault for credential {CredentialId}", credentialId);
+                    throw new InvalidOperationException("Failed to update password in Key Vault. The secret may be in an invalid state or Key Vault permissions may be insufficient.");
+                }
 
-            _logger.LogInformation("SAP password updated successfully in Key Vault (new version created for existing secret)");
+                // Update to the new version URI in SQL database
+                if (!string.IsNullOrEmpty(newVersionUri))
+                {
+                    credential.PasswordSecretName = newVersionUri;
+                    _logger.LogInformation("Updated SAP password secret to new version URI: {NewVersionUri}", newVersionUri);
+                }
+                
+                _logger.LogInformation("SAP password updated successfully in Key Vault (new version created for existing secret)");
+            }
 
             // Note: Connection string is not updated here as this method only updates SAP password
             // Connection string uses database password, not SAP password
@@ -874,13 +1226,62 @@ public class DatabaseCredentialService : IDatabaseCredentialService
                 return null;
             }
 
-            // Try to get connection string from Key Vault first (new secure approach)
+            // Try consolidated secret first (newest approach)
+            if (!string.IsNullOrEmpty(credential.ConsolidatedSecretName))
+            {
+                _logger.LogInformation("Attempting to get connection string from consolidated secret for credential {CredentialId}", credentialId);
+                
+                // Extract secret name from consolidated URI
+                var consolidatedSecretName = KeyVaultService.ExtractSecretNameFromUri(credential.ConsolidatedSecretName) ?? credential.ConsolidatedSecretName;
+                
+                // Smart prefix handling for consolidated secrets
+                string? secretValue = null;
+                Dictionary<string, string>? tags = null;
+                
+                if (consolidatedSecretName.StartsWith("cumulus-service-com-"))
+                {
+                    // For prefixed names, use direct access - tags not available yet, so assume connection string is in the secret value
+                    secretValue = await _keyVaultService.GetSecretByExactNameAsync(consolidatedSecretName);
+                    // TODO: Add proper tag retrieval for exact name access when method becomes available
+                    // For now, assume consolidated secret contains connection string directly
+                    if (!string.IsNullOrEmpty(secretValue))
+                    {
+                        _logger.LogInformation("Successfully retrieved connection string from consolidated secret (direct access) for credential {CredentialId}", credentialId);
+                        return secretValue; // Consolidated secret value might contain the connection string
+                    }
+                }
+                else
+                {
+                    (secretValue, tags) = await _keyVaultService.GetSecretWithTagsAsync(consolidatedSecretName, organizationId.ToString());
+                    if (tags != null && tags.ContainsKey("connectionString"))
+                    {
+                        _logger.LogInformation("Successfully retrieved connection string from consolidated secret for credential {CredentialId}", credentialId);
+                        return tags["connectionString"];
+                    }
+                }
+                
+                _logger.LogWarning("Failed to get connection string from consolidated secret, falling back to separate secret for credential {CredentialId}", credentialId);
+            }
+
+            // Fallback to separate connection string secret (previous approach)
             if (!string.IsNullOrEmpty(credential.ConnectionStringSecretName))
             {
+                _logger.LogInformation("Getting connection string from separate secret for credential {CredentialId}", credentialId);
+                
                 // Extract secret name from URI (backward compatibility)
                 var connectionStringSecretName = KeyVaultService.ExtractSecretNameFromUri(credential.ConnectionStringSecretName) ?? credential.ConnectionStringSecretName;
                 
-                var connectionString = await _keyVaultService.GetSecretAsync(connectionStringSecretName, organizationId.ToString());
+                // Smart prefix handling: use direct access if already prefixed, otherwise let KeyVault service add prefix
+                string? connectionString = null;
+                if (connectionStringSecretName.StartsWith("cumulus-service-com-"))
+                {
+                    connectionString = await _keyVaultService.GetSecretByExactNameAsync(connectionStringSecretName);
+                }
+                else
+                {
+                    connectionString = await _keyVaultService.GetSecretAsync(connectionStringSecretName, organizationId.ToString());
+                }
+                
                 if (connectionString != null)
                 {
                     return connectionString;
@@ -940,6 +1341,18 @@ public class DatabaseCredentialService : IDatabaseCredentialService
             existingCredential.Encrypt = model.Encrypt;
             existingCredential.SSLValidateCertificate = model.SSLValidateCertificate;
             existingCredential.TrustServerCertificate = model.TrustServerCertificate;
+            
+            // Update SAP Configuration fields
+            existingCredential.SAPServiceLayerHostname = model.SAPServiceLayerHostname ?? string.Empty;
+            existingCredential.SAPAPIGatewayHostname = model.SAPAPIGatewayHostname ?? string.Empty;
+            existingCredential.SAPBusinessOneWebClientHost = model.SAPBusinessOneWebClientHost ?? string.Empty;
+            existingCredential.DocumentCode = model.DocumentCode ?? string.Empty;
+            
+            // Update SAPServiceLayerDBSchema based on database type
+            existingCredential.SAPServiceLayerDBSchema = existingCredential.DatabaseType == DatabaseType.HANA 
+                ? model.CurrentSchema 
+                : model.DatabaseName;
+            
             existingCredential.ModifiedBy = modifiedBy;
             existingCredential.ModifiedOn = DateTime.UtcNow;
 
@@ -987,6 +1400,7 @@ public class DatabaseCredentialService : IDatabaseCredentialService
             _logger.LogInformation("  IsActive: {IsActive}", credential.IsActive);
             _logger.LogInformation("  PasswordSecretName: {PasswordSecretName}", credential.PasswordSecretName);
             _logger.LogInformation("  ConnectionStringSecretName: {ConnectionStringSecretName}", credential.ConnectionStringSecretName);
+            _logger.LogInformation("  ConsolidatedSecretName: {ConsolidatedSecretName}", credential.ConsolidatedSecretName);
             
             int successCount = 0;
             int attemptCount = 0;
@@ -1038,6 +1452,81 @@ public class DatabaseCredentialService : IDatabaseCredentialService
                     _logger.LogWarning(ex, "❌ Exception during connection string secret metadata sync - this may be expected for older credentials");
                 }
             }
+            
+            // Update consolidated secret metadata (newer approach - may not exist for older credentials)
+            if (!string.IsNullOrEmpty(credential.ConsolidatedSecretName))
+            {
+                attemptCount++;
+                _logger.LogInformation("Attempting to sync consolidated secret metadata...");
+                try
+                {
+                    // For consolidated secrets, we need to update both the value and connection string tag
+                    string currentSAPPassword;
+                    string currentConnectionString;
+                    
+                    try
+                    {
+                        currentSAPPassword = await GetSAPPasswordAsync(credential.Id, Guid.Parse(organizationId));
+                        if (string.IsNullOrEmpty(currentSAPPassword))
+                        {
+                            _logger.LogError("GetSAPPasswordAsync returned null or empty for credential {CredentialId} during sync", credential.Id);
+                            throw new InvalidOperationException("Unable to retrieve SAP password for consolidated secret sync.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to retrieve SAP password for consolidated secret sync for credential {CredentialId}", credential.Id);
+                        _logger.LogWarning("❌ Skipping consolidated secret sync due to SAP password retrieval failure");
+                        goto SkipConsolidatedSync; // Skip this consolidated secret sync but continue
+                    }
+                    
+                    try
+                    {
+                        currentConnectionString = await BuildConnectionStringAsync(credential.Id, Guid.Parse(organizationId));
+                        if (string.IsNullOrEmpty(currentConnectionString))
+                        {
+                            _logger.LogError("BuildConnectionStringAsync returned null or empty for credential {CredentialId} during sync", credential.Id);
+                            throw new InvalidOperationException("Unable to build connection string for consolidated secret sync.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to build connection string for consolidated secret sync for credential {CredentialId}", credential.Id);
+                        _logger.LogWarning("❌ Skipping consolidated secret sync due to connection string build failure");
+                        goto SkipConsolidatedSync; // Skip this consolidated secret sync but continue
+                    }
+                    
+                    var (success, newVersionUri) = await _keyVaultService.UpdateSecretMetadataByUriAsync(
+                        credential.ConsolidatedSecretName,
+                        currentSAPPassword,
+                        organizationId,
+                        credential.IsActive, // enabled status matches credential active status
+                        new Dictionary<string, string> { { "connectionString", currentConnectionString } });
+                        
+                    if (success)
+                    {
+                        if (!string.IsNullOrEmpty(newVersionUri))
+                        {
+                            credential.ConsolidatedSecretName = newVersionUri;
+                            _logger.LogInformation("Updated consolidated secret to new version URI: {NewVersionUri}", newVersionUri);
+                        }
+                        
+                        successCount++;
+                        _logger.LogInformation("✅ Consolidated secret metadata sync completed successfully");
+                    }
+                    else
+                    {
+                        _logger.LogWarning("❌ Consolidated secret metadata sync failed");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "❌ Exception during consolidated secret metadata sync");
+                }
+            }
+            
+            SkipConsolidatedSync:
+            // Continue with regular sync summary even if consolidated secret sync failed
             
             _logger.LogInformation("Key Vault metadata sync summary: {SuccessCount}/{AttemptCount} secrets updated", successCount, attemptCount);
             
@@ -1157,7 +1646,9 @@ public class DatabaseCredentialService : IDatabaseCredentialService
     private void InvalidateCache(Guid organizationId)
     {
         var cacheKey = $"org_credentials_{organizationId}";
+        var activeCacheKey = $"org_active_credentials_{organizationId}";
         _cache.Remove(cacheKey);
+        _cache.Remove(activeCacheKey);
     }
 
     /// <summary>
@@ -1192,5 +1683,278 @@ public class DatabaseCredentialService : IDatabaseCredentialService
     {
         var cacheKey = $"org_active_credentials_{organizationId}";
         _cache.Remove(cacheKey);
+    }
+
+    /// <summary>
+    /// Creates a consolidated Key Vault secret with SAP password as value and connection string + SAP configuration as tags
+    /// </summary>
+    private async Task<bool> CreateConsolidatedSecretAsync(string secretName, string sapPassword, string connectionString, string organizationId, DatabaseCredential? credential = null)
+    {
+        try
+        {
+            _logger.LogInformation("Creating consolidated secret {SecretName} for organization {OrganizationId}", secretName, organizationId);
+            
+            // Validate connection string length for Key Vault tag (max 256 chars)
+            if (connectionString.Length > 256)
+            {
+                _logger.LogWarning("Connection string too long ({Length} chars) for Key Vault tag, falling back to separate secrets", connectionString.Length);
+                return false;
+            }
+            
+            // 🔧 FIX: Create consolidated secret with ALL tags in ONE operation (no double creation)
+            var allTags = new Dictionary<string, string>
+            {
+                { "connectionString", connectionString },
+                { "secretType", "consolidated" }
+            };
+
+            // Add database-level SAP configuration as tags (only if provided and not empty)
+            if (credential != null)
+            {
+                if (!string.IsNullOrWhiteSpace(credential.SAPServiceLayerHostname))
+                {
+                    allTags["sapServiceLayer"] = credential.SAPServiceLayerHostname;
+                    _logger.LogDebug("Adding SAP Service Layer hostname tag: {Hostname}", credential.SAPServiceLayerHostname);
+                }
+
+                if (!string.IsNullOrWhiteSpace(credential.SAPAPIGatewayHostname))
+                {
+                    allTags["sapAPIGateway"] = credential.SAPAPIGatewayHostname;
+                    _logger.LogDebug("Adding SAP API Gateway hostname tag: {Hostname}", credential.SAPAPIGatewayHostname);
+                }
+
+                if (!string.IsNullOrWhiteSpace(credential.SAPBusinessOneWebClientHost))
+                {
+                    allTags["sapWebClient"] = credential.SAPBusinessOneWebClientHost;
+                    _logger.LogDebug("Adding SAP Web Client hostname tag: {Hostname}", credential.SAPBusinessOneWebClientHost);
+                }
+
+                if (!string.IsNullOrWhiteSpace(credential.DocumentCode))
+                {
+                    allTags["documentCode"] = credential.DocumentCode;
+                    _logger.LogDebug("Adding Document Code tag: {DocumentCode}", credential.DocumentCode);
+                }
+            }
+            
+            _logger.LogInformation("🎉 Creating consolidated secret with {TagCount} total tags in SINGLE operation (fixing double-creation bug)", allTags.Count + 5); // +5 for default tags (org, type, created, secretName, isActive)
+            var success = await _keyVaultService.SetSecretWithTagsAsync(secretName, sapPassword, organizationId, allTags);
+            if (!success)
+            {
+                _logger.LogError("Failed to create consolidated secret {SecretName} with all tags", secretName);
+                return false;
+            }
+            
+            _logger.LogInformation("Successfully created consolidated secret {SecretName} with connection string tag", secretName);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating consolidated secret {SecretName}", secretName);
+            return false;
+        }
+    }
+
+    public async Task<string?> GetEffectiveSAPServiceLayerHostnameAsync(Guid credentialId, Guid organizationId)
+    {
+        try
+        {
+            var credential = await GetByIdAsync(credentialId, organizationId);
+            if (credential == null)
+            {
+                return null;
+            }
+
+            // Check database-level setting first (from database columns)
+            if (!string.IsNullOrWhiteSpace(credential.SAPServiceLayerHostname))
+            {
+                _logger.LogDebug("Using database-level SAP Service Layer hostname for credential {CredentialId}: {Hostname}", 
+                    credentialId, credential.SAPServiceLayerHostname);
+                return credential.SAPServiceLayerHostname;
+            }
+
+            // Check consolidated secret tags (if available)
+            if (!string.IsNullOrEmpty(credential.ConsolidatedSecretName))
+            {
+                try
+                {
+                    var consolidatedSecretName = KeyVaultService.ExtractSecretNameFromUri(credential.ConsolidatedSecretName) ?? credential.ConsolidatedSecretName;
+                    var (_, tags) = await _keyVaultService.GetSecretWithTagsAsync(consolidatedSecretName, organizationId.ToString());
+                    
+                    if (tags != null && tags.ContainsKey("sapServiceLayer") && !string.IsNullOrWhiteSpace(tags["sapServiceLayer"]))
+                    {
+                        _logger.LogDebug("Using consolidated secret tag SAP Service Layer hostname for credential {CredentialId}: {Hostname}", 
+                            credentialId, tags["sapServiceLayer"]);
+                        return tags["sapServiceLayer"];
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error reading SAP Service Layer hostname from consolidated secret for credential {CredentialId}", credentialId);
+                }
+            }
+
+            // Fall back to organization-level setting
+            var organization = await _organizationService.GetByIdAsync(organizationId.ToString());
+            if (organization != null && !string.IsNullOrWhiteSpace(organization.SAPServiceLayerHostname))
+            {
+                _logger.LogDebug("Using organization-level SAP Service Layer hostname for credential {CredentialId}: {Hostname}", 
+                    credentialId, organization.SAPServiceLayerHostname);
+                return organization.SAPServiceLayerHostname;
+            }
+
+            _logger.LogDebug("No SAP Service Layer hostname configured at database, secret, or organization level for credential {CredentialId}", credentialId);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting effective SAP Service Layer hostname for credential {CredentialId}", credentialId);
+            return null;
+        }
+    }
+
+    public async Task<string?> GetEffectiveSAPAPIGatewayHostnameAsync(Guid credentialId, Guid organizationId)
+    {
+        try
+        {
+            var credential = await GetByIdAsync(credentialId, organizationId);
+            if (credential == null)
+            {
+                return null;
+            }
+
+            // Check database-level setting first
+            if (!string.IsNullOrWhiteSpace(credential.SAPAPIGatewayHostname))
+            {
+                _logger.LogDebug("Using database-level SAP API Gateway hostname for credential {CredentialId}: {Hostname}", 
+                    credentialId, credential.SAPAPIGatewayHostname);
+                return credential.SAPAPIGatewayHostname;
+            }
+
+            // Fall back to organization-level setting
+            var organization = await _organizationService.GetByIdAsync(organizationId.ToString());
+            if (organization != null && !string.IsNullOrWhiteSpace(organization.SAPAPIGatewayHostname))
+            {
+                _logger.LogDebug("Using organization-level SAP API Gateway hostname for credential {CredentialId}: {Hostname}", 
+                    credentialId, organization.SAPAPIGatewayHostname);
+                return organization.SAPAPIGatewayHostname;
+            }
+
+            _logger.LogDebug("No SAP API Gateway hostname configured at database or organization level for credential {CredentialId}", credentialId);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting effective SAP API Gateway hostname for credential {CredentialId}", credentialId);
+            return null;
+        }
+    }
+
+    public async Task<string?> GetEffectiveSAPBusinessOneWebClientHostAsync(Guid credentialId, Guid organizationId)
+    {
+        try
+        {
+            var credential = await GetByIdAsync(credentialId, organizationId);
+            if (credential == null)
+            {
+                return null;
+            }
+
+            // Check database-level setting first
+            if (!string.IsNullOrWhiteSpace(credential.SAPBusinessOneWebClientHost))
+            {
+                _logger.LogDebug("Using database-level SAP Business One Web Client host for credential {CredentialId}: {Host}", 
+                    credentialId, credential.SAPBusinessOneWebClientHost);
+                return credential.SAPBusinessOneWebClientHost;
+            }
+
+            // Fall back to organization-level setting
+            var organization = await _organizationService.GetByIdAsync(organizationId.ToString());
+            if (organization != null && !string.IsNullOrWhiteSpace(organization.SAPBusinessOneWebClientHost))
+            {
+                _logger.LogDebug("Using organization-level SAP Business One Web Client host for credential {CredentialId}: {Host}", 
+                    credentialId, organization.SAPBusinessOneWebClientHost);
+                return organization.SAPBusinessOneWebClientHost;
+            }
+
+            _logger.LogDebug("No SAP Business One Web Client host configured at database or organization level for credential {CredentialId}", credentialId);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting effective SAP Business One Web Client host for credential {CredentialId}", credentialId);
+            return null;
+        }
+    }
+
+    public async Task<string?> GetEffectiveDocumentCodeAsync(Guid credentialId, Guid organizationId)
+    {
+        try
+        {
+            var credential = await GetByIdAsync(credentialId, organizationId);
+            if (credential == null)
+            {
+                return null;
+            }
+
+            // Check database-level setting first
+            if (!string.IsNullOrWhiteSpace(credential.DocumentCode))
+            {
+                _logger.LogDebug("Using database-level Document Code for credential {CredentialId}: {DocumentCode}", 
+                    credentialId, credential.DocumentCode);
+                return credential.DocumentCode;
+            }
+
+            // Fall back to organization-level setting
+            var organization = await _organizationService.GetByIdAsync(organizationId.ToString());
+            if (organization != null && !string.IsNullOrWhiteSpace(organization.DocumentCode))
+            {
+                _logger.LogDebug("Using organization-level Document Code for credential {CredentialId}: {DocumentCode}", 
+                    credentialId, organization.DocumentCode);
+                return organization.DocumentCode;
+            }
+
+            _logger.LogDebug("No Document Code configured at database or organization level for credential {CredentialId}", credentialId);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting effective Document Code for credential {CredentialId}", credentialId);
+            return null;
+        }
+    }
+
+    private string? ExtractSecretNameFromConsolidatedSecretName(string? consolidatedSecretName)
+    {
+        if (string.IsNullOrWhiteSpace(consolidatedSecretName))
+            return null;
+
+        // If it's just a name (not a URI), return it as-is
+        if (!consolidatedSecretName.Contains("://"))
+        {
+            return consolidatedSecretName;
+        }
+
+        // If it's a full URI, extract the secret name
+        try
+        {
+            var uri = new Uri(consolidatedSecretName);
+            var pathSegments = uri.AbsolutePath.Trim('/').Split('/');
+            
+            // Should have at least "secrets" and "secret-name"
+            if (pathSegments.Length >= 2 && pathSegments[0] == "secrets")
+            {
+                return pathSegments[1]; // This is the secret name without version
+            }
+        }
+        catch (UriFormatException ex)
+        {
+            _logger.LogWarning(ex, "Invalid URI format when extracting consolidated secret name: {ConsolidatedSecretName}", consolidatedSecretName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error extracting consolidated secret name: {ConsolidatedSecretName}", consolidatedSecretName);
+        }
+
+        return null;
     }
 }

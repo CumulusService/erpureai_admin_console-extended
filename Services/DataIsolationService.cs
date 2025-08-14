@@ -1,4 +1,6 @@
+using AdminConsole.Data;
 using AdminConsole.Models;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using System.Security.Claims;
 
@@ -12,17 +14,20 @@ public class DataIsolationService : IDataIsolationService
 {
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IGraphService _graphService;
+    private readonly AdminConsoleDbContext _context;
     private readonly ILogger<DataIsolationService> _logger;
     private readonly IMemoryCache _cache;
 
     public DataIsolationService(
         IHttpContextAccessor httpContextAccessor,
         IGraphService graphService,
+        AdminConsoleDbContext context,
         ILogger<DataIsolationService> logger,
         IMemoryCache cache)
     {
         _httpContextAccessor = httpContextAccessor;
         _graphService = graphService;
+        _context = context;
         _logger = logger;
         _cache = cache;
     }
@@ -155,10 +160,11 @@ public class DataIsolationService : IDataIsolationService
     }
 
     /// <summary>
-    /// Checks if the current user is a Super Admin with cross-organization access
+    /// Checks if the current user is a Super Admin with cross-organization access (synchronous wrapper)
     /// </summary>
     public bool IsCurrentUserSuperAdmin()
     {
+        // Synchronous wrapper - only checks Azure AD claims, not database
         try
         {
             var user = _httpContextAccessor.HttpContext?.User;
@@ -167,28 +173,77 @@ public class DataIsolationService : IDataIsolationService
                 return false;
             }
 
-            var email = user.FindFirst(ClaimTypes.Email)?.Value ?? 
-                       user.FindFirst("email")?.Value ?? 
-                       user.FindFirst("preferred_username")?.Value ?? 
-                       user.FindFirst("upn")?.Value;
-            if (string.IsNullOrEmpty(email))
+            // Check for Super Admin role claim - multiple fallbacks for robustness
+            var hasAdminRole = user.HasClaim("extension_UserRole", "SuperAdmin") ||
+                              user.HasClaim("roles", "SuperAdmin") ||
+                              user.IsInRole("SuperAdmin") ||
+                              user.HasClaim("role", "SuperAdmin") ||
+                              user.HasClaim("app_role", "SuperAdmin");
+
+            return hasAdminRole;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error checking super admin status (sync)");
+            return false;
+        }
+    }
+    
+    /// <summary>
+    /// Checks if the current user is a Super Admin with cross-organization access (async version with database checks)
+    /// </summary>
+    public async Task<bool> IsCurrentUserSuperAdminAsync()
+    {
+        try
+        {
+            var user = _httpContextAccessor.HttpContext?.User;
+            if (user?.Identity?.IsAuthenticated != true)
             {
+                _logger.LogDebug("IsCurrentUserSuperAdmin: User not authenticated");
                 return false;
             }
 
-            // Check if user email belongs to the main domain (erpure.ai)
-            var isErpureDomain = email.EndsWith("@erpure.ai", StringComparison.OrdinalIgnoreCase);
+            var email = user.FindFirst(ClaimTypes.Email)?.Value ?? 
+                       user.FindFirst("email")?.Value ?? 
+                       user.FindFirst("preferred_username")?.Value ?? 
+                       user.FindFirst("upn")?.Value ??
+                       user.FindFirst("unique_name")?.Value ??
+                       user.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value ??
+                       user.FindFirst("http://schemas.microsoft.com/identity/claims/email")?.Value;
+            if (string.IsNullOrEmpty(email))
+            {
+                _logger.LogDebug("IsCurrentUserSuperAdmin: No email found in claims");
+                return false;
+            }
+
+            _logger.LogInformation("=== IsCurrentUserSuperAdmin DEBUG ===");
+            _logger.LogInformation("Email: {Email}", email);
+
+            // Check if user has SuperAdmin role in database (replaces hardcoded domain check)
+            var isDatabaseSuperAdmin = await CheckIfSuperAdminAsync(email);
+            _logger.LogInformation("Is database SuperAdmin: {IsDatabaseSuperAdmin}", isDatabaseSuperAdmin);
             
-            // Check for Super Admin role claim
+            // Check for Super Admin role claim - multiple fallbacks for robustness
             var hasAdminRole = user.HasClaim("extension_UserRole", "SuperAdmin") ||
                               user.HasClaim("roles", "SuperAdmin") ||
-                              user.IsInRole("SuperAdmin");
+                              user.IsInRole("SuperAdmin") ||
+                              user.HasClaim("role", "SuperAdmin") ||
+                              user.HasClaim("app_role", "SuperAdmin");
+            _logger.LogInformation("Has admin role: {HasAdminRole}", hasAdminRole);
 
-            var isSuperAdmin = isErpureDomain && hasAdminRole;
+            // Enhanced logic: database role check OR Azure AD role claim for super admin access
+            var isSuperAdmin = isDatabaseSuperAdmin || hasAdminRole;
+            _logger.LogInformation("Final super admin result: {IsSuperAdmin} (database: {Database}, role: {Role})", 
+                isSuperAdmin, isDatabaseSuperAdmin, hasAdminRole);
             
             if (isSuperAdmin)
             {
                 _logger.LogInformation("Super admin access confirmed for user {Email}", email);
+            }
+            else
+            {
+                _logger.LogWarning("Super admin access DENIED for user {Email} - Database: {IsDatabaseSuperAdmin}, Role: {HasAdminRole}", 
+                    email, isDatabaseSuperAdmin, hasAdminRole);
             }
 
             return isSuperAdmin;
@@ -238,39 +293,33 @@ public class DataIsolationService : IDataIsolationService
     }
 
     /// <summary>
-    /// Gets the current user's role within their organization
+    /// Gets the current user's role within their organization (synchronous wrapper)
     /// </summary>
     public UserRole GetCurrentUserRole()
     {
+        // Synchronous wrapper - avoid database calls in sync context
+        // This version only checks Azure AD claims, not database role
         try
         {
             var user = _httpContextAccessor.HttpContext?.User;
             if (user?.Identity?.IsAuthenticated != true)
             {
+                _logger.LogDebug("GetCurrentUserRole: User not authenticated, returning UserRole.User");
                 return UserRole.User;
             }
 
             // Check for Azure AD app roles first (preferred method)
             if (user.IsInRole("SuperAdmin"))
             {
-                _logger.LogDebug("User has SuperAdmin app role");
                 return UserRole.SuperAdmin;
             }
             if (user.IsInRole("OrgAdmin"))
             {
-                _logger.LogDebug("User has OrgAdmin app role");
                 return UserRole.OrgAdmin;
             }
-            
-            // Fallback: Check email domain for SuperAdmin access
-            var email = user.FindFirst(ClaimTypes.Email)?.Value ?? 
-                       user.FindFirst("email")?.Value ?? 
-                       user.FindFirst("preferred_username")?.Value ?? 
-                       user.FindFirst("upn")?.Value;
-            
-            if (!string.IsNullOrEmpty(email) && email.EndsWith("@erpure.ai", StringComparison.OrdinalIgnoreCase))
+            if (user.IsInRole("OrgUser"))
             {
-                return UserRole.SuperAdmin;
+                return UserRole.User; // Map OrgUser to UserRole.User for compatibility
             }
             
             // Legacy claim checks (for backward compatibility)
@@ -291,13 +340,105 @@ public class DataIsolationService : IDataIsolationService
             return UserRole.User;
         }
     }
+    
+    /// <summary>
+    /// Gets the current user's role within their organization (async version with database checks)
+    /// </summary>
+    public async Task<UserRole> GetCurrentUserRoleAsync()
+    {
+        try
+        {
+            var user = _httpContextAccessor.HttpContext?.User;
+            if (user?.Identity?.IsAuthenticated != true)
+            {
+                _logger.LogDebug("GetCurrentUserRole: User not authenticated, returning UserRole.User");
+                return UserRole.User;
+            }
+
+            var email = user.FindFirst(ClaimTypes.Email)?.Value ?? 
+                       user.FindFirst("email")?.Value ?? 
+                       user.FindFirst("preferred_username")?.Value ?? 
+                       user.FindFirst("upn")?.Value;
+            _logger.LogInformation("=== GetCurrentUserRole DEBUG ===");
+            _logger.LogInformation("User Email: {Email}", email);
+
+            // Check for Azure AD app roles first (preferred method)
+            if (user.IsInRole("SuperAdmin"))
+            {
+                _logger.LogInformation("User has SuperAdmin app role - returning SuperAdmin");
+                return UserRole.SuperAdmin;
+            }
+            if (user.IsInRole("OrgAdmin"))
+            {
+                _logger.LogInformation("User has OrgAdmin app role - returning OrgAdmin");
+                return UserRole.OrgAdmin;
+            }
+            if (user.IsInRole("OrgUser"))
+            {
+                _logger.LogInformation("User has OrgUser app role - returning User");
+                return UserRole.User; // Map OrgUser to UserRole.User for compatibility
+            }
+            
+            // Database check: Check for SuperAdmin role in database (replaces domain check)
+            var isDatabaseSuperAdmin = await CheckIfSuperAdminAsync(email);
+            if (isDatabaseSuperAdmin)
+            {
+                _logger.LogInformation("User has SuperAdmin role in database - returning SuperAdmin");
+                return UserRole.SuperAdmin;
+            }
+            
+            // Legacy claim checks (for backward compatibility)
+            if (user.HasClaim("extension_UserRole", "SuperAdmin"))
+            {
+                _logger.LogInformation("User has extension_UserRole SuperAdmin claim - returning SuperAdmin");
+                return UserRole.SuperAdmin;
+            }
+            if (user.HasClaim("extension_UserRole", "OrgAdmin") || user.HasClaim("extension_IsAdmin", "true"))
+            {
+                _logger.LogInformation("User has extension_UserRole OrgAdmin claim - returning OrgAdmin");
+                return UserRole.OrgAdmin;
+            }
+
+            _logger.LogInformation("No admin roles found - returning UserRole.User");
+            return UserRole.User;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting current user role");
+            return UserRole.User;
+        }
+    }
 
     /// <summary>
-    /// Validates that the current user has the required role for an operation
+    /// Validates that the current user has the required role for an operation (synchronous wrapper)
     /// </summary>
     public bool ValidateUserRole(UserRole requiredRole)
     {
         var currentRole = GetCurrentUserRole();
+        
+        // Role hierarchy: SuperAdmin > OrgAdmin > User
+        switch (requiredRole)
+        {
+            case UserRole.SuperAdmin:
+                return currentRole == UserRole.SuperAdmin;
+            
+            case UserRole.OrgAdmin:
+                return currentRole == UserRole.SuperAdmin || currentRole == UserRole.OrgAdmin;
+            
+            case UserRole.User:
+                return true; // All authenticated users have User level access
+            
+            default:
+                return false;
+        }
+    }
+    
+    /// <summary>
+    /// Validates that the current user has the required role for an operation (async version with database checks)
+    /// </summary>
+    public async Task<bool> ValidateUserRoleAsync(UserRole requiredRole)
+    {
+        var currentRole = await GetCurrentUserRoleAsync();
         
         // Role hierarchy: SuperAdmin > OrgAdmin > User
         switch (requiredRole)
@@ -366,5 +507,37 @@ public class DataIsolationService : IDataIsolationService
         var generatedGuid = new Guid(hash);
         
         return generatedGuid.ToString().ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Check if user has SuperAdmin role via database instead of hardcoded domain check
+    /// </summary>
+    private async Task<bool> CheckIfSuperAdminAsync(string? email)
+    {
+        if (string.IsNullOrEmpty(email))
+        {
+            return false;
+        }
+
+        try
+        {
+            var user = await _context.OnboardedUsers
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower());
+
+            if (user == null)
+            {
+                return false;
+            }
+
+            // Use the extension method to get the role (handles both new and legacy systems)
+            var userRole = user.GetUserRole();
+            return userRole == UserRole.SuperAdmin;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error checking SuperAdmin status for user {Email}", email);
+            return false;
+        }
     }
 }

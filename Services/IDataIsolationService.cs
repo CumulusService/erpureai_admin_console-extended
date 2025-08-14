@@ -28,6 +28,12 @@ public interface IDataIsolationService
     /// </summary>
     /// <returns>True if user is a Super Admin</returns>
     bool IsCurrentUserSuperAdmin();
+    
+    /// <summary>
+    /// Checks if the current user is a Super Admin with cross-organization access (async version)
+    /// </summary>
+    /// <returns>True if user is a Super Admin</returns>
+    Task<bool> IsCurrentUserSuperAdminAsync();
 
     /// <summary>
     /// Filters a list of items to only include those the current user has access to
@@ -44,6 +50,12 @@ public interface IDataIsolationService
     /// </summary>
     /// <returns>User's role</returns>
     UserRole GetCurrentUserRole();
+    
+    /// <summary>
+    /// Gets the current user's role within their organization (async version)
+    /// </summary>
+    /// <returns>User's role</returns>
+    Task<UserRole> GetCurrentUserRoleAsync();
 
     /// <summary>
     /// Validates that the current user has the required role for an operation
@@ -51,6 +63,13 @@ public interface IDataIsolationService
     /// <param name="requiredRole">Minimum required role</param>
     /// <returns>True if user has sufficient role</returns>
     bool ValidateUserRole(UserRole requiredRole);
+    
+    /// <summary>
+    /// Validates that the current user has the required role for an operation (async version)
+    /// </summary>
+    /// <param name="requiredRole">Minimum required role</param>
+    /// <returns>True if user has sufficient role</returns>
+    Task<bool> ValidateUserRoleAsync(UserRole requiredRole);
 
     /// <summary>
     /// Clears organization cache for the current user

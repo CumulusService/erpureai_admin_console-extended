@@ -22,6 +22,58 @@ namespace AdminConsole.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("AdminConsole.Models.AgentTypeEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AgentShareUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("CreatedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("GlobalSecurityGroupId")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("ModifiedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("TeamsAppId")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("AgentTypes");
+                });
+
             modelBuilder.Entity("AdminConsole.Models.DatabaseCredential", b =>
                 {
                     b.Property<Guid>("Id")
@@ -32,6 +84,12 @@ namespace AdminConsole.Migrations
                         .IsRequired()
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("ConnectionStringSecretName")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ConsolidatedSecretName")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<Guid>("CreatedBy")
                         .HasColumnType("uniqueidentifier");
@@ -61,6 +119,10 @@ namespace AdminConsole.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<string>("DocumentCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<bool>("Encrypt")
                         .HasColumnType("bit");
 
@@ -68,6 +130,10 @@ namespace AdminConsole.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("InstanceName")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
@@ -88,6 +154,22 @@ namespace AdminConsole.Migrations
                     b.Property<int?>("Port")
                         .HasColumnType("int");
 
+                    b.Property<string>("SAPAPIGatewayHostname")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("SAPBusinessOneWebClientHost")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("SAPServiceLayerDBSchema")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("SAPServiceLayerHostname")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
                     b.Property<string>("SAPUsername")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -106,7 +188,7 @@ namespace AdminConsole.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DatabaseCredentials", (string)null);
+                    b.ToTable("DatabaseCredentials");
                 });
 
             modelBuilder.Entity("AdminConsole.Models.OnboardedUser", b =>
@@ -118,6 +200,10 @@ namespace AdminConsole.Migrations
                     b.Property<Guid?>("AgentNameId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("AgentTypeIds")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("AgentTypes")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -126,9 +212,16 @@ namespace AdminConsole.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int>("AssignedRole")
+                        .HasColumnType("int");
+
                     b.Property<string>("AssignedSupervisorEmail")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("AzureObjectId")
+                        .HasMaxLength(36)
+                        .HasColumnType("nvarchar(36)");
 
                     b.Property<Guid?>("CreatedBy")
                         .HasColumnType("uniqueidentifier");
@@ -154,6 +247,12 @@ namespace AdminConsole.Migrations
 
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("LastInvitationDate")
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uniqueidentifier");
@@ -189,6 +288,10 @@ namespace AdminConsole.Migrations
                     b.Property<Guid?>("OwningUser")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("RedirectUri")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<int>("StateCode")
                         .HasColumnType("int");
 
@@ -208,7 +311,7 @@ namespace AdminConsole.Migrations
 
                     b.HasIndex("OrganizationId");
 
-                    b.ToTable("OnboardedUsers", (string)null);
+                    b.ToTable("OnboardedUsers");
                 });
 
             modelBuilder.Entity("AdminConsole.Models.Organization", b =>
@@ -250,7 +353,6 @@ namespace AdminConsole.Migrations
                         .HasColumnType("int");
 
                     b.Property<string>("DocumentCode")
-                        .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
@@ -277,6 +379,10 @@ namespace AdminConsole.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<string>("M365GroupId")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
                     b.Property<Guid?>("ModifiedBy")
                         .HasColumnType("uniqueidentifier");
 
@@ -290,6 +396,10 @@ namespace AdminConsole.Migrations
                         .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("OrganizationAgentTypeIds")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime?>("OverriddenCreatedOn")
                         .HasColumnType("datetime2");
@@ -307,17 +417,14 @@ namespace AdminConsole.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("SAPAPIGatewayHostname")
-                        .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
                     b.Property<string>("SAPBusinessOneWebClientHost")
-                        .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
                     b.Property<string>("SAPServiceLayerHostname")
-                        .IsRequired()
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
@@ -341,7 +448,115 @@ namespace AdminConsole.Migrations
 
                     b.HasKey("OrganizationId");
 
-                    b.ToTable("Organizations", (string)null);
+                    b.ToTable("Organizations");
+                });
+
+            modelBuilder.Entity("AdminConsole.Models.OrganizationTeamsGroup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AgentTypeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CreatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("CreatedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("ModifiedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TeamName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("TeamUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("TeamsGroupId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AgentTypeId");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("TeamsGroupId");
+
+                    b.HasIndex("OrganizationId", "AgentTypeId")
+                        .IsUnique();
+
+                    b.ToTable("OrganizationTeamsGroups");
+                });
+
+            modelBuilder.Entity("AdminConsole.Models.UserAgentTypeGroupAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AgentTypeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AssignedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("AssignedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime>("ModifiedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SecurityGroupId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AgentTypeId");
+
+                    b.HasIndex("IsActive");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("UserAgentTypeGroupAssignments");
                 });
 
             modelBuilder.Entity("AdminConsole.Models.UserDatabaseAssignment", b =>
@@ -377,7 +592,109 @@ namespace AdminConsole.Migrations
                     b.HasIndex("UserId", "DatabaseCredentialId")
                         .IsUnique();
 
-                    b.ToTable("UserDatabaseAssignments", (string)null);
+                    b.ToTable("UserDatabaseAssignments");
+                });
+
+            modelBuilder.Entity("AdminConsole.Models.UserRevocationRecord", b =>
+                {
+                    b.Property<Guid>("RevocationRecordId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("AccountDisabled")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("AdditionalDetails")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("AppRolesRevoked")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("M365GroupsRemoved")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("ModifiedBy")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("ModifiedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool?>("RestorationSuccessful")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("RestoredBy")
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime?>("RestoredOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("RevocationSuccessful")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("RevokedBy")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<DateTime>("RevokedOn")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("SecurityGroupsRemoved")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("UserDisplayName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("UserEmail")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.HasKey("RevocationRecordId");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("RevokedOn");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("UserEmail");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("OrganizationId", "Status");
+
+                    b.HasIndex("UserId", "Status");
+
+                    b.ToTable("UserRevocationRecords");
                 });
 
             modelBuilder.Entity("AdminConsole.Models.OnboardedUser", b =>

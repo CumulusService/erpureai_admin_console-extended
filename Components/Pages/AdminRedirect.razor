@@ -1,0 +1,47 @@
+@page "/admin"
+@using AdminConsole.Models
+@inject NavigationManager Navigation
+@inject IDataIsolationService DataIsolationService
+@inject ILogger<AdminRedirect> Logger
+@rendermode InteractiveServer
+
+<PageTitle>Redirecting...</PageTitle>
+
+<div class="container-fluid d-flex justify-content-center align-items-center" style="min-height: 100vh;">
+    <div class="text-center">
+        <div class="spinner-border text-primary mb-3" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <h5 class="text-muted">Redirecting to your dashboard...</h5>
+    </div>
+</div>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await Task.Delay(500); // Brief delay to show loading state
+            
+            var userRole = DataIsolationService.GetCurrentUserRole();
+            Logger.LogInformation("Admin redirect - User role: {Role}", userRole);
+            
+            string redirectUrl = userRole switch
+            {
+                UserRole.SuperAdmin => "/owner/dashboard",
+                UserRole.OrgAdmin => "/admin/users", 
+                UserRole.User => "/admin/users",
+                _ => "/admin/users"
+            };
+            
+            Logger.LogInformation("Redirecting admin to: {Url}", redirectUrl);
+            Navigation.NavigateTo(redirectUrl, replace: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error during admin redirect");
+            // Fallback to default admin page
+            Navigation.NavigateTo("/admin/users", replace: true);
+        }
+    }
+}

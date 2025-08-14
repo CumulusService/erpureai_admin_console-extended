@@ -1,0 +1,273 @@
+@using AdminConsole.Models
+
+<div class="modal fade show" style="display: block; background-color: rgba(0,0,0,0.5);" tabindex="-1" role="dialog">
+    <div class="modal-dialog modal-xl" role="document">
+        <div class="modal-content">
+            <div class="modal-header @(OverallSuccess ? "bg-success" : "bg-warning") text-white">
+                <h5 class="modal-title">
+                    <i class="fas @(OverallSuccess ? "fa-check-circle" : "fa-exclamation-triangle") me-2"></i>
+                    @(IsActivation ? "Organization Reactivation" : "Organization Deactivation") Results
+                </h5>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <div class="card @(OverallSuccess ? "border-success" : "border-warning")">
+                            <div class="card-header @(OverallSuccess ? "bg-success" : "bg-warning") text-white">
+                                <h6 class="mb-0">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    Operation Summary
+                                </h6>
+                            </div>
+                            <div class="card-body">
+                                <dl class="row">
+                                    <dt class="col-sm-4">Organization:</dt>
+                                    <dd class="col-sm-8"><strong>@OrganizationName</strong></dd>
+                                    <dt class="col-sm-4">Action:</dt>
+                                    <dd class="col-sm-8">
+                                        <span class="badge @(IsActivation ? "bg-success" : "bg-danger")">
+                                            @(IsActivation ? "REACTIVATED" : "DEACTIVATED")
+                                        </span>
+                                    </dd>
+                                    <dt class="col-sm-4">Users Processed:</dt>
+                                    <dd class="col-sm-8">@TotalUsersProcessed</dd>
+                                    <dt class="col-sm-4">Overall Status:</dt>
+                                    <dd class="col-sm-8">
+                                        <span class="badge @(OverallSuccess ? "bg-success" : "bg-warning")">
+                                            @(OverallSuccess ? "COMPLETED SUCCESSFULLY" : "COMPLETED WITH WARNINGS")
+                                        </span>
+                                    </dd>
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card border-info">
+                            <div class="card-header bg-info text-white">
+                                <h6 class="mb-0">
+                                    <i class="fas fa-chart-pie me-2"></i>
+                                    Success Rate
+                                </h6>
+                            </div>
+                            <div class="card-body text-center">
+                                <div class="progress mb-3" style="height: 25px;">
+                                    <div class="progress-bar @(SuccessRate >= 90 ? "bg-success" : SuccessRate >= 70 ? "bg-warning" : "bg-danger")" 
+                                         role="progressbar" style="width: @(SuccessRate)%">
+                                        @(SuccessRate.ToString("F1"))%
+                                    </div>
+                                </div>
+                                <div class="row text-center">
+                                    <div class="col">
+                                        <div class="text-success">
+                                            <i class="fas fa-check-circle fa-2x"></i>
+                                            <br><strong>@SuccessCount</strong>
+                                            <br><small>Successful</small>
+                                        </div>
+                                    </div>
+                                    <div class="col">
+                                        <div class="text-danger">
+                                            <i class="fas fa-times-circle fa-2x"></i>
+                                            <br><strong>@FailureCount</strong>
+                                            <br><small>Failed</small>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Detailed Results -->
+                <div class="card">
+                    <div class="card-header">
+                        <h6 class="mb-0">
+                            <i class="fas fa-list-check me-2"></i>
+                            Detailed Operation Results
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6 class="text-success">✅ Successful Operations</h6>
+                                @if (SuccessfulOperations.Any())
+                                {
+                                    <ul class="list-group list-group-flush">
+                                        @foreach (var operation in SuccessfulOperations)
+                                        {
+                                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                                <span>
+                                                    <i class="fas fa-user me-2 text-muted"></i>
+                                                    @operation.UserEmail
+                                                </span>
+                                                <div>
+                                                    @if (operation.AzureSuccess)
+                                                    {
+                                                        <span class="badge bg-success me-1" title="Azure AD Updated">AD</span>
+                                                    }
+                                                    @if (operation.DatabaseSuccess)
+                                                    {
+                                                        <span class="badge bg-primary me-1" title="Database Updated">DB</span>
+                                                    }
+                                                    @if (operation.GroupsSuccess)
+                                                    {
+                                                        <span class="badge bg-info me-1" title="Groups Updated">GRP</span>
+                                                    }
+                                                </div>
+                                            </li>
+                                        }
+                                    </ul>
+                                }
+                                else
+                                {
+                                    <p class="text-muted">No successful operations to display.</p>
+                                }
+                            </div>
+                            <div class="col-md-6">
+                                <h6 class="text-danger">❌ Failed Operations</h6>
+                                @if (FailedOperations.Any())
+                                {
+                                    <ul class="list-group list-group-flush">
+                                        @foreach (var operation in FailedOperations)
+                                        {
+                                            <li class="list-group-item">
+                                                <div class="d-flex justify-content-between align-items-start">
+                                                    <div class="flex-grow-1">
+                                                        <i class="fas fa-user me-2 text-muted"></i>
+                                                        <strong>@operation.UserEmail</strong>
+                                                        <br>
+                                                        <small class="text-danger">
+                                                            <i class="fas fa-exclamation-triangle me-1"></i>
+                                                            @operation.ErrorMessage
+                                                        </small>
+                                                    </div>
+                                                    <div>
+                                                        @if (!operation.AzureSuccess)
+                                                        {
+                                                            <span class="badge bg-danger me-1" title="Azure AD Failed">AD</span>
+                                                        }
+                                                        @if (!operation.DatabaseSuccess)
+                                                        {
+                                                            <span class="badge bg-danger me-1" title="Database Failed">DB</span>
+                                                        }
+                                                        @if (!operation.GroupsSuccess)
+                                                        {
+                                                            <span class="badge bg-danger me-1" title="Groups Failed">GRP</span>
+                                                        }
+                                                    </div>
+                                                </div>
+                                            </li>
+                                        }
+                                    </ul>
+                                }
+                                else
+                                {
+                                    <p class="text-success">All operations completed successfully! 🎉</p>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Summary Actions Taken -->
+                <div class="card mt-3">
+                    <div class="card-header bg-light">
+                        <h6 class="mb-0">
+                            <i class="fas fa-cogs me-2"></i>
+                            Summary of Actions Performed
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            @if (IsActivation)
+                            {
+                                <div class="col-md-6">
+                                    <h6 class="text-success">🔓 Reactivation Actions:</h6>
+                                    <ul class="list-unstyled">
+                                        <li><i class="fas fa-check text-success me-2"></i>Azure AD accounts enabled</li>
+                                        <li><i class="fas fa-check text-success me-2"></i>Security group memberships restored</li>
+                                        <li><i class="fas fa-check text-success me-2"></i>Teams group access restored</li>
+                                        <li><i class="fas fa-check text-success me-2"></i>App roles reassigned</li>
+                                        <li><i class="fas fa-check text-success me-2"></i>Database access restored</li>
+                                        <li><i class="fas fa-check text-success me-2"></i>Organization status updated</li>
+                                    </ul>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="col-md-6">
+                                    <h6 class="text-danger">🔒 Deactivation Actions:</h6>
+                                    <ul class="list-unstyled">
+                                        <li><i class="fas fa-times text-danger me-2"></i>Azure AD accounts disabled</li>
+                                        <li><i class="fas fa-times text-danger me-2"></i>Security group memberships removed</li>
+                                        <li><i class="fas fa-times text-danger me-2"></i>Teams group access revoked</li>
+                                        <li><i class="fas fa-times text-danger me-2"></i>App roles revoked</li>
+                                        <li><i class="fas fa-times text-danger me-2"></i>Database access blocked</li>
+                                        <li><i class="fas fa-times text-danger me-2"></i>Organization status updated</li>
+                                    </ul>
+                                </div>
+                            }
+                            <div class="col-md-6">
+                                <h6 class="text-info">📊 Impact Analysis:</h6>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-users text-info me-2"></i>@TotalUsersProcessed users processed</li>
+                                    <li><i class="fas fa-check-circle text-success me-2"></i>@SuccessCount operations successful</li>
+                                    <li><i class="fas fa-times-circle text-danger me-2"></i>@FailureCount operations failed</li>
+                                    <li><i class="fas fa-percent text-info me-2"></i>@(SuccessRate.ToString("F1"))% success rate</li>
+                                    <li><i class="fas fa-clock text-warning me-2"></i>Effect is immediate</li>
+                                    <li><i class="fas fa-shield-alt text-primary me-2"></i>Security enforced</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                @if (FailureCount > 0)
+                {
+                    <div class="alert alert-warning mt-3">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <strong>Action Required:</strong> @FailureCount user(s) had processing failures. 
+                        Please review the failed operations above and consider manual intervention for affected users.
+                        Check system logs for detailed error information.
+                    </div>
+                }
+                else
+                {
+                    <div class="alert alert-success mt-3">
+                        <i class="fas fa-check-circle me-2"></i>
+                        <strong>Complete Success:</strong> All users were processed successfully! 
+                        The organization @(IsActivation ? "reactivation" : "deactivation") is complete.
+                    </div>
+                }
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" @onclick="Close">
+                    <i class="fas fa-check me-2"></i>
+                    Understood - Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string OrganizationName { get; set; } = "";
+    [Parameter] public bool IsActivation { get; set; }
+    [Parameter] public bool OverallSuccess { get; set; }
+    [Parameter] public int TotalUsersProcessed { get; set; }
+    [Parameter] public int SuccessCount { get; set; }
+    [Parameter] public int FailureCount { get; set; }
+    [Parameter] public List<UserOperationResult> SuccessfulOperations { get; set; } = new();
+    [Parameter] public List<UserOperationResult> FailedOperations { get; set; } = new();
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private double SuccessRate => TotalUsersProcessed > 0 ? (SuccessCount * 100.0 / TotalUsersProcessed) : 0;
+
+    private async Task Close()
+    {
+        if (OnClose.HasDelegate)
+        {
+            await OnClose.InvokeAsync();
+        }
+    }
+}
+

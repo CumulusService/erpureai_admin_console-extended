@@ -14,6 +14,7 @@
 @inject IJSRuntime JSRuntime
 @inject NavigationManager Navigation
 @inject IHttpContextAccessor HttpContextAccessor
+@inject IGraphService GraphService
 @attribute [Authorize(Policy = "OrgAdminOrHigher")]
 
 <div class="container-fluid">
@@ -27,7 +28,7 @@
                             <li class="breadcrumb-item active">@(user?.Name ?? "User Details")</li>
                         </ol>
                     </nav>
-                    <h2 class="mb-1">@(user?.Name ?? "Loading...")</h2>
+                    <h2 class="mb-1 admin-page-title">@(user?.Name ?? "Loading...")</h2>
                     <p class="text-muted mb-0">
                         @if (user != null)
                         {
@@ -41,9 +42,16 @@
                 <div>
                     @if (user != null)
                     {
-                        <button type="button" class="btn btn-outline-primary me-2" @onclick="ShowEditModal">
-                            <i class="fas fa-edit me-1"></i>
-                            Edit User
+                        <button type="button" class="btn btn-outline-info me-2" @onclick="RefreshUserData" disabled="@isRefreshing">
+                            @if (isRefreshing)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                            }
+                            else
+                            {
+                                <i class="fas fa-sync-alt me-1"></i>
+                            }
+                            Refresh
                         </button>
                         @if (user.GetInvitationStatus() == "Pending")
                         {
@@ -116,7 +124,7 @@
                 <div class="row">
                     <div class="col-lg-8">
                         <div class="card mb-4">
-                            <div class="card-header">
+                            <div class="card-header admin-card-header">
                                 <h5 class="card-title mb-0">
                                     <i class="fas fa-user me-2"></i>
                                     User Information
@@ -148,14 +156,18 @@
                                         <div class="mb-3">
                                             <label class="form-label text-muted">Assigned Databases</label>
                                             <p class="fw-bold">
-                                                @if (user.AssignedDatabaseIds.Any())
+                                                @{
+                                                    // Filter to only show valid/existing database assignments
+                                                    var validAssignedDatabases = availableDatabases.Where(db => user.AssignedDatabaseIds.Contains(db.Id)).ToList();
+                                                }
+                                                @if (validAssignedDatabases.Any())
                                                 {
-                                                    <span class="badge bg-info me-1">@user.AssignedDatabaseIds.Count database(s)</span>
+                                                    <span class="badge bg-success me-1">@validAssignedDatabases.Count database(s) assigned</span>
                                                     <br/>
                                                     <small class="text-muted">
-                                                        @foreach (var dbId in user.AssignedDatabaseIds)
+                                                        @foreach (var database in validAssignedDatabases)
                                                         {
-                                                            <span class="badge bg-secondary me-1 mt-1">@dbId.ToString().Substring(0, 8)...</span>
+                                                            <span class="badge bg-primary me-1 mt-1">@database.FriendlyName (@database.DatabaseType)</span>
                                                         }
                                                     </small>
                                                 }
@@ -164,10 +176,54 @@
                                                     <span class="text-muted">No databases assigned</span>
                                                 }
                                             </p>
-                                            <button type="button" class="btn btn-outline-primary btn-sm" @onclick="ShowDatabaseAssignmentModal">
+                                            <button type="button" class="btn btn-outline-primary btn-sm" @onclick="ToggleDatabaseAssignment">
                                                 <i class="fas fa-database me-1"></i>
-                                                @(user.AssignedDatabaseIds.Any() ? "Manage Databases" : "Assign Databases")
+                                                @(showDatabaseAssignment ? "Hide" : (user.AssignedDatabaseIds.Any() ? "Manage Databases" : "Assign Databases"))
                                             </button>
+                                            
+                                            @if (showDatabaseAssignment)
+                                            {
+                                                <div class="assignment-section">
+                                                    <div class="assignment-header">
+                                                        <i class="fas fa-database me-2"></i>
+                                                        Database Assignment
+                                                    </div>
+                                                    @if (availableDatabases.Any())
+                                                    {
+                                                        <div class="assignment-select">
+                                                            @foreach (var database in availableDatabases)
+                                                            {
+                                                                <div class="assignment-option @(selectedDatabaseIds.Contains(database.Id) ? "selected" : "")"
+                                                                     @onclick="() => ToggleDatabaseSelection(database.Id)">
+                                                                    <div class="assignment-item-name">@database.DatabaseName</div>
+                                                                    <div class="assignment-item-info">@database.DatabaseType - @database.ServerInstance</div>
+                                                                </div>
+                                                            }
+                                                        </div>
+                                                        <div class="assignment-controls">
+                                                            <button type="button" class="btn btn-primary btn-sm" @onclick="SaveDatabaseAssignments" disabled="@isSavingDatabaseAssignment">
+                                                                @if (isSavingDatabaseAssignment)
+                                                                {
+                                                                    <span class="spinner-border spinner-border-sm me-1"></span>
+                                                                }
+                                                                <i class="fas fa-save me-1"></i>
+                                                                Save Assignments
+                                                            </button>
+                                                            <button type="button" class="btn btn-secondary btn-sm" @onclick="CancelDatabaseAssignment">
+                                                                <i class="fas fa-times me-1"></i>
+                                                                Cancel
+                                                            </button>
+                                                        </div>
+                                                    }
+                                                    else
+                                                    {
+                                                        <div class="text-muted">
+                                                            <i class="fas fa-info-circle me-2"></i>
+                                                            No databases are available for assignment in your organization. Please add database credentials first.
+                                                        </div>
+                                                    }
+                                                </div>
+                                            }
                                         </div>
                                     </div>
                                 </div>
@@ -183,45 +239,129 @@
                                             <span class="text-muted">No supervisor assigned</span>
                                         }
                                     </p>
-                                    <button type="button" class="btn btn-outline-primary btn-sm" @onclick="ShowSupervisorModal">
+                                    <button type="button" class="btn btn-outline-primary btn-sm" @onclick="ToggleSupervisorAssignment">
                                         <i class="fas fa-user-tie me-1"></i>
-                                        @(string.IsNullOrEmpty(user.AssignedSupervisorEmail) ? "Assign Supervisor" : "Change Supervisor")
+                                        @(showSupervisorAssignment ? "Hide" : (string.IsNullOrEmpty(user.AssignedSupervisorEmail) ? "Assign Supervisor" : "Change Supervisor"))
                                     </button>
+                                    
+                                    @if (showSupervisorAssignment)
+                                    {
+                                        <div class="assignment-section">
+                                            <div class="assignment-header">
+                                                <i class="fas fa-user-tie me-2"></i>
+                                                Supervisor Assignment
+                                            </div>
+                                            <div class="mb-3">
+                                                <label class="form-label">Supervisor Email Address</label>
+                                                <input type="email" class="form-control" @bind="newSupervisorEmail" 
+                                                       placeholder="Enter supervisor email address" />
+                                                <div class="form-text">
+                                                    Leave empty to remove the supervisor assignment.
+                                                </div>
+                                            </div>
+                                            <div class="assignment-controls">
+                                                <button type="button" class="btn btn-primary btn-sm" @onclick="SaveSupervisorAssignment" disabled="@isSavingSupervisorAssignment">
+                                                    @if (isSavingSupervisorAssignment)
+                                                    {
+                                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                                    }
+                                                    <i class="fas fa-save me-1"></i>
+                                                    Save Assignment
+                                                </button>
+                                                <button type="button" class="btn btn-secondary btn-sm" @onclick="CancelSupervisorAssignment">
+                                                    <i class="fas fa-times me-1"></i>
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        </div>
+                                    }
                                 </div>
                             </div>
                         </div>
 
                         <div class="card">
-                            <div class="card-header">
+                            <div class="card-header admin-card-header">
                                 <h5 class="card-title mb-0">
                                     <i class="fas fa-robot me-2"></i>
                                     Agent Types
                                 </h5>
                             </div>
                             <div class="card-body">
-                                @if (user.AgentTypes.Any())
+                                @if (currentUserAgentTypes.Any())
                                 {
                                     <div class="d-flex flex-wrap gap-2">
-                                        @foreach (var agentType in user.AgentTypes)
+                                        @foreach (var agentType in currentUserAgentTypes)
                                         {
                                             <span class="badge bg-primary fs-6">
                                                 <i class="fas fa-robot me-1"></i>
-                                                @GetAgentTypeDisplayName(agentType)
+                                                @agentType.DisplayName
                                             </span>
                                         }
                                     </div>
-                                    <button type="button" class="btn btn-outline-primary btn-sm mt-3" @onclick="ShowAgentTypesModal">
+                                    <button type="button" class="btn btn-outline-primary btn-sm mt-3" @onclick="ToggleAgentTypesAssignment">
                                         <i class="fas fa-edit me-1"></i>
-                                        Update Agent Types
+                                        @(showAgentTypesAssignment ? "Hide" : "Update Agent Types")
                                     </button>
                                 }
                                 else
                                 {
                                     <p class="text-muted mb-3">No agent types assigned.</p>
-                                    <button type="button" class="btn btn-primary btn-sm" @onclick="ShowAgentTypesModal">
+                                    <button type="button" class="btn btn-primary btn-sm" @onclick="ToggleAgentTypesAssignment">
                                         <i class="fas fa-plus me-1"></i>
-                                        Assign Agent Types
+                                        @(showAgentTypesAssignment ? "Hide" : "Assign Agent Types")
                                     </button>
+                                }
+                                
+                                @if (showAgentTypesAssignment)
+                                {
+                                    <div class="assignment-section">
+                                        <div class="assignment-header">
+                                            <i class="fas fa-robot me-2"></i>
+                                            Agent Types Assignment
+                                        </div>
+                                        @if (availableAgentTypes.Any())
+                                        {
+                                            <div class="assignment-select">
+                                                @foreach (var agentType in availableAgentTypes)
+                                                {
+                                                    <div class="form-check mb-3 p-3 border rounded @(selectedAgentTypeIds.Contains(agentType.Id) ? "border-primary bg-primary bg-opacity-10" : "border-secondary")">
+                                                        <input class="form-check-input" type="checkbox" id="agentType_@agentType.Id" 
+                                                               @onchange="(e) => ToggleAgentTypeSelection(agentType.Id)"
+                                                               checked="@selectedAgentTypeIds.Contains(agentType.Id)">
+                                                        <label class="form-check-label w-100" for="agentType_@agentType.Id">
+                                                            <div class="assignment-item-name">
+                                                                <strong>@agentType.DisplayName</strong>
+                                                            </div>
+                                                            <div class="assignment-item-info text-muted small">
+                                                                @agentType.Description
+                                                            </div>
+                                                        </label>
+                                                    </div>
+                                                }
+                                            </div>
+                                            <div class="assignment-controls">
+                                                <button type="button" class="btn btn-primary btn-sm" @onclick="SaveAgentTypesAssignment" disabled="@isSavingAgentTypes">
+                                                    @if (isSavingAgentTypes)
+                                                    {
+                                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                                    }
+                                                    <i class="fas fa-save me-1"></i>
+                                                    Save Assignment
+                                                </button>
+                                                <button type="button" class="btn btn-secondary btn-sm" @onclick="CancelAgentTypesAssignment">
+                                                    <i class="fas fa-times me-1"></i>
+                                                    Cancel
+                                                </button>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="text-muted">
+                                                <i class="fas fa-info-circle me-2"></i>
+                                                No agent types are allocated to your organization. Please contact the system administrator to configure agent types at the organization level.
+                                            </div>
+                                        }
+                                    </div>
                                 }
                             </div>
                         </div>
@@ -229,7 +369,7 @@
 
                     <div class="col-lg-4">
                         <div class="card mb-4">
-                            <div class="card-header">
+                            <div class="card-header admin-card-header">
                                 <h5 class="card-title mb-0">
                                     <i class="fas fa-info-circle me-2"></i>
                                     Status Information
@@ -253,18 +393,38 @@
                                     </p>
                                 </div>
                                 <div class="mb-3">
-                                    <label class="form-label text-muted">Invitation Status</label>
+                                    <label class="form-label text-muted">
+                                        Invitation Status
+                                        <button class="btn btn-link btn-sm p-0 ms-2" @onclick="RefreshInvitationStatus" disabled="@isRefreshingStatus" title="Refresh from Azure AD">
+                                            @if (isRefreshingStatus)
+                                            {
+                                                <span class="spinner-border spinner-border-sm" role="status"></span>
+                                            }
+                                            else
+                                            {
+                                                <i class="fas fa-sync-alt text-primary"></i>
+                                            }
+                                        </button>
+                                    </label>
                                     <p>
-                                        <span class="badge bg-info fs-6">
-                                            @user.GetInvitationStatus()
+                                        @{
+                                            var statusInfo = GetInvitationStatusInfo();
+                                        }
+                                        <span class="badge @statusInfo.BadgeClass fs-6">
+                                            <i class="@statusInfo.Icon me-1"></i>
+                                            @statusInfo.Text
                                         </span>
+                                        @if (!string.IsNullOrEmpty(statusInfo.LastChecked))
+                                        {
+                                            <br><small class="text-muted">@statusInfo.LastChecked</small>
+                                        }
                                     </p>
                                 </div>
                             </div>
                         </div>
 
                         <div class="card">
-                            <div class="card-header">
+                            <div class="card-header admin-card-header">
                                 <h5 class="card-title mb-0">
                                     <i class="fas fa-history me-2"></i>
                                     Audit Information
@@ -297,11 +457,36 @@
     
     private OnboardedUser? user;
     private List<AgentTypeEntity> availableAgentTypes = new();
+    private List<DatabaseCredential> availableDatabases = new();
     private string errorMessage = string.Empty;
     private string successMessage = string.Empty;
     private bool isLoading = true;
     private Guid currentUserOrgId;
     private UserRole currentUserRole = UserRole.User;
+    
+    // Database assignment UI state
+    private bool showDatabaseAssignment = false;
+    private List<Guid> selectedDatabaseIds = new();
+    private bool isSavingDatabaseAssignment = false;
+    
+    // Supervisor assignment UI state
+    private bool showSupervisorAssignment = false;
+    private string newSupervisorEmail = string.Empty;
+    private bool isSavingSupervisorAssignment = false;
+    
+    // Agent Types assignment UI state
+    private bool showAgentTypesAssignment = false;
+    private List<Guid> selectedAgentTypeIds = new();
+    private bool isSavingAgentTypes = false;
+    
+    // Refresh state
+    private bool isRefreshing = false;
+    private bool isRefreshingStatus = false;
+    private string realTimeInvitationStatus = string.Empty;
+    private DateTime? lastStatusCheck = null;
+    
+    // Current user agent types from database
+    private List<AgentTypeEntity> currentUserAgentTypes = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -329,6 +514,13 @@
             }
             await LoadUser();
             await LoadAvailableAgentTypes();
+            await LoadAvailableDatabases();
+            
+            // CRITICAL FIX: Automatically refresh invitation status on page load for accurate display
+            if (user != null && user.LastInvitationDate != null)
+            {
+                await RefreshInvitationStatus();
+            }
         }
         catch (Exception ex)
         {
@@ -347,6 +539,20 @@
         try
         {
             user = await OnboardedUserService.GetByIdAsync(UserId, currentUserOrgId);
+            
+            // Load current agent type assignments from database
+            if (user != null)
+            {
+                var allUserAgentTypes = await OnboardedUserService.GetUserAgentTypesAsync(user.OnboardedUserId, currentUserOrgId);
+                
+                // CRITICAL FIX: Filter user agent types to only show those currently allocated to the organization
+                var orgAgentTypeIds = await OrganizationService.GetOrganizationAgentTypesAsync(currentUserOrgId.ToString());
+                var orgAgentTypeIdSet = orgAgentTypeIds.ToHashSet();
+                currentUserAgentTypes = allUserAgentTypes.Where(at => orgAgentTypeIdSet.Contains(at.Id)).ToList();
+                
+                Logger.LogInformation("Loaded {AllCount} total agent types for user, showing {FilteredCount} (org-allocated only)", 
+                    allUserAgentTypes.Count, currentUserAgentTypes.Count);
+            }
         }
         catch (Exception ex)
         {
@@ -359,184 +565,68 @@
     {
         try
         {
-            availableAgentTypes = await AgentTypeService.GetActiveAgentTypesAsync();
-            Logger.LogInformation("Loaded {Count} available agent types", availableAgentTypes.Count);
+            // Get organization-allocated agent types only (not all active agent types)
+            var orgAgentTypeIds = await OrganizationService.GetOrganizationAgentTypesAsync(currentUserOrgId.ToString());
+            
+            if (orgAgentTypeIds.Any())
+            {
+                // Get the full agent type entities for the organization-allocated types
+                var allAgentTypes = await AgentTypeService.GetActiveAgentTypesAsync();
+                availableAgentTypes = allAgentTypes.Where(at => orgAgentTypeIds.Contains(at.Id)).ToList();
+                
+                Logger.LogInformation("Loaded {Count} organization-allocated agent types for organization {OrgId}", 
+                    availableAgentTypes.Count, currentUserOrgId);
+            }
+            else
+            {
+                availableAgentTypes = new List<AgentTypeEntity>();
+                Logger.LogInformation("No agent types allocated to organization {OrgId}", currentUserOrgId);
+            }
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error loading available agent types");
+            Logger.LogError(ex, "Error loading organization-allocated agent types");
             availableAgentTypes = new List<AgentTypeEntity>();
         }
     }
 
-    private string GetAgentTypeDisplayName(LegacyAgentType agentType)
-    {
-        return agentType switch
-        {
-            LegacyAgentType.SBOAgentAppv1 => "SBO Agent App v1",
-            LegacyAgentType.Sales => "Sales Agent",
-            LegacyAgentType.Admin => "Admin Agent",
-            _ => agentType.ToString()
-        };
-    }
-
-    private void ShowEditModal()
-    {
-        // TODO: Implement edit modal
-        errorMessage = "Edit functionality coming soon.";
-        StateHasChanged();
-    }
-
-    private async Task ShowAgentTypesModal()
+    private async Task LoadAvailableDatabases()
     {
         try
         {
-            ClearMessages();
+            // Clear existing list to ensure fresh data
+            availableDatabases.Clear();
+            StateHasChanged();
             
-            if (!availableAgentTypes.Any())
+            // TEMPORARY FIX: Use same method as ManageDatabaseCredentials to test
+            var allDatabases = await DatabaseCredentialService.GetByOrganizationAsync(currentUserOrgId);
+            availableDatabases = allDatabases.Where(d => d.IsActive).ToList();
+            Logger.LogInformation("🔍 DATABASE DEBUG: Loaded {Count} available databases for organization {OrgId}", 
+                availableDatabases.Count, currentUserOrgId);
+            Logger.LogInformation("🔍 DATABASE DEBUG: Using organization ID: {OrgId} (generated from domain)", currentUserOrgId);
+            
+            // Log each database for debugging
+            foreach (var db in availableDatabases)
             {
-                errorMessage = "No agent types are available for assignment. Please contact the system administrator to configure agent types.";
-                StateHasChanged();
-                return;
+                Logger.LogInformation("🔍 DATABASE DEBUG: - {FriendlyName} ({DatabaseName}) - Active: {IsActive}", 
+                    db.FriendlyName, db.DatabaseName, db.IsActive);
             }
             
-            var currentAgentTypes = user?.AgentTypes ?? new List<LegacyAgentType>();
-            
-            // Build user-friendly options from database agent types
-            var agentTypeOptions = availableAgentTypes.Select((agentType, index) => 
-                $"{index + 1}. {agentType.DisplayName}").ToList();
-            
-            var currentAgentTypesStr = currentAgentTypes.Any() ? 
-                string.Join(", ", currentAgentTypes.Select(GetAgentTypeDisplayName)) : 
-                "None";
-            
-            var promptMessage = $"Current agent types: {currentAgentTypesStr}\n\nAvailable agent types:\n{string.Join("\n", agentTypeOptions)}\n\nEnter numbers of agent types to assign (comma-separated):\nExample: 1,2\nLeave empty to clear all agent types:";
-            
-            var selectedNumbers = await JSRuntime.InvokeAsync<string>("prompt", promptMessage, "");
-            
-            if (selectedNumbers != null) // User clicked OK (even if empty)
-            {
-                var selectedAgentTypeIds = new List<Guid>();
-                
-                if (!string.IsNullOrEmpty(selectedNumbers))
-                {
-                    var parts = selectedNumbers.Split(',');
-                    foreach (var part in parts)
-                    {
-                        if (int.TryParse(part.Trim(), out var agentTypeIndex) && 
-                            agentTypeIndex >= 1 && agentTypeIndex <= availableAgentTypes.Count)
-                        {
-                            selectedAgentTypeIds.Add(availableAgentTypes[agentTypeIndex - 1].Id);
-                        }
-                    }
-                }
-                
-                await UpdateUserAgentTypesFromDatabase(selectedAgentTypeIds);
-            }
+            // Force UI refresh
+            StateHasChanged();
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error showing agent types modal for user {UserId}", user?.OnboardedUserId);
-            errorMessage = "Error updating agent types. Please try again.";
-        }
-        
-        StateHasChanged();
-    }
-
-    private async Task UpdateUserAgentTypes(List<LegacyAgentType> newAgentTypes)
-    {
-        if (user == null) return;
-
-        try
-        {
-            ClearMessages();
-            
-            var currentUserId = GetCurrentUserId();
-            var success = await OnboardedUserService.UpdateAgentTypesAsync(
-                user.OnboardedUserId, 
-                newAgentTypes, 
-                currentUserOrgId, 
-                currentUserId);
-            
-            if (success)
-            {
-                successMessage = $"Agent types updated successfully for {user.Name}.";
-                await LoadUser(); // Reload to get updated agent types
-            }
-            else
-            {
-                errorMessage = "Failed to update agent types. Please try again.";
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Error updating agent types for user {UserId}", user.OnboardedUserId);
-            errorMessage = "An unexpected error occurred while updating agent types. Please try again.";
+            Logger.LogError(ex, "Error loading available databases");
+            availableDatabases = new List<DatabaseCredential>();
+            StateHasChanged();
         }
     }
 
-    private async Task UpdateUserAgentTypesFromDatabase(List<Guid> selectedAgentTypeIds)
-    {
-        if (user == null) return;
 
-        try
-        {
-            ClearMessages();
-            
-            var currentUserId = GetCurrentUserId();
-            
-            // TODO: Replace with new method when OnboardedUserService supports agent type IDs
-            // For now, this is a placeholder that maintains backward compatibility
-            var success = false;
-            
-            if (selectedAgentTypeIds.Any())
-            {
-                // Log the intended operation for now
-                Logger.LogInformation("Would assign agent type IDs {AgentTypeIds} to user {UserId}", 
-                    string.Join(", ", selectedAgentTypeIds), user.OnboardedUserId);
-                    
-                // For backward compatibility, convert to empty legacy agent types to clear current assignments
-                success = await OnboardedUserService.UpdateAgentTypesAsync(
-                    user.OnboardedUserId, 
-                    new List<LegacyAgentType>(), 
-                    currentUserOrgId, 
-                    currentUserId);
-                    
-                if (success)
-                {
-                    successMessage = $"Agent types cleared for {user.Name}. Database-driven agent type assignment will be implemented in next phase.";
-                }
-            }
-            else
-            {
-                // Clear agent types
-                success = await OnboardedUserService.UpdateAgentTypesAsync(
-                    user.OnboardedUserId, 
-                    new List<LegacyAgentType>(), 
-                    currentUserOrgId, 
-                    currentUserId);
-                    
-                if (success)
-                {
-                    successMessage = $"Agent types cleared for {user.Name}.";
-                }
-            }
-            
-            if (success)
-            {
-                await LoadUser(); // Reload to get updated agent types
-            }
-            else
-            {
-                errorMessage = "Failed to update agent types. Please try again.";
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Error updating agent types for user {UserId}", user.OnboardedUserId);
-            errorMessage = "An unexpected error occurred while updating agent types. Please try again.";
-        }
-    }
+
+
+
 
     private async Task ToggleUserStatus(bool activate)
     {
@@ -546,6 +636,18 @@
         {
             ClearMessages();
             var currentUserId = GetCurrentUserId();
+
+            // CRITICAL SECURITY CHECK: Validate user permissions before allowing deactivation
+            if (!activate) // Only check for deactivation, not reactivation
+            {
+                if (!CanRemoveUser(user))
+                {
+                    errorMessage = "You do not have permission to deactivate this user.";
+                    Logger.LogWarning("User attempted to deactivate user {UserId} without proper permissions", user.OnboardedUserId);
+                    StateHasChanged();
+                    return;
+                }
+            }
 
             bool success;
             if (activate)
@@ -589,63 +691,82 @@
         successMessage = string.Empty;
     }
 
-    private async Task ShowDatabaseAssignmentModal()
+    private async void ToggleDatabaseAssignment()
     {
+        showDatabaseAssignment = !showDatabaseAssignment;
+        if (showDatabaseAssignment && user != null)
+        {
+            // Refresh available databases when opening the modal
+            await LoadAvailableDatabases();
+            
+            // Initialize selected databases with current assignments
+            selectedDatabaseIds = user.AssignedDatabaseIds.ToList();
+        }
+        else
+        {
+            selectedDatabaseIds.Clear();
+        }
+        StateHasChanged();
+    }
+
+    private void ToggleDatabaseSelection(Guid databaseId)
+    {
+        if (selectedDatabaseIds.Contains(databaseId))
+        {
+            selectedDatabaseIds.Remove(databaseId);
+        }
+        else
+        {
+            selectedDatabaseIds.Add(databaseId);
+        }
+        StateHasChanged();
+    }
+
+    private async Task SaveDatabaseAssignments()
+    {
+        if (user == null || isSavingDatabaseAssignment) return;
+
         try
         {
             ClearMessages();
-            
-            // Get available databases for the organization
-            var availableDatabases = await DatabaseCredentialService.GetByOrganizationAsync(currentUserOrgId);
-            var currentDbIds = user?.AssignedDatabaseIds ?? new List<Guid>();
-            
-            if (!availableDatabases.Any())
+            isSavingDatabaseAssignment = true;
+            StateHasChanged();
+
+            var currentUserId = GetCurrentUserId();
+            var success = await OnboardedUserService.UpdateDatabaseAssignmentsAsync(
+                user.OnboardedUserId,
+                selectedDatabaseIds,
+                currentUserOrgId,
+                currentUserId);
+
+            if (success)
             {
-                errorMessage = "No databases are available for assignment in your organization. Please add database credentials first.";
-                StateHasChanged();
-                return;
+                successMessage = $"Database assignments updated successfully for {user.Name}.";
+                await LoadUser(); // Reload to get updated assignments
+                showDatabaseAssignment = false;
             }
-            
-            // Build a user-friendly prompt with database names and IDs
-            var dbOptions = availableDatabases.Select((db, index) => 
-                $"{index + 1}. {db.DatabaseName} ({db.DatabaseType}) - ID: {db.Id}").ToList();
-            
-            var currentDbNames = availableDatabases
-                .Where(db => currentDbIds.Contains(db.Id))
-                .Select(db => db.DatabaseName);
-                
-            var currentDbStr = currentDbNames.Any() ? string.Join(", ", currentDbNames) : "None";
-            
-            var promptMessage = $"Current assigned databases: {currentDbStr}\n\nAvailable databases:\n{string.Join("\n", dbOptions)}\n\nEnter numbers of databases to assign (comma-separated):\nExample: 1,3\nLeave empty to clear all assignments:";
-            
-            var selectedNumbers = await JSRuntime.InvokeAsync<string>("prompt", promptMessage, "");
-            
-            if (selectedNumbers != null) // User clicked OK (even if empty)
+            else
             {
-                var newDbIds = new List<Guid>();
-                
-                if (!string.IsNullOrEmpty(selectedNumbers))
-                {
-                    var parts = selectedNumbers.Split(',');
-                    foreach (var part in parts)
-                    {
-                        if (int.TryParse(part.Trim(), out var dbIndex) && 
-                            dbIndex >= 1 && dbIndex <= availableDatabases.Count())
-                        {
-                            newDbIds.Add(availableDatabases[dbIndex - 1].Id);
-                        }
-                    }
-                }
-                
-                await UpdateUserDatabaseAssignments(newDbIds);
+                errorMessage = "Failed to update database assignments. Please try again.";
             }
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error showing database assignment modal for user {UserId}", user?.OnboardedUserId);
-            errorMessage = "Error updating database assignments. Please try again.";
+            Logger.LogError(ex, "Error updating database assignments for user {UserId}", user.OnboardedUserId);
+            errorMessage = "An unexpected error occurred while updating database assignments. Please try again.";
+        }
+        finally
+        {
+            isSavingDatabaseAssignment = false;
             StateHasChanged();
         }
+    }
+
+    private void CancelDatabaseAssignment()
+    {
+        showDatabaseAssignment = false;
+        selectedDatabaseIds.Clear();
+        StateHasChanged();
     }
 
     private async Task UpdateUserDatabaseAssignments(List<Guid> newDatabaseIds)
@@ -714,28 +835,74 @@
         StateHasChanged();
     }
 
-    private async Task ShowSupervisorModal()
+    private void ToggleSupervisorAssignment()
     {
+        showSupervisorAssignment = !showSupervisorAssignment;
+        if (showSupervisorAssignment && user != null)
+        {
+            // Initialize with current supervisor email
+            newSupervisorEmail = user.AssignedSupervisorEmail ?? string.Empty;
+        }
+        else
+        {
+            newSupervisorEmail = string.Empty;
+        }
+        StateHasChanged();
+    }
+
+    private async Task SaveSupervisorAssignment()
+    {
+        if (user == null || isSavingSupervisorAssignment) return;
+
         try
         {
             ClearMessages();
-            
-            var currentSupervisor = user?.AssignedSupervisorEmail ?? "";
-            var promptMessage = $"Current supervisor: {(string.IsNullOrEmpty(currentSupervisor) ? "None" : currentSupervisor)}\n\nEnter new supervisor email address:\n(Leave empty to remove supervisor assignment)";
-            
-            var newSupervisor = await JSRuntime.InvokeAsync<string>("prompt", promptMessage, currentSupervisor);
-            
-            if (newSupervisor != null) // User clicked OK (even if empty)
+            isSavingSupervisorAssignment = true;
+            StateHasChanged();
+
+            // Validate email format if provided
+            if (!string.IsNullOrEmpty(newSupervisorEmail) && !IsValidEmail(newSupervisorEmail))
             {
-                await UpdateSupervisorAssignment(newSupervisor.Trim());
+                errorMessage = "Please enter a valid email address for the supervisor.";
+                return;
+            }
+
+            var currentUserId = GetCurrentUserId();
+            var success = await OnboardedUserService.UpdateSupervisorAssignmentAsync(
+                user.OnboardedUserId,
+                newSupervisorEmail.Trim(),
+                currentUserOrgId,
+                currentUserId);
+
+            if (success)
+            {
+                var action = string.IsNullOrEmpty(newSupervisorEmail.Trim()) ? "removed" : "updated";
+                successMessage = $"Supervisor assignment {action} successfully for {user.Name}.";
+                await LoadUser(); // Reload to get updated assignment
+                showSupervisorAssignment = false;
+            }
+            else
+            {
+                errorMessage = "Failed to update supervisor assignment. Please try again.";
             }
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error showing supervisor modal for user {UserId}", user?.OnboardedUserId);
-            errorMessage = "Error updating supervisor assignment. Please try again.";
+            Logger.LogError(ex, "Error updating supervisor assignment for user {UserId}", user.OnboardedUserId);
+            errorMessage = "An unexpected error occurred while updating supervisor assignment. Please try again.";
+        }
+        finally
+        {
+            isSavingSupervisorAssignment = false;
             StateHasChanged();
         }
+    }
+
+    private void CancelSupervisorAssignment()
+    {
+        showSupervisorAssignment = false;
+        newSupervisorEmail = string.Empty;
+        StateHasChanged();
     }
 
     private async Task UpdateSupervisorAssignment(string newSupervisorEmail)
@@ -812,5 +979,307 @@
             Logger.LogError(ex, "Error getting current user ID");
             return Guid.NewGuid(); // Fallback
         }
+    }
+
+    private void ToggleAgentTypesAssignment()
+    {
+        showAgentTypesAssignment = !showAgentTypesAssignment;
+        if (showAgentTypesAssignment && user != null)
+        {
+            try
+            {
+                // CRITICAL FIX: Use the already filtered currentUserAgentTypes instead of loading from database
+                // This ensures we only work with agent types that are currently allocated to the organization
+                selectedAgentTypeIds = currentUserAgentTypes.Select(at => at.Id).ToList();
+                
+                Logger.LogInformation("Initialized agent type selection for user {UserId}: {AgentTypes} (org-allocated only)", 
+                    user.OnboardedUserId, string.Join(", ", selectedAgentTypeIds));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Error loading current agent type assignments for user {UserId}", user.OnboardedUserId);
+                selectedAgentTypeIds.Clear();
+            }
+        }
+        else
+        {
+            selectedAgentTypeIds.Clear();
+        }
+        StateHasChanged();
+    }
+
+    private void ToggleAgentTypeSelection(Guid agentTypeId)
+    {
+        if (selectedAgentTypeIds.Contains(agentTypeId))
+        {
+            selectedAgentTypeIds.Remove(agentTypeId);
+        }
+        else
+        {
+            selectedAgentTypeIds.Add(agentTypeId);
+        }
+        StateHasChanged();
+    }
+
+    private async Task SaveAgentTypesAssignment()
+    {
+        if (user == null || isSavingAgentTypes) return;
+
+        try
+        {
+            ClearMessages();
+            isSavingAgentTypes = true;
+            StateHasChanged();
+
+            var currentUserId = GetCurrentUserId();
+            
+            Logger.LogInformation("🔍 DEBUG: About to update agent types for user {UserId} with types: {AgentTypeIds}", 
+                user.OnboardedUserId, string.Join(", ", selectedAgentTypeIds));
+            
+            // Use the new fallback method that handles Azure AD sync failures gracefully
+            var result = await OnboardedUserService.UpdateUserAgentTypesWithFallbackAsync(
+                user.OnboardedUserId,
+                selectedAgentTypeIds.ToList(),
+                currentUserOrgId,
+                currentUserId);
+                
+            Logger.LogInformation("🔍 DEBUG: Update result - Success: {Success}, DB Updated: {DbUpdated}, Azure Synced: {AzureSynced}", 
+                result.Success, result.DatabaseUpdated, result.AzureADSynced);
+
+            if (result.Success)
+            {
+                if (result.AzureADSynced)
+                {
+                    successMessage = $"Agent types updated successfully for {user.Name}. Azure AD security group memberships have been synchronized.";
+                }
+                else if (!string.IsNullOrEmpty(result.WarningMessage))
+                {
+                    successMessage = $"Agent types updated successfully for {user.Name}. However, there was a warning: {result.WarningMessage}";
+                }
+                else
+                {
+                    successMessage = $"Agent types updated successfully for {user.Name}.";
+                }
+                
+                await LoadUser(); // Reload to get updated assignments
+                showAgentTypesAssignment = false;
+                Logger.LogInformation("Successfully updated agent types for user {UserId} - Azure AD synced: {AzureSynced}", user.OnboardedUserId, result.AzureADSynced);
+            }
+            else
+            {
+                errorMessage = !string.IsNullOrEmpty(result.ErrorMessage) 
+                    ? $"Failed to update agent types: {result.ErrorMessage}"
+                    : "Failed to update agent types. Please try again.";
+                Logger.LogError("Failed to update agent types for user {UserId} - Error: {ErrorMessage}", user.OnboardedUserId, result.ErrorMessage);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error updating agent types for user {UserId}", user.OnboardedUserId);
+            errorMessage = "An unexpected error occurred while updating agent types. Please try again.";
+        }
+        finally
+        {
+            isSavingAgentTypes = false;
+            StateHasChanged();
+        }
+    }
+
+    private void CancelAgentTypesAssignment()
+    {
+        showAgentTypesAssignment = false;
+        selectedAgentTypeIds.Clear();
+        StateHasChanged();
+    }
+
+    private async Task RefreshUserData()
+    {
+        if (isRefreshing) return;
+        
+        try
+        {
+            isRefreshing = true;
+            ClearMessages();
+            StateHasChanged();
+            
+            // Parse organization ID properly for domain-based IDs
+            var currentUserOrgIdStr = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
+            if (!string.IsNullOrEmpty(currentUserOrgIdStr))
+            {
+                Guid organizationGuid;
+                if (!Guid.TryParse(currentUserOrgIdStr, out organizationGuid))
+                {
+                    // Generate deterministic GUID from organization ID string
+                    using (var md5 = System.Security.Cryptography.MD5.Create())
+                    {
+                        var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(currentUserOrgIdStr));
+                        organizationGuid = new Guid(hash);
+                    }
+                }
+                currentUserOrgId = organizationGuid;
+            }
+            
+            // Reload all data
+            await LoadUser();
+            await LoadAvailableAgentTypes();
+            await LoadAvailableDatabases();
+            
+            successMessage = "User data refreshed successfully.";
+            Logger.LogInformation("Successfully refreshed user data for user {UserId}", UserId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error refreshing user data for user {UserId}", UserId);
+            errorMessage = "Error refreshing user data. Please try again.";
+        }
+        finally
+        {
+            isRefreshing = false;
+            StateHasChanged();
+        }
+    }
+
+
+    // SECURITY METHODS - Prevent unauthorized user deactivation
+    private bool CanRemoveUser(OnboardedUser targetUser)
+    {
+        Logger.LogInformation("=== UserDetails.CanRemoveUser DEBUG ===");
+        Logger.LogInformation("Target User: {UserEmail}", targetUser.Email);
+        Logger.LogInformation("Current User Role: {CurrentUserRole}", currentUserRole);
+        
+        // Get current user info for debugging
+        var currentUserEmail = HttpContextAccessor.HttpContext?.User.FindFirst("email")?.Value ?? 
+                              HttpContextAccessor.HttpContext?.User.FindFirst("preferred_username")?.Value;
+        Logger.LogInformation("Current User Email: {CurrentUserEmail}", currentUserEmail);
+        
+        // CRITICAL SECURITY CHECK: No one can deactivate themselves - this is the primary issue to fix
+        if (IsCurrentUser(targetUser))
+        {
+            Logger.LogInformation("RESULT: FALSE - User cannot remove themselves: {UserEmail}", targetUser.Email);
+            return false;
+        }
+
+        // Super Admins can remove anyone (except themselves, checked above)
+        if (currentUserRole == UserRole.SuperAdmin)
+        {
+            Logger.LogInformation("RESULT: TRUE - SuperAdmin can remove user: {UserEmail}", targetUser.Email);
+            return true;
+        }
+
+        // Org Admins can only remove regular organization users (OrgUsers), not other Org Admins
+        if (currentUserRole == UserRole.OrgAdmin)
+        {
+            var targetUserRole = GetUserRole(targetUser);
+            
+            // Additional safety check for same domain users
+            if (!string.IsNullOrEmpty(currentUserEmail))
+            {
+                var currentUserDomain = currentUserEmail.Split('@').LastOrDefault();
+                var targetUserDomain = targetUser.Email?.Split('@').LastOrDefault();
+                
+                if (!string.IsNullOrEmpty(currentUserDomain) && 
+                    !string.IsNullOrEmpty(targetUserDomain) &&
+                    string.Equals(currentUserDomain, targetUserDomain, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (targetUserRole == UserRole.OrgAdmin)
+                    {
+                        Logger.LogInformation("RESULT: FALSE - OrgAdmin cannot remove other OrgAdmin from same domain: {UserEmail}", targetUser.Email);
+                        return false;
+                    }
+                }
+            }
+            
+            // OrgAdmins can remove regular users but NOT other OrgAdmins
+            var canRemove = targetUserRole != UserRole.OrgAdmin;
+            Logger.LogInformation("RESULT: {CanRemove} - OrgAdmin attempting to remove user: {UserEmail} (Target Role: {TargetRole})", 
+                canRemove, targetUser.Email, targetUserRole);
+            return canRemove;
+        }
+
+        // Regular users cannot remove anyone
+        Logger.LogInformation("RESULT: FALSE - Regular user cannot remove anyone: {UserEmail}", targetUser.Email);
+        return false;
+    }
+
+    private bool IsCurrentUser(OnboardedUser targetUser)
+    {
+        // Get current user's email from the HTTP context
+        var currentUserEmail = HttpContextAccessor.HttpContext?.User.FindFirst("email")?.Value ?? 
+                              HttpContextAccessor.HttpContext?.User.FindFirst("preferred_username")?.Value ?? 
+                              HttpContextAccessor.HttpContext?.User.FindFirst("upn")?.Value ?? 
+                              HttpContextAccessor.HttpContext?.User.FindFirst("unique_name")?.Value ??
+                              HttpContextAccessor.HttpContext?.User.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress")?.Value;
+
+        Logger.LogInformation("IsCurrentUser DEBUG: Current user email: {CurrentUserEmail}, Target user email: {TargetUserEmail}", 
+            currentUserEmail, targetUser.Email);
+
+        // Compare with the target user's email
+        var isCurrentUser = !string.IsNullOrEmpty(currentUserEmail) && 
+                           string.Equals(currentUserEmail, targetUser.Email, StringComparison.OrdinalIgnoreCase);
+        
+        Logger.LogInformation("IsCurrentUser result: {IsCurrentUser}", isCurrentUser);
+        return isCurrentUser;
+    }
+
+    private UserRole GetUserRole(OnboardedUser targetUser)
+    {
+        // Use the extension method to get the user's role from database
+        var role = targetUser.GetUserRole();
+        Logger.LogInformation("GetUserRole for {UserEmail}: {Role} (AgentTypes: {AgentTypes})", 
+            targetUser.Email, role, 
+            targetUser.AgentTypes != null ? string.Join(", ", targetUser.AgentTypes) : "null");
+        return role;
+    }
+
+    private async Task RefreshInvitationStatus()
+    {
+        if (isRefreshingStatus || user == null) return;
+
+        try
+        {
+            isRefreshingStatus = true;
+            StateHasChanged();
+
+            // Use the real-time invitation status method if available
+            realTimeInvitationStatus = await user.GetRealTimeInvitationStatusAsync(GraphService);
+            lastStatusCheck = DateTime.Now;
+            
+            Logger.LogInformation("Refreshed invitation status for user {Email}: {Status}", user.Email, realTimeInvitationStatus);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error refreshing invitation status for user {Email}", user?.Email);
+            // Fallback to database status
+            realTimeInvitationStatus = user?.GetInvitationStatus() ?? "Unknown";
+        }
+        finally
+        {
+            isRefreshingStatus = false;
+            StateHasChanged();
+        }
+    }
+
+    private (string Text, string BadgeClass, string Icon, string LastChecked) GetInvitationStatusInfo()
+    {
+        if (user == null) 
+            return ("Unknown", "bg-secondary", "fas fa-question", "");
+
+        // CRITICAL FIX: Always prioritize real-time Azure AD status over database status
+        // Azure AD is the authoritative source for B2B invitation status
+        var status = !string.IsNullOrEmpty(realTimeInvitationStatus) ? realTimeInvitationStatus : user.GetInvitationStatus();
+        
+        // Show if we're using real-time or database status
+        var lastChecked = lastStatusCheck.HasValue 
+            ? $"Last checked: {lastStatusCheck.Value:MMM dd, h:mm tt} (Azure AD)" 
+            : "Database status (click refresh for real-time)";
+
+        return status switch
+        {
+            "Accepted" => ("✅ Accepted", "bg-success", "fas fa-check-circle", lastChecked),
+            "PendingAcceptance" => ("⏳ Pending", "bg-warning", "fas fa-clock", lastChecked),
+            "NotInvited" => ("❌ Not Invited", "bg-secondary", "fas fa-envelope", lastChecked),
+            "Inactive" => ("⚠️ Inactive", "bg-danger", "fas fa-user-times", lastChecked),
+            _ => (status, "bg-info", "fas fa-info-circle", lastChecked)
+        };
     }
 }
