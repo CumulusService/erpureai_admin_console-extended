@@ -20,6 +20,7 @@
 @inject IBusinessDomainValidationService BusinessDomainValidationService
 @inject IOnboardedUserService OnboardedUserService
 @attribute [Authorize(Policy = "OrgAdminOrHigher")]
+@implements IDisposable
 
 <div class="container-fluid">
     <div class="row">
@@ -76,8 +77,8 @@
                                     Search for existing users before sending invitations to avoid duplicates.
                                 </p>
                                 <div class="input-group mb-3">
-                                    <input type="text" class="form-control" placeholder="Search by email or name..." 
-                                           @bind="searchQuery" @bind:event="oninput" @onkeyup="OnSearchKeyUp" />
+                                    <input type="text" class="form-control" placeholder="Search by email or name (auto-suggests)..." 
+                                           @bind="searchQuery" @onkeyup="OnSearchKeyUp" @oninput="OnSearchInput" />
                                     <button class="btn btn-outline-secondary" type="button" @onclick="SearchUsers">
                                         <i class="fas fa-search"></i>
                                     </button>
@@ -132,7 +133,7 @@
                                         }
                                     </div>
                                 }
-                                else if (!string.IsNullOrEmpty(searchQuery) && searchQuery.Length >= 3 && !isSearching)
+                                else if (!string.IsNullOrEmpty(searchQuery) && searchQuery.Length >= 2 && !isSearching)
                                 {
                                     <div class="alert alert-info">
                                         <i class="fas fa-info-circle me-2"></i>
@@ -458,6 +459,10 @@
     private string searchQuery = string.Empty;
     private List<OnboardedUser> searchResults = new();
     private bool isSearching = false;
+
+    // 🚀 PERFORMANCE OPTIMIZATION: Debounce timer for auto-suggestions
+    private Timer? searchDebounceTimer;
+    private const int DebounceDelayMs = 300;
 
     public class InvitationModel
     {
@@ -881,10 +886,37 @@
     /// </summary>
     private async Task OnSearchKeyUp(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter" && searchQuery.Length >= 3)
+        if (e.Key == "Enter" && searchQuery.Length >= 2)
         {
             await SearchUsers();
         }
+    }
+
+    /// <summary>
+    /// 🚀 PERFORMANCE OPTIMIZATION: Debounced auto-suggestion search on input
+    /// </summary>
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        searchQuery = e.Value?.ToString() ?? string.Empty;
+
+        // Cancel previous timer
+        searchDebounceTimer?.Dispose();
+
+        if (searchQuery.Length < 2)
+        {
+            searchResults.Clear();
+            StateHasChanged();
+            return;
+        }
+
+        // Start new debounced timer for auto-suggestions
+        searchDebounceTimer = new Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await SearchUsers();
+            });
+        }, null, DebounceDelayMs, Timeout.Infinite);
     }
     
     /// <summary>
@@ -892,7 +924,7 @@
     /// </summary>
     private async Task SearchUsers()
     {
-        if (string.IsNullOrEmpty(searchQuery) || searchQuery.Length < 3)
+        if (string.IsNullOrEmpty(searchQuery) || searchQuery.Length < 2)
         {
             searchResults.Clear();
             return;
@@ -921,17 +953,13 @@
                 }
             }
             
-            // ADDITIVE: Get users and filter locally (since SearchAsync doesn't exist in the interface)
-            var allUsers = await OnboardedUserService.GetByOrganizationAsync(orgGuid);
+            Logger.LogInformation("🚀 PERFORMANCE: Using optimized database search for '{SearchQuery}'", searchQuery);
+
+            // 🚀 PERFORMANCE OPTIMIZATION: Use new efficient database search instead of loading all users
+            searchResults = await OnboardedUserService.SearchUsersByQueryAsync(orgGuid, searchQuery, 10);
             
-            // Search by email or name (case insensitive)
-            searchResults = allUsers.Where(u => 
-                u.Email.Contains(searchQuery, StringComparison.OrdinalIgnoreCase) ||
-                (u.FullName ?? "").Contains(searchQuery, StringComparison.OrdinalIgnoreCase) ||
-                (u.Name ?? "").Contains(searchQuery, StringComparison.OrdinalIgnoreCase)
-            ).Take(10).ToList(); // Limit to 10 results for performance
-            
-            Logger.LogInformation("ADDITIVE: Search for '{SearchQuery}' found {Count} results", searchQuery, searchResults.Count);
+            Logger.LogInformation("🚀 PERFORMANCE SUCCESS: Search for '{SearchQuery}' found {Count} results with optimized query", 
+                searchQuery, searchResults.Count);
         }
         catch (Exception ex)
         {
@@ -977,5 +1005,13 @@
             // ADDITIVE: Don't break functionality if pre-fill fails
             Logger.LogWarning(ex, "ADDITIVE: Failed to pre-fill form from user {Email}", user.Email);
         }
+    }
+
+    /// <summary>
+    /// 🚀 PERFORMANCE OPTIMIZATION: Proper cleanup to prevent memory leaks
+    /// </summary>
+    public void Dispose()
+    {
+        searchDebounceTimer?.Dispose();
     }
 }

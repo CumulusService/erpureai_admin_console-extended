@@ -567,12 +567,75 @@
     
     @if (isLoading)
     {
-        <div class="text-center py-5">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
+        <!-- 🚀 PERFORMANCE OPTIMIZATION: Modern skeleton loading screen -->
+        <div class="card shadow mb-4">
+            <div class="card-header py-3">
+                <div class="row align-items-center">
+                    <div class="col-md-4">
+                        <div class="skeleton-loader rounded" style="height: 20px; width: 200px;"></div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="skeleton-loader rounded" style="height: 32px;"></div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="skeleton-loader rounded" style="height: 32px;"></div>
+                    </div>
+                </div>
             </div>
-            <p class="mt-2 text-muted">Loading your organization's users...</p>
+            <div class="card-body">
+                <!-- Skeleton user rows -->
+                @for (int i = 0; i < 8; i++)
+                {
+                    <div class="row align-items-center border-bottom py-3">
+                        <div class="col-md-3">
+                            <div class="d-flex align-items-center">
+                                <div class="skeleton-loader rounded-circle me-3" style="height: 40px; width: 40px;"></div>
+                                <div>
+                                    <div class="skeleton-loader rounded mb-1" style="height: 16px; width: 120px;"></div>
+                                    <div class="skeleton-loader rounded" style="height: 12px; width: 180px;"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="skeleton-loader rounded" style="height: 24px; width: 80px;"></div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="d-flex gap-1">
+                                <div class="skeleton-loader rounded" style="height: 20px; width: 60px;"></div>
+                                <div class="skeleton-loader rounded" style="height: 20px; width: 50px;"></div>
+                            </div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="skeleton-loader rounded" style="height: 20px; width: 70px;"></div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="d-flex gap-1">
+                                <div class="skeleton-loader rounded" style="height: 28px; width: 30px;"></div>
+                                <div class="skeleton-loader rounded" style="height: 28px; width: 30px;"></div>
+                                <div class="skeleton-loader rounded" style="height: 28px; width: 30px;"></div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
         </div>
+        
+        <style>
+            .skeleton-loader {
+                background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+                background-size: 200% 100%;
+                animation: loading 1.5s infinite;
+            }
+            
+            @@keyframes loading {
+                0% {
+                    background-position: 200% 0;
+                }
+                100% {
+                    background-position: -200% 0;
+                }
+            }
+        </style>
     }
     else
     {
@@ -835,6 +898,32 @@
     private List<Guid> selectedUserAgentTypes = new();
     private bool isUpdatingUserAgent = false;
 
+    // 🚀 PERFORMANCE OPTIMIZATION: Track rendering state to prevent unnecessary SignalR updates
+    private bool shouldRender = true;
+
+    /// <summary>
+    /// 🚀 PERFORMANCE OPTIMIZATION: Prevents unnecessary re-renders to improve SignalR performance
+    /// </summary>
+    protected override bool ShouldRender()
+    {
+        if (!shouldRender)
+        {
+            return false;
+        }
+        
+        shouldRender = false; // Reset after render
+        return true;
+    }
+
+    /// <summary>
+    /// 🚀 PERFORMANCE OPTIMIZATION: Trigger render only when needed
+    /// </summary>
+    private void TriggerRender()
+    {
+        shouldRender = true;
+        StateHasChanged();
+    }
+
     protected override async Task OnInitializedAsync()
     {
         try
@@ -900,7 +989,7 @@
         finally
         {
             isLoading = false;
-            StateHasChanged();
+            TriggerRender();
         }
     }
 
@@ -927,87 +1016,67 @@
                 return;
             }
 
-            // Load users from OnboardedUserService
-            var onboardedUsers = await OnboardedUserService.GetByOrganizationAsync(currentUserOrgId);
+            Logger.LogInformation("🚀 PERFORMANCE OPTIMIZATION: Loading users with optimized bulk query (replaces N+1 queries)");
+            var startTime = DateTime.UtcNow;
+
+            // 🚀 PERFORMANCE OPTIMIZATION: Use new bulk loading method instead of N+1 queries
+            var usersWithDetails = await OnboardedUserService.GetUsersWithDetailsAsync(currentUserOrgId);
             
             // Convert to GuestUser for backward compatibility and ensure unique users by email
-            allUsers = onboardedUsers
-                .Select(u => new GuestUser(u))
+            allUsers = usersWithDetails
+                .Select(uwd => new GuestUser(uwd.User))
                 .GroupBy(u => u.Email?.ToLowerInvariant())
                 .Select(g => g.OrderByDescending(u => u.InvitedDateTime).First()) // Keep the most recent invitation if duplicates
                 .ToList();
             
-            // Load database user status and agent types for accurate display
-            foreach (var user in allUsers)
+            // 🚀 PERFORMANCE OPTIMIZATION: Pre-populate all caches from bulk-loaded data (eliminates individual queries)
+            userStatusCache.Clear();
+            userAgentTypesCache.Clear(); 
+            userDatabasesCache.Clear();
+
+            foreach (var userWithDetails in usersWithDetails)
             {
-                try
+                var user = userWithDetails.User;
+                var email = user.Email;
+                
+                // Pre-populate caches with bulk-loaded data
+                userStatusCache[email] = user;
+                userAgentTypesCache[email] = userWithDetails.AgentTypes;
+                userDatabasesCache[email] = userWithDetails.DatabaseAssignments;
+
+                // PRESERVED FUNCTIONALITY: Real-time Azure AD invitation status (background task for non-blocking)
+                _ = Task.Run(async () =>
                 {
-                    var dbUser = await OnboardedUserService.GetByEmailAsync(user.Email, currentUserOrgId);
-                    userStatusCache[user.Email] = dbUser;
-                    
-                    // Load agent types for this user if they exist in database
-                    if (dbUser != null)
+                    try
                     {
-                        try
+                        if (user.LastInvitationDate != null && user.LastInvitationDate != DateTime.MinValue)
                         {
-                            var userAgentTypes = await OnboardedUserService.GetUserAgentTypesAsync(dbUser.OnboardedUserId, currentUserOrgId);
-                            userAgentTypesCache[user.Email] = userAgentTypes;
-                        }
-                        catch (Exception agentEx)
-                        {
-                            Logger.LogWarning(agentEx, "Could not load agent types for {Email}", user.Email);
-                            userAgentTypesCache[user.Email] = new List<AgentTypeEntity>();
-                        }
-                        
-                        // Load databases for this user
-                        try
-                        {
-                            var userDatabases = await UserDatabaseAccessService.GetUserAssignedDatabasesAsync(dbUser.OnboardedUserId, currentUserOrgId);
-                            userDatabasesCache[user.Email] = userDatabases;
-                        }
-                        catch (Exception dbEx)
-                        {
-                            Logger.LogWarning(dbEx, "Could not load databases for {Email}", user.Email);
-                            userDatabasesCache[user.Email] = new List<DatabaseCredential>();
-                        }
-                        
-                        // CRITICAL FIX: Auto-fetch real-time Azure AD invitation status like ManageAdmins.razor
-                        // This ensures all screens show consistent and accurate invitation status
-                        if (dbUser.LastInvitationDate != null && dbUser.LastInvitationDate != DateTime.MinValue)
-                        {
-                            try
+                            var guestUser = allUsers.FirstOrDefault(u => u.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
+                            if (guestUser != null)
                             {
-                                var realTimeStatus = await dbUser.GetRealTimeInvitationStatusAsync(GraphService);
-                                // Override the database-based status with real Azure AD status
-                                user.InvitationStatus = realTimeStatus;
+                                var realTimeStatus = await user.GetRealTimeInvitationStatusAsync(GraphService);
+                                guestUser.InvitationStatus = realTimeStatus;
                                 
-                                Logger.LogDebug("Updated invitation status for {Email}: Database={DatabaseStatus}, Azure AD={AzureStatus}", 
-                                    dbUser.Email, dbUser.GetInvitationStatus(), realTimeStatus);
-                            }
-                            catch (Exception statusEx)
-                            {
-                                Logger.LogWarning(statusEx, "Failed to get real-time invitation status for {Email}, using database status", dbUser.Email);
+                                Logger.LogDebug("Background: Updated invitation status for {Email}: Database={DatabaseStatus}, Azure AD={AzureStatus}", 
+                                    user.Email, user.GetInvitationStatus(), realTimeStatus);
+                                
+                                // Trigger UI update for this specific change
+                                InvokeAsync(() => TriggerRender());
                             }
                         }
                     }
-                    else
+                    catch (Exception statusEx)
                     {
-                        userAgentTypesCache[user.Email] = new List<AgentTypeEntity>();
-                        userDatabasesCache[user.Email] = new List<DatabaseCredential>();
+                        Logger.LogWarning(statusEx, "Background: Failed to get real-time invitation status for {Email}, using database status", email);
                     }
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogWarning(ex, "Could not load database user status for {Email}", user.Email);
-                    userStatusCache[user.Email] = null;
-                    userAgentTypesCache[user.Email] = new List<AgentTypeEntity>();
-                    userDatabasesCache[user.Email] = new List<DatabaseCredential>();
-                }
+                });
             }
             
             filteredUsers = allUsers;
             
-            Logger.LogInformation("Loaded {UserCount} unique users for organization {OrganizationId}", allUsers.Count, currentUserOrgId);
+            var loadTime = (DateTime.UtcNow - startTime).TotalMilliseconds;
+            Logger.LogInformation("🚀 PERFORMANCE SUCCESS: Loaded {UserCount} users with all details in {LoadTimeMs}ms (optimized bulk query)", 
+                allUsers.Count, loadTime);
         }
         catch (Exception ex)
         {
@@ -1348,7 +1417,7 @@
             
             // Show loading state
             isLoading = true;
-            StateHasChanged();
+            TriggerRender();
             
             if (user.OnboardedUser != null)
             {
@@ -1397,7 +1466,7 @@
         finally
         {
             isLoading = false;
-            StateHasChanged();
+            TriggerRender();
         }
     }
 
@@ -1410,7 +1479,7 @@
             
             // Show loading state
             isLoading = true;
-            StateHasChanged();
+            TriggerRender();
             
             // Use InvitationService to resend invitation for regular users
             // The GuestUser has an OnboardedUser property with the database record
@@ -1468,7 +1537,7 @@
         finally
         {
             isLoading = false;
-            StateHasChanged();
+            TriggerRender();
         }
     }
 
@@ -1816,7 +1885,7 @@
         try
         {
             isLoading = true;
-            StateHasChanged();
+            TriggerRender();
             
             // Clear any cached data
             userStatusCache.Clear();
@@ -1840,7 +1909,7 @@
         finally
         {
             isLoading = false;
-            StateHasChanged();
+            TriggerRender();
         }
     }
 
@@ -1849,7 +1918,7 @@
         if (pendingAction != null)
         {
             isProcessingConfirmation = true;
-            StateHasChanged();
+            TriggerRender();
             
             try
             {
@@ -1860,7 +1929,7 @@
                 isProcessingConfirmation = false;
                 showConfirmationModal = false;
                 pendingAction = null;
-                StateHasChanged();
+                TriggerRender();
             }
         }
     }
@@ -1900,7 +1969,7 @@
             }
             
             // Force UI update
-            StateHasChanged();
+            TriggerRender();
         }
         catch (Exception ex)
         {
@@ -2016,7 +2085,7 @@
         {
             isBulkAssigning = true;
             ClearMessages();
-            StateHasChanged();
+            TriggerRender();
             
             var currentUserId = GetCurrentUserId();
             var successCount = 0;
@@ -2122,7 +2191,7 @@
         finally
         {
             isBulkAssigning = false;
-            StateHasChanged();
+            TriggerRender();
         }
     }
     
@@ -2206,7 +2275,7 @@
         {
             isUpdatingUserAgent = true;
             ClearMessages();
-            StateHasChanged();
+            TriggerRender();
             
             var currentUserId = GetCurrentUserId();
             
@@ -2255,7 +2324,7 @@
         finally
         {
             isUpdatingUserAgent = false;
-            StateHasChanged();
+            TriggerRender();
         }
     }
     
@@ -2298,7 +2367,7 @@
         {
             isAssigningToAllUsers = true;
             ClearMessages();
-            StateHasChanged();
+            TriggerRender();
             
             var currentUserId = GetCurrentUserId();
             var successCount = 0;
@@ -2408,7 +2477,7 @@
         finally
         {
             isAssigningToAllUsers = false;
-            StateHasChanged();
+            TriggerRender();
         }
     }
 

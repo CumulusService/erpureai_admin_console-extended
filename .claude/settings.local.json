@@ -23,7 +23,9 @@
       "Bash(timeout:*)",
       "Bash(grep:*)",
       "Bash(dotnet ef database:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)"
     ],
     "deny": []
   }

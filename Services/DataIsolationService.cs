@@ -49,7 +49,8 @@ public class DataIsolationService : IDataIsolationService
 
             var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? 
                         user.FindFirst("oid")?.Value ?? 
-                        user.FindFirst("sub")?.Value;
+                        user.FindFirst("sub")?.Value ??
+                        user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
             var email = user.FindFirst(ClaimTypes.Email)?.Value ?? 
                        user.FindFirst("email")?.Value ?? 
                        user.FindFirst("preferred_username")?.Value ?? 

@@ -1,0 +1,5 @@
+{
+    "appService.preDeployTask": "publish-release",
+    "appService.deploySubpath": "bin\\Release\\net9.0\\publish",
+    "appService.defaultWebAppToDeploy": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-adminconsole/providers/Microsoft.Web/sites/erpure-adminconsole"
+}

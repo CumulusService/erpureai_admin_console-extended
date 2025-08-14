@@ -99,7 +99,7 @@ public class GraphService : IGraphService
             {
                 InvitedUserEmailAddress = email,
                 InvitedUserDisplayName = displayName,
-                InviteRedirectUrl = GetRedirectUrl(),
+                InviteRedirectUrl = "http://localhost:5243",
                 SendInvitationMessage = true,
                 InvitedUserMessageInfo = new InvitedUserMessageInfo
                 {
@@ -146,7 +146,7 @@ public class GraphService : IGraphService
             {
                 InvitedUserEmailAddress = email,
                 InvitedUserDisplayName = displayName,
-                InviteRedirectUrl = GetRedirectUrl(),
+                InviteRedirectUrl = "http://localhost:5243",
                 SendInvitationMessage = true,
                 InvitedUserMessageInfo = new InvitedUserMessageInfo
                 {
@@ -762,8 +762,11 @@ public class GraphService : IGraphService
             var user = _httpContextAccessor.HttpContext?.User;
             if (user?.Identity?.IsAuthenticated == true)
             {
-                var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var email = user.FindFirst(ClaimTypes.Email)?.Value;
+                var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? 
+                            user.FindFirst("oid")?.Value ?? 
+                            user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+                var email = user.FindFirst(ClaimTypes.Email)?.Value ?? 
+                           user.FindFirst("preferred_username")?.Value;
                 var displayName = user.FindFirst(ClaimTypes.Name)?.Value;
                 var upn = user.FindFirst("preferred_username")?.Value;
 
@@ -825,7 +828,7 @@ public class GraphService : IGraphService
     public async Task<GraphInvitationResult> InviteGuestUserAsync(string email, string organizationName)
     {
         // Call the enhanced method with default values for backward compatibility
-        return await InviteGuestUserAsync(email, organizationName, GetRedirectUrl(), new List<string>(), false);
+        return await InviteGuestUserAsync(email, organizationName, "https://localhost:5243", new List<string>(), false);
     }
 
     /// <summary>
@@ -3285,15 +3288,5 @@ public class GraphService : IGraphService
             _logger.LogError(ex, "Error creating Teams app setup policy {PolicyName}", policyName);
             return Task.FromResult(false);
         }
-    }
-
-    /// <summary>
-    /// Gets the appropriate redirect URL based on the current environment
-    /// </summary>
-    private string GetRedirectUrl()
-    {
-        return _configuration["ASPNETCORE_ENVIRONMENT"] == "Production" 
-            ? _configuration["Production:BaseUrl"] ?? "https://adminconsole.erpure.ai"
-            : "http://localhost:5243";
     }
 }

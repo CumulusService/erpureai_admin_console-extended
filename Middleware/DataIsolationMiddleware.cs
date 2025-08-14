@@ -72,9 +72,10 @@ public class DataIsolationMiddleware
             return true;
         }
 
-        // Skip for static assets
+        // Skip for static assets and Blazor SignalR
         if (path.StartsWith("/_framework") ||
             path.StartsWith("/_content") ||
+            path.StartsWith("/_blazor") ||
             path.StartsWith("/css") ||
             path.StartsWith("/js") ||
             path.StartsWith("/lib") ||

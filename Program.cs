@@ -14,6 +14,7 @@ using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
 using AdminConsole.HealthChecks;
 using AdminConsole.Hubs;
+using Microsoft.AspNetCore.ResponseCompression;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -201,21 +202,30 @@ builder.Services.AddControllersWithViews();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
-// Configure SignalR for Blazor Server stability and large-scale users
+// Configure SignalR for Blazor Server performance and responsiveness
 builder.Services.AddSignalR(options =>
 {
-    // Optimized for large number of simultaneous users
-    options.ClientTimeoutInterval = TimeSpan.FromMinutes(10);  // Increased for stability
-    options.KeepAliveInterval = TimeSpan.FromSeconds(15);
-    options.HandshakeTimeout = TimeSpan.FromSeconds(30);
-    options.MaximumReceiveMessageSize = 64 * 1024;  // Increased for larger payloads
-    options.StreamBufferCapacity = 10;  // Reasonable buffer for streaming
-    options.MaximumParallelInvocationsPerClient = 2;  // Prevent client overload
-    options.EnableDetailedErrors = builder.Environment.IsDevelopment();  // Only in dev
+    // Optimized for responsiveness in production
+    options.ClientTimeoutInterval = TimeSpan.FromMinutes(3);  // Reduced for faster detection of disconnects
+    options.KeepAliveInterval = TimeSpan.FromSeconds(5);      // More frequent keep-alives for responsiveness
+    options.HandshakeTimeout = TimeSpan.FromSeconds(15);      // Faster handshake
+    options.MaximumReceiveMessageSize = 32 * 1024;            // Smaller messages for speed
+    options.StreamBufferCapacity = 5;                         // Reduced buffer for lower latency
+    options.MaximumParallelInvocationsPerClient = 4;          // Allow more parallel operations
+    options.EnableDetailedErrors = builder.Environment.IsDevelopment();
 });
 
 // Add Blazor authentication services
 builder.Services.AddCascadingAuthenticationState();
+
+// Add performance optimizations
+builder.Services.AddResponseCompression(opts =>
+{
+    opts.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
+        new[] { "application/octet-stream" });
+});
+
+builder.Services.AddResponseCaching();
 
 
 var app = builder.Build();
@@ -232,6 +242,10 @@ else
     // Skip HTTPS redirection in development to avoid port determination issues
     app.UseDeveloperExceptionPage();
 }
+
+// Add performance middleware early in the pipeline
+app.UseResponseCompression();
+app.UseResponseCaching();
 
 // Add authentication middleware BEFORE authorization
 app.UseAuthentication();

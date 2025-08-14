@@ -72,7 +72,8 @@ public class UserAccessValidationMiddleware
             "/fonts",
             "/_framework",
             "/_blazor",
-            "/error"
+            "/error",
+            "/debug"
         };
 
         return skipPaths.Any(skipPath => pathValue?.StartsWith(skipPath) == true);

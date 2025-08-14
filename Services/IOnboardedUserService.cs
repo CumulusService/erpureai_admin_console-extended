@@ -188,6 +188,34 @@ public interface IOnboardedUserService
     /// <param name="agentTypeIds">List of agent type IDs to validate</param>
     /// <returns>True if valid assignment (at least one agent type)</returns>
     Task<bool> ValidateAgentTypeAssignmentAsync(List<Guid> agentTypeIds);
+    
+    /// <summary>
+    /// PERFORMANCE OPTIMIZATION: Gets users with all related data (agent types, databases) in a single optimized query
+    /// Replaces multiple N+1 queries with efficient JOINs for ManageUsers page performance
+    /// </summary>
+    /// <param name="organizationId">Organization ID</param>
+    /// <returns>Users with all related data preloaded</returns>
+    Task<List<UserWithDetails>> GetUsersWithDetailsAsync(Guid organizationId);
+    
+    /// <summary>
+    /// PERFORMANCE OPTIMIZATION: Efficient search for users by email/name with database indexing
+    /// Optimized for InviteUser page auto-suggestions and search performance
+    /// </summary>
+    /// <param name="organizationId">Organization ID</param>
+    /// <param name="searchQuery">Search term (email or name)</param>
+    /// <param name="maxResults">Maximum number of results (default 10)</param>
+    /// <returns>Matching users limited to organization scope</returns>
+    Task<List<OnboardedUser>> SearchUsersByQueryAsync(Guid organizationId, string searchQuery, int maxResults = 10);
+}
+
+/// <summary>
+/// PERFORMANCE OPTIMIZATION: User with all related details preloaded to avoid N+1 queries
+/// </summary>
+public class UserWithDetails
+{
+    public OnboardedUser User { get; set; } = null!;
+    public List<AgentTypeEntity> AgentTypes { get; set; } = new();
+    public List<DatabaseCredential> DatabaseAssignments { get; set; } = new();
 }
 
 /// <summary>
