@@ -46,35 +46,46 @@ namespace AdminConsole.Services
 
                     var librariesToLoad = new[] { "libSQLDBCHDB.dll", "libadonetHDB.dll" };
 
+                    Console.WriteLine($"🔍 Starting explicit library loading for {librariesToLoad.Length} libraries...");
+                    
                     foreach (var library in librariesToLoad)
                     {
+                        Console.WriteLine($"📋 Attempting to load {library}:");
                         var loaded = false;
+                        
                         foreach (var path in possiblePaths)
                         {
                             var libraryPath = Path.Combine(path, library);
-                            if (File.Exists(libraryPath))
+                            var exists = File.Exists(libraryPath);
+                            Console.WriteLine($"  🔍 Checking {libraryPath}: {(exists ? "EXISTS" : "NOT FOUND")}");
+                            
+                            if (exists)
                             {
-                                var handle = LoadLibrary(libraryPath);
-                                if (handle != IntPtr.Zero)
+                                try
                                 {
-                                    Console.WriteLine($"✅ Successfully loaded {library} from {libraryPath}");
-                                    loaded = true;
-                                    break;
+                                    var handle = LoadLibrary(libraryPath);
+                                    if (handle != IntPtr.Zero)
+                                    {
+                                        Console.WriteLine($"  ✅ Successfully loaded {library} from {libraryPath} (Handle: 0x{handle:X})");
+                                        loaded = true;
+                                        break;
+                                    }
+                                    else
+                                    {
+                                        var error = Marshal.GetLastWin32Error();
+                                        Console.WriteLine($"  ❌ LoadLibrary failed for {libraryPath} (Win32 Error: {error})");
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"  ❌ Exception loading {libraryPath}: {ex.Message}");
                                 }
                             }
                         }
                         
                         if (!loaded)
                         {
-                            Console.WriteLine($"⚠️ Could not load {library} from any path");
-                            // Log all searched paths for debugging
-                            Console.WriteLine($"   Searched paths:");
-                            foreach (var path in possiblePaths)
-                            {
-                                var libraryPath = Path.Combine(path, library);
-                                var exists = File.Exists(libraryPath) ? "EXISTS" : "NOT FOUND";
-                                Console.WriteLine($"     - {libraryPath} ({exists})");
-                            }
+                            Console.WriteLine($"  ⚠️ Final result: Could not load {library} from any location");
                         }
                     }
 
