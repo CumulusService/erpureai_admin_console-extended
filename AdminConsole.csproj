@@ -29,4 +29,24 @@
     <PackageReference Include="SAPHANAClient" Version="1.0.0" />
   </ItemGroup>
 
+  <!-- Ensure SAP HANA native libraries are deployed to Azure (backup approach) -->
+  <Target Name="EnsureHANALibrariesDeployed" AfterTargets="Publish">
+    <ItemGroup>
+      <HANANativeLibs Include="$(PublishDir)libadonetHDB.dll" />
+      <HANANativeLibs Include="$(PublishDir)libSQLDBCHDB.dll" />
+    </ItemGroup>
+    
+    <!-- Copy from NuGet package location if not found in publish directory -->
+    <Copy SourceFiles="$(NuGetPackageRoot)saphanaClient\1.0.0\runtimes\win-x64\native\libadonetHDB.dll" 
+          DestinationFolder="$(PublishDir)" 
+          SkipUnchangedFiles="true"
+          Condition="!Exists('$(PublishDir)libadonetHDB.dll')" />
+    <Copy SourceFiles="$(NuGetPackageRoot)saphanaClient\1.0.0\runtimes\win-x64\native\libSQLDBCHDB.dll" 
+          DestinationFolder="$(PublishDir)" 
+          SkipUnchangedFiles="true"
+          Condition="!Exists('$(PublishDir)libSQLDBCHDB.dll')" />
+    
+    <Message Text="Verified SAP HANA native libraries are present in publish directory" Importance="high" />
+  </Target>
+
 </Project>

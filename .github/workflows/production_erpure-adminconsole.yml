@@ -23,6 +23,11 @@ jobs:
         with:
           dotnet-version: '9.x'
 
+      - name: Copy local NuGet packages to build environment
+        run: |
+          mkdir -p ~/.nuget/packages/saphanaClient/1.0.0/
+          cp -r LocalNuGetPackages/* ~/.nuget/packages/saphanaClient/1.0.0/ || echo "Local packages not found, will use embedded package"
+
       - name: Build with dotnet
         run: dotnet build --configuration Release
 

@@ -1,0 +1,308 @@
+/* Global Theme System */
+:root {
+    /* Light theme colors */
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8f9fa;
+    --bg-tertiary: #e9ecef;
+    --text-primary: #212529;
+    --text-secondary: #6c757d;
+    --text-muted: #495057;
+    --border-color: #dee2e6;
+    --border-strong: #495057;
+    --accent-primary: #0d6efd;
+    --accent-hover: #0b5ed7;
+    --success: #198754;
+    --warning: #ffc107;
+    --danger: #dc3545;
+    --info: #0dcaf0;
+    
+    /* Form controls */
+    --form-bg: #ffffff;
+    --form-border: #ced4da;
+    --form-focus-border: #86b7fe;
+    --form-focus-shadow: rgba(13, 110, 253, 0.25);
+    
+    /* Cards and containers */
+    --card-bg: #ffffff;
+    --card-border: #dee2e6;
+    --card-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    
+    /* Agent checkboxes */
+    --checkbox-bg: #ffffff;
+    --checkbox-border: #495057;
+    --checkbox-hover-bg: #e3f2fd;
+    --checkbox-hover-border: #1976d2;
+    --checkbox-checked-bg: #e8f4fd;
+    --checkbox-checked-border: #1976d2;
+    --checkbox-text: #212529;
+    
+    /* Theme toggle */
+    --toggle-bg: #ffffff;
+    --toggle-border: #495057;
+    --toggle-text: #495057;
+    --toggle-hover-bg: #f8f9fa;
+}
+
+[data-theme="dark"] {
+    /* Dark theme colors */
+    --bg-primary: #1a202c;
+    --bg-secondary: #2d3748;
+    --bg-tertiary: #4a5568;
+    --text-primary: #f7fafc;
+    --text-secondary: #e2e8f0;
+    --text-muted: #cbd5e0;
+    --border-color: #4a5568;
+    --border-strong: #718096;
+    --accent-primary: #3182ce;
+    --accent-hover: #2c5282;
+    --success: #38a169;
+    --warning: #d69e2e;
+    --danger: #e53e3e;
+    --info: #3182ce;
+    
+    /* Form controls */
+    --form-bg: #2d3748;
+    --form-border: #4a5568;
+    --form-focus-border: #63b3ed;
+    --form-focus-shadow: rgba(66, 153, 225, 0.25);
+    
+    /* Cards and containers */
+    --card-bg: #2d3748;
+    --card-border: #4a5568;
+    --card-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.3);
+    
+    /* Agent checkboxes */
+    --checkbox-bg: #2d3748;
+    --checkbox-border: #718096;
+    --checkbox-hover-bg: #2c5282;
+    --checkbox-hover-border: #63b3ed;
+    --checkbox-checked-bg: #2c5282;
+    --checkbox-checked-border: #63b3ed;
+    --checkbox-text: #f7fafc;
+    
+    /* Theme toggle */
+    --toggle-bg: #4a5568;
+    --toggle-border: #718096;
+    --toggle-text: #f7fafc;
+    --toggle-hover-bg: #2d3748;
+}
+
+/* Global theme application */
+body {
+    background-color: var(--bg-primary) !important;
+    color: var(--text-primary) !important;
+    transition: all 0.3s ease;
+}
+
+/* Theme Toggle Button */
+.global-theme-toggle {
+    position: fixed;
+    top: 15px;
+    right: 15px;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    background: var(--toggle-bg);
+    color: var(--toggle-text);
+    border: 2px solid var(--toggle-border);
+    border-radius: 25px;
+    padding: 8px 12px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    user-select: none;
+    min-width: 60px;
+    justify-content: center;
+}
+
+.global-theme-toggle:hover {
+    background: var(--toggle-hover-bg);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.global-theme-toggle:active {
+    transform: translateY(0);
+}
+
+.global-theme-toggle i {
+    font-size: 16px;
+    transition: all 0.3s ease;
+}
+
+.global-theme-toggle:hover i {
+    transform: scale(1.1);
+}
+
+/* Cards */
+.card {
+    background-color: var(--card-bg) !important;
+    border-color: var(--card-border) !important;
+    color: var(--text-primary) !important;
+    box-shadow: var(--card-shadow) !important;
+}
+
+.card-header {
+    background-color: var(--bg-secondary) !important;
+    border-bottom-color: var(--border-color) !important;
+    color: var(--text-primary) !important;
+}
+
+/* Form Controls */
+.form-control, .form-select {
+    background-color: var(--form-bg) !important;
+    border-color: var(--form-border) !important;
+    color: var(--text-primary) !important;
+}
+
+.form-control:focus, .form-select:focus {
+    background-color: var(--form-bg) !important;
+    border-color: var(--form-focus-border) !important;
+    color: var(--text-primary) !important;
+    box-shadow: 0 0 0 0.2rem var(--form-focus-shadow) !important;
+}
+
+.form-control::placeholder {
+    color: var(--text-muted) !important;
+    opacity: 0.7;
+}
+
+/* Form Labels */
+.form-label {
+    color: var(--text-primary) !important;
+    font-weight: 500;
+}
+
+.form-text {
+    color: var(--text-secondary) !important;
+}
+
+/* Alerts */
+.alert-info {
+    background-color: rgba(var(--info-rgb), 0.1) !important;
+    border-color: var(--info) !important;
+    color: var(--text-primary) !important;
+}
+
+.alert-success {
+    background-color: rgba(var(--success-rgb), 0.1) !important;
+    border-color: var(--success) !important;
+    color: var(--text-primary) !important;
+}
+
+.alert-danger {
+    background-color: rgba(var(--danger-rgb), 0.1) !important;
+    border-color: var(--danger) !important;
+    color: var(--text-primary) !important;
+}
+
+/* Buttons */
+.btn-primary {
+    background-color: var(--accent-primary) !important;
+    border-color: var(--accent-primary) !important;
+}
+
+.btn-primary:hover {
+    background-color: var(--accent-hover) !important;
+    border-color: var(--accent-hover) !important;
+}
+
+.btn-secondary {
+    background-color: var(--bg-tertiary) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-primary) !important;
+}
+
+/* Agent Type Checkboxes */
+.agent-type-checkbox {
+    border: 2px solid var(--checkbox-border) !important;
+    border-radius: 8px !important;
+    padding: 1rem !important;
+    margin-bottom: 0.75rem !important;
+    background-color: var(--checkbox-bg) !important;
+    color: var(--checkbox-text) !important;
+    transition: all 0.3s ease-in-out !important;
+    cursor: pointer;
+    position: relative;
+}
+
+.agent-type-checkbox:hover {
+    border-color: var(--checkbox-hover-border) !important;
+    background-color: var(--checkbox-hover-bg) !important;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
+}
+
+.agent-type-checkbox:has(input:checked) {
+    border-color: var(--checkbox-checked-border) !important;
+    background-color: var(--checkbox-checked-bg) !important;
+    box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.2) !important;
+}
+
+.agent-type-checkbox .form-check-input {
+    width: 1.2em !important;
+    height: 1.2em !important;
+    margin-top: 0.1em !important;
+}
+
+.agent-type-checkbox .form-check-input:focus {
+    box-shadow: 0 0 0 0.25rem var(--form-focus-shadow) !important;
+}
+
+.agent-type-checkbox label {
+    cursor: pointer !important;
+    user-select: none !important;
+    width: 100% !important;
+    color: var(--checkbox-text) !important;
+    font-weight: 500 !important;
+}
+
+.agent-type-checkbox small {
+    color: var(--text-secondary) !important;
+}
+
+/* Navigation */
+.sidebar {
+    background-color: var(--bg-secondary) !important;
+    border-right: 1px solid var(--border-color) !important;
+}
+
+.nav-link {
+    color: var(--text-secondary) !important;
+}
+
+.nav-link:hover, .nav-link.active {
+    color: var(--text-primary) !important;
+}
+
+/* Tables */
+.table {
+    color: var(--text-primary) !important;
+}
+
+.table-striped > tbody > tr:nth-of-type(odd) > td,
+.table-striped > tbody > tr:nth-of-type(odd) > th {
+    background-color: var(--bg-secondary) !important;
+}
+
+/* Modals */
+.modal-content {
+    background-color: var(--card-bg) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-primary) !important;
+}
+
+.modal-header {
+    border-bottom-color: var(--border-color) !important;
+}
+
+.modal-footer {
+    border-top-color: var(--border-color) !important;
+}
+
+/* Smooth transitions for theme switching */
+* {
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease !important;
+}
