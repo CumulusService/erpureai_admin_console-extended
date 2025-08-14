@@ -23,16 +23,14 @@ jobs:
         with:
           dotnet-version: '9.x'
 
-      - name: Copy local NuGet packages to build environment
-        run: |
-          mkdir -p ~/.nuget/packages/saphanaClient/1.0.0/
-          cp -r LocalNuGetPackages/* ~/.nuget/packages/saphanaClient/1.0.0/ || echo "Local packages not found, will use embedded package"
+      - name: Restore NuGet packages
+        run: dotnet restore --verbosity normal
 
       - name: Build with dotnet
-        run: dotnet build --configuration Release
+        run: dotnet build --configuration Release --no-restore --verbosity normal
 
       - name: dotnet publish
-        run: dotnet publish -c Release -o "${{env.DOTNET_ROOT}}/myapp"
+        run: dotnet publish -c Release -o "${{env.DOTNET_ROOT}}/myapp" --no-restore --verbosity normal
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4

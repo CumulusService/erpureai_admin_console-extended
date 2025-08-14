@@ -1,36 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Simple approach: Just copy the native libraries -->
   <ItemGroup>
-    <!-- Copy native libraries to output directory -->
-    <None Include="$(MSBuildThisFileDirectory)\..\runtimes\win-x64\native\libadonetHDB.dll">
+    <None Include="$(MSBuildThisFileDirectory)\..\runtimes\win-x64\native\*.dll">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       <CopyToPublishDirectory>Always</CopyToPublishDirectory>
       <Visible>false</Visible>
-      <Link>libadonetHDB.dll</Link>
-    </None>
-    <None Include="$(MSBuildThisFileDirectory)\..\runtimes\win-x64\native\libSQLDBCHDB.dll">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
-      <Visible>false</Visible>
-      <Link>libSQLDBCHDB.dll</Link>
     </None>
   </ItemGroup>
-  
-  <!-- Force copy native libraries for all build scenarios -->
-  <Target Name="CopyHANANativeLibraries" BeforeTargets="Build;Publish">
-    <ItemGroup>
-      <HANANativeFiles Include="$(MSBuildThisFileDirectory)\..\runtimes\win-x64\native\*.dll" />
-    </ItemGroup>
-    <Copy SourceFiles="@(HANANativeFiles)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
-    <Message Text="Copied SAP HANA native libraries to $(OutputPath)" Importance="high" />
-  </Target>
-  
-  <!-- Ensure libraries are also copied during publish (critical for Azure deployment) -->
-  <Target Name="CopyHANANativeLibrariesForPublish" BeforeTargets="Publish">
-    <ItemGroup>
-      <HANANativeFiles Include="$(MSBuildThisFileDirectory)\..\runtimes\win-x64\native\*.dll" />
-    </ItemGroup>
-    <Copy SourceFiles="@(HANANativeFiles)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
-    <Message Text="Copied SAP HANA native libraries to $(PublishDir) for deployment" Importance="high" />
-  </Target>
 </Project>
