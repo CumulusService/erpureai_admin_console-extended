@@ -281,8 +281,8 @@
     <!-- Bulk Agent Assignment Modal -->
     @if (showBulkAgentAssignmentModal)
     {
-        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onclick="CloseBulkAgentAssignmentModal">
-            <div class="modal-dialog modal-lg" @onclick:stopPropagation="true">
+        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+            <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title text-info">
@@ -390,8 +390,8 @@
     <!-- Assign to ALL Users Modal -->
     @if (showAssignToAllUsersModal)
     {
-        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onclick="CloseAssignToAllUsersModal">
-            <div class="modal-dialog modal-md" @onclick:stopPropagation="true">
+        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+            <div class="modal-dialog modal-md">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title text-success">
@@ -483,8 +483,8 @@
     <!-- Individual User Agent Management Modal -->
     @if (showUserAgentManagementModal && selectedUserForAgentManagement != null)
     {
-        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onclick="CloseUserAgentManagementModal">
-            <div class="modal-dialog modal-md" @onclick:stopPropagation="true">
+        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+            <div class="modal-dialog modal-md">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title text-info">
@@ -567,75 +567,12 @@
     
     @if (isLoading)
     {
-        <!-- 🚀 PERFORMANCE OPTIMIZATION: Modern skeleton loading screen -->
-        <div class="card shadow mb-4">
-            <div class="card-header py-3">
-                <div class="row align-items-center">
-                    <div class="col-md-4">
-                        <div class="skeleton-loader rounded" style="height: 20px; width: 200px;"></div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="skeleton-loader rounded" style="height: 32px;"></div>
-                    </div>
-                    <div class="col-md-4">
-                        <div class="skeleton-loader rounded" style="height: 32px;"></div>
-                    </div>
-                </div>
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
             </div>
-            <div class="card-body">
-                <!-- Skeleton user rows -->
-                @for (int i = 0; i < 8; i++)
-                {
-                    <div class="row align-items-center border-bottom py-3">
-                        <div class="col-md-3">
-                            <div class="d-flex align-items-center">
-                                <div class="skeleton-loader rounded-circle me-3" style="height: 40px; width: 40px;"></div>
-                                <div>
-                                    <div class="skeleton-loader rounded mb-1" style="height: 16px; width: 120px;"></div>
-                                    <div class="skeleton-loader rounded" style="height: 12px; width: 180px;"></div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="skeleton-loader rounded" style="height: 24px; width: 80px;"></div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="d-flex gap-1">
-                                <div class="skeleton-loader rounded" style="height: 20px; width: 60px;"></div>
-                                <div class="skeleton-loader rounded" style="height: 20px; width: 50px;"></div>
-                            </div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="skeleton-loader rounded" style="height: 20px; width: 70px;"></div>
-                        </div>
-                        <div class="col-md-2">
-                            <div class="d-flex gap-1">
-                                <div class="skeleton-loader rounded" style="height: 28px; width: 30px;"></div>
-                                <div class="skeleton-loader rounded" style="height: 28px; width: 30px;"></div>
-                                <div class="skeleton-loader rounded" style="height: 28px; width: 30px;"></div>
-                            </div>
-                        </div>
-                    </div>
-                }
-            </div>
+            <p class="mt-2 text-muted">Loading your organization's users...</p>
         </div>
-        
-        <style>
-            .skeleton-loader {
-                background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-                background-size: 200% 100%;
-                animation: loading 1.5s infinite;
-            }
-            
-            @@keyframes loading {
-                0% {
-                    background-position: 200% 0;
-                }
-                100% {
-                    background-position: -200% 0;
-                }
-            }
-        </style>
     }
     else
     {
@@ -650,8 +587,8 @@
 <!-- Reactivate Confirmation Modal -->
 @if (userToReactivate != null && showReactivateModal)
 {
-    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onclick="CloseReactivateModal">
-        <div class="modal-dialog" @onclick:stopPropagation="true">
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title text-success">
@@ -898,40 +835,6 @@
     private List<Guid> selectedUserAgentTypes = new();
     private bool isUpdatingUserAgent = false;
 
-    // 🚀 PERFORMANCE OPTIMIZATION: Track rendering state to prevent unnecessary SignalR updates
-    private bool shouldRender = true;
-
-    /// <summary>
-    /// 🚀 PERFORMANCE OPTIMIZATION: Prevents unnecessary re-renders to improve SignalR performance
-    /// CRITICAL FIX: Always render when modals are visible to ensure responsiveness
-    /// </summary>
-    protected override bool ShouldRender()
-    {
-        // ALWAYS render when modals are visible or changing state
-        if (showBulkAgentAssignmentModal || showAssignToAllUsersModal || 
-            showUserAgentManagementModal || showReactivateModal)
-        {
-            return true; // Always render when modals are visible
-        }
-        
-        if (!shouldRender)
-        {
-            return false;
-        }
-        
-        shouldRender = false; // Reset after render
-        return true;
-    }
-
-    /// <summary>
-    /// 🚀 PERFORMANCE OPTIMIZATION: Trigger render only when needed
-    /// </summary>
-    private void TriggerRender()
-    {
-        shouldRender = true;
-        StateHasChanged();
-    }
-
     protected override async Task OnInitializedAsync()
     {
         try
@@ -997,7 +900,7 @@
         finally
         {
             isLoading = false;
-            TriggerRender();
+            StateHasChanged();
         }
     }
 
@@ -1024,67 +927,87 @@
                 return;
             }
 
-            Logger.LogInformation("🚀 PERFORMANCE OPTIMIZATION: Loading users with optimized bulk query (replaces N+1 queries)");
-            var startTime = DateTime.UtcNow;
-
-            // 🚀 PERFORMANCE OPTIMIZATION: Use new bulk loading method instead of N+1 queries
-            var usersWithDetails = await OnboardedUserService.GetUsersWithDetailsAsync(currentUserOrgId);
+            // Load users from OnboardedUserService
+            var onboardedUsers = await OnboardedUserService.GetByOrganizationAsync(currentUserOrgId);
             
             // Convert to GuestUser for backward compatibility and ensure unique users by email
-            allUsers = usersWithDetails
-                .Select(uwd => new GuestUser(uwd.User))
+            allUsers = onboardedUsers
+                .Select(u => new GuestUser(u))
                 .GroupBy(u => u.Email?.ToLowerInvariant())
                 .Select(g => g.OrderByDescending(u => u.InvitedDateTime).First()) // Keep the most recent invitation if duplicates
                 .ToList();
             
-            // 🚀 PERFORMANCE OPTIMIZATION: Pre-populate all caches from bulk-loaded data (eliminates individual queries)
-            userStatusCache.Clear();
-            userAgentTypesCache.Clear(); 
-            userDatabasesCache.Clear();
-
-            foreach (var userWithDetails in usersWithDetails)
+            // Load database user status and agent types for accurate display
+            foreach (var user in allUsers)
             {
-                var user = userWithDetails.User;
-                var email = user.Email;
-                
-                // Pre-populate caches with bulk-loaded data
-                userStatusCache[email] = user;
-                userAgentTypesCache[email] = userWithDetails.AgentTypes;
-                userDatabasesCache[email] = userWithDetails.DatabaseAssignments;
-
-                // PRESERVED FUNCTIONALITY: Real-time Azure AD invitation status (background task for non-blocking)
-                _ = Task.Run(async () =>
+                try
                 {
-                    try
+                    var dbUser = await OnboardedUserService.GetByEmailAsync(user.Email, currentUserOrgId);
+                    userStatusCache[user.Email] = dbUser;
+                    
+                    // Load agent types for this user if they exist in database
+                    if (dbUser != null)
                     {
-                        if (user.LastInvitationDate != null && user.LastInvitationDate != DateTime.MinValue)
+                        try
                         {
-                            var guestUser = allUsers.FirstOrDefault(u => u.Email.Equals(email, StringComparison.OrdinalIgnoreCase));
-                            if (guestUser != null)
+                            var userAgentTypes = await OnboardedUserService.GetUserAgentTypesAsync(dbUser.OnboardedUserId, currentUserOrgId);
+                            userAgentTypesCache[user.Email] = userAgentTypes;
+                        }
+                        catch (Exception agentEx)
+                        {
+                            Logger.LogWarning(agentEx, "Could not load agent types for {Email}", user.Email);
+                            userAgentTypesCache[user.Email] = new List<AgentTypeEntity>();
+                        }
+                        
+                        // Load databases for this user
+                        try
+                        {
+                            var userDatabases = await UserDatabaseAccessService.GetUserAssignedDatabasesAsync(dbUser.OnboardedUserId, currentUserOrgId);
+                            userDatabasesCache[user.Email] = userDatabases;
+                        }
+                        catch (Exception dbEx)
+                        {
+                            Logger.LogWarning(dbEx, "Could not load databases for {Email}", user.Email);
+                            userDatabasesCache[user.Email] = new List<DatabaseCredential>();
+                        }
+                        
+                        // CRITICAL FIX: Auto-fetch real-time Azure AD invitation status like ManageAdmins.razor
+                        // This ensures all screens show consistent and accurate invitation status
+                        if (dbUser.LastInvitationDate != null && dbUser.LastInvitationDate != DateTime.MinValue)
+                        {
+                            try
                             {
-                                var realTimeStatus = await user.GetRealTimeInvitationStatusAsync(GraphService);
-                                guestUser.InvitationStatus = realTimeStatus;
+                                var realTimeStatus = await dbUser.GetRealTimeInvitationStatusAsync(GraphService);
+                                // Override the database-based status with real Azure AD status
+                                user.InvitationStatus = realTimeStatus;
                                 
-                                Logger.LogDebug("Background: Updated invitation status for {Email}: Database={DatabaseStatus}, Azure AD={AzureStatus}", 
-                                    user.Email, user.GetInvitationStatus(), realTimeStatus);
-                                
-                                // Trigger UI update for this specific change
-                                InvokeAsync(() => TriggerRender());
+                                Logger.LogDebug("Updated invitation status for {Email}: Database={DatabaseStatus}, Azure AD={AzureStatus}", 
+                                    dbUser.Email, dbUser.GetInvitationStatus(), realTimeStatus);
+                            }
+                            catch (Exception statusEx)
+                            {
+                                Logger.LogWarning(statusEx, "Failed to get real-time invitation status for {Email}, using database status", dbUser.Email);
                             }
                         }
                     }
-                    catch (Exception statusEx)
+                    else
                     {
-                        Logger.LogWarning(statusEx, "Background: Failed to get real-time invitation status for {Email}, using database status", email);
+                        userAgentTypesCache[user.Email] = new List<AgentTypeEntity>();
+                        userDatabasesCache[user.Email] = new List<DatabaseCredential>();
                     }
-                });
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Could not load database user status for {Email}", user.Email);
+                    userStatusCache[user.Email] = null;
+                    userAgentTypesCache[user.Email] = new List<AgentTypeEntity>();
+                    userDatabasesCache[user.Email] = new List<DatabaseCredential>();
+                }
             }
             
             filteredUsers = allUsers;
             
-            var loadTime = (DateTime.UtcNow - startTime).TotalMilliseconds;
-            Logger.LogInformation("🚀 PERFORMANCE SUCCESS: Loaded {UserCount} users with all details in {LoadTimeMs}ms (optimized bulk query)", 
-                allUsers.Count, loadTime);
+            Logger.LogInformation("Loaded {UserCount} unique users for organization {OrganizationId}", allUsers.Count, currentUserOrgId);
         }
         catch (Exception ex)
         {
@@ -1425,7 +1348,7 @@
             
             // Show loading state
             isLoading = true;
-            TriggerRender();
+            StateHasChanged();
             
             if (user.OnboardedUser != null)
             {
@@ -1474,7 +1397,7 @@
         finally
         {
             isLoading = false;
-            TriggerRender();
+            StateHasChanged();
         }
     }
 
@@ -1487,7 +1410,7 @@
             
             // Show loading state
             isLoading = true;
-            TriggerRender();
+            StateHasChanged();
             
             // Use InvitationService to resend invitation for regular users
             // The GuestUser has an OnboardedUser property with the database record
@@ -1545,7 +1468,7 @@
         finally
         {
             isLoading = false;
-            TriggerRender();
+            StateHasChanged();
         }
     }
 
@@ -1893,7 +1816,7 @@
         try
         {
             isLoading = true;
-            TriggerRender();
+            StateHasChanged();
             
             // Clear any cached data
             userStatusCache.Clear();
@@ -1917,7 +1840,7 @@
         finally
         {
             isLoading = false;
-            TriggerRender();
+            StateHasChanged();
         }
     }
 
@@ -1926,7 +1849,7 @@
         if (pendingAction != null)
         {
             isProcessingConfirmation = true;
-            TriggerRender();
+            StateHasChanged();
             
             try
             {
@@ -1937,7 +1860,7 @@
                 isProcessingConfirmation = false;
                 showConfirmationModal = false;
                 pendingAction = null;
-                TriggerRender();
+                StateHasChanged();
             }
         }
     }
@@ -1977,7 +1900,7 @@
             }
             
             // Force UI update
-            TriggerRender();
+            StateHasChanged();
         }
         catch (Exception ex)
         {
@@ -2093,7 +2016,7 @@
         {
             isBulkAssigning = true;
             ClearMessages();
-            TriggerRender();
+            StateHasChanged();
             
             var currentUserId = GetCurrentUserId();
             var successCount = 0;
@@ -2199,7 +2122,7 @@
         finally
         {
             isBulkAssigning = false;
-            TriggerRender();
+            StateHasChanged();
         }
     }
     
@@ -2283,7 +2206,7 @@
         {
             isUpdatingUserAgent = true;
             ClearMessages();
-            TriggerRender();
+            StateHasChanged();
             
             var currentUserId = GetCurrentUserId();
             
@@ -2332,7 +2255,7 @@
         finally
         {
             isUpdatingUserAgent = false;
-            TriggerRender();
+            StateHasChanged();
         }
     }
     
@@ -2375,7 +2298,7 @@
         {
             isAssigningToAllUsers = true;
             ClearMessages();
-            TriggerRender();
+            StateHasChanged();
             
             var currentUserId = GetCurrentUserId();
             var successCount = 0;
@@ -2485,7 +2408,7 @@
         finally
         {
             isAssigningToAllUsers = false;
-            TriggerRender();
+            StateHasChanged();
         }
     }
 
