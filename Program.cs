@@ -191,6 +191,9 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<ICacheConfigurationService, CacheConfigurationService>();
 
+// Add navigation performance optimization service
+builder.Services.AddSingleton<INavigationOptimizationService, NavigationOptimizationService>();
+
 // Add health checks for monitoring external dependencies
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<AdminConsoleDbContext>("database")
@@ -635,5 +638,21 @@ app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.Health
 
 // Detailed health check endpoint for monitoring systems (requires authentication)
 app.MapHealthChecks("/health/detailed").RequireAuthorization("SuperAdminOnly");
+
+// 🚀 Start navigation optimization background preloading
+_ = Task.Run(async () =>
+{
+    try
+    {
+        await Task.Delay(5000); // Wait for app to fully start
+        var navigationService = app.Services.GetRequiredService<INavigationOptimizationService>();
+        await navigationService.PreloadCommonDataAsync();
+    }
+    catch (Exception ex)
+    {
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogWarning(ex, "Navigation preloading failed but app will continue normally");
+    }
+});
 
 app.Run();

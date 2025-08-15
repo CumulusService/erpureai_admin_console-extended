@@ -4,12 +4,18 @@
 @using AdminConsole.Services
 @using AdminConsole.Components.Shared
 @inject IAgentTypeService AgentTypeService
+@inject INavigationOptimizationService NavigationOptimizer
 @inject ILogger<DeveloperDashboard> Logger
 @inject NavigationManager Navigation
 @attribute [Authorize(Policy = "DevOnly")]
 @rendermode InteractiveServer
 
 <PageTitle>Developer Dashboard</PageTitle>
+
+<FastNavigationWrapper PagePath="/developer/dashboard" 
+                      LoadingTitle="Loading Dashboard" 
+                      LoadingMessage="Preparing developer tools..."
+                      OnDataLoad="@PreloadDashboardData">
 
 <div class="container-fluid">
     <div class="row">
@@ -201,6 +207,8 @@
     </div>
 </div>
 
+</FastNavigationWrapper>
+
 @code {
     private List<AgentTypeEntity> recentAgentTypes = new();
     private int totalCount = 0;
@@ -210,22 +218,40 @@
 
     protected override async Task OnInitializedAsync()
     {
-        try
-        {
-            await LoadDashboardData();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Error loading developer dashboard data");
-        }
+        // Data loading is handled by FastNavigationWrapper
+        await LoadDashboardData();
+    }
+
+    private async Task PreloadDashboardData()
+    {
+        // This runs in the background during the loading screen
+        await LoadDashboardData();
     }
 
     private async Task LoadDashboardData()
     {
         try
         {
-            var allAgentTypes = await AgentTypeService.GetAllAgentTypesAsync();
+            // Try to get cached data first for instant loading
+            var cachedAgentTypes = NavigationOptimizer.GetCachedData<List<AgentTypeEntity>>(NavigationOptimizationService.AGENT_TYPES_CACHE_KEY);
             
+            List<AgentTypeEntity> allAgentTypes;
+            
+            if (cachedAgentTypes != null)
+            {
+                // Use cached data for instant loading
+                allAgentTypes = cachedAgentTypes;
+                Logger.LogDebug("🚀 Using cached agent types data for fast loading");
+            }
+            else
+            {
+                // Load fresh data if cache is empty
+                allAgentTypes = await AgentTypeService.GetAllAgentTypesAsync();
+                // Cache for future navigations
+                NavigationOptimizer.SetCachedData(NavigationOptimizationService.AGENT_TYPES_CACHE_KEY, allAgentTypes, TimeSpan.FromMinutes(10));
+            }
+            
+            // Calculate dashboard metrics
             totalCount = allAgentTypes.Count;
             activeCount = allAgentTypes.Count(at => at.IsActive);
             configuredCount = allAgentTypes.Count(at => !string.IsNullOrEmpty(at.GlobalSecurityGroupId));

@@ -20,6 +20,7 @@
     <Routes />
     <script src="@Assets["lib/bootstrap/dist/js/bootstrap.bundle.min.js"]"></script>
     <script src="_framework/blazor.web.js"></script>
+    <script src="js/enhanced-navigation.js"></script>
     <script src="js/unsaved-changes.js"></script>
     
     <!-- Fallback inline unsaved changes detection -->
@@ -99,12 +100,25 @@
         console.log('Unsaved changes detection initialized');
     </script>
     
-    <!-- Blazor SignalR reconnection configuration -->
+    <!-- Blazor Enhanced Navigation and SignalR configuration -->
     <script>
         Blazor.start({
+            // 🚀 Enhanced Navigation Configuration (based on Telerik best practices)
+            ssr: {
+                // Enable enhanced navigation for faster page transitions
+                disableDomPreservation: false
+            },
+            
+            // SignalR reconnection configuration
             reconnectionOptions: {
                 maxRetries: 8,
                 retryIntervalMilliseconds: 2000
+            },
+            
+            // Additional performance optimizations
+            circuit: {
+                maxBufferedUnacknowledgedRenderBatches: 10,
+                jsInteropDefaultCallTimeout: 60000
             }
         });
     </script>

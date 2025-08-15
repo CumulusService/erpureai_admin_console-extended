@@ -3,16 +3,16 @@
 @inject IJSRuntime JSRuntime
 
 <div class="page">
-    <div class="sidebar">
+    <div class="sidebar" data-enhance-nav="preserve">
         <NavMenu />
     </div>
 
-    <main>
+    <main data-enhance-nav="preserve">
         <div class="top-row px-4">
             <!-- Header content can be added here if needed -->
         </div>
 
-        <article class="content px-4">
+        <article class="content px-4" data-enhance-nav="content">
             @Body
         </article>
     </main>

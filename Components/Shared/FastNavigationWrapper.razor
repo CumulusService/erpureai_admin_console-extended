@@ -1,0 +1,76 @@
+@* 🚀 Fast Navigation Wrapper Component *@
+@inject INavigationOptimizationService NavigationOptimizer
+@inject IJSRuntime JSRuntime
+
+@* Enhanced Navigation Optimized Loading State *@
+@if (IsLoading)
+{
+    <div class="d-flex justify-content-center align-items-center" style="min-height: 200px;" data-enhance-nav="loading">
+        <div class="text-center">
+            <div class="spinner-border text-primary" role="status" style="width: 2rem; height: 2rem;">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <div class="mt-2">
+                <h6 class="text-muted mb-1" style="font-size: 0.9rem;">@LoadingTitle</h6>
+                <small class="text-muted" style="font-size: 0.8rem;">@LoadingMessage</small>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <div data-enhance-nav="content">
+        @ChildContent
+    </div>
+}
+
+@code {
+    [Parameter] public RenderFragment ChildContent { get; set; } = default!;
+    [Parameter] public string LoadingTitle { get; set; } = "Loading";
+    [Parameter] public string LoadingMessage { get; set; } = "Preparing your dashboard...";
+    [Parameter] public string? PagePath { get; set; }
+    [Parameter] public Func<Task>? OnDataLoad { get; set; }
+    
+    private bool IsLoading { get; set; } = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Start loading immediately for fast perception
+            var loadingTask = LoadPageDataAsync();
+            // Reduced minimum display time for enhanced navigation (100ms is enough)
+            var minDisplayTask = Task.Delay(100); 
+
+            await Task.WhenAll(loadingTask, minDisplayTask);
+        }
+        finally
+        {
+            IsLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadPageDataAsync()
+    {
+        try
+        {
+            // Preload page-specific data if path is provided
+            if (!string.IsNullOrEmpty(PagePath))
+            {
+                await NavigationOptimizer.PreloadPageDataAsync(PagePath);
+            }
+
+            // Execute custom data loading if provided
+            if (OnDataLoad != null)
+            {
+                await OnDataLoad();
+            }
+        }
+        catch (Exception)
+        {
+            // Silently handle errors to prevent navigation breaking
+            // The child component will handle errors in its own initialization
+        }
+    }
+}
