@@ -337,7 +337,7 @@ public static class DatabaseCredentialExtensions
                 $"Server={credential.ServerInstance}{(credential.Port.HasValue ? $",{credential.Port}" : "")};Database={credential.DatabaseName};User Id={credential.DatabaseUsername};Password={{password}};TrustServerCertificate={credential.TrustServerCertificate.ToString().ToLower()};",
             
             DatabaseType.HANA => 
-                $"Server={credential.ServerInstance}{(credential.Port.HasValue ? $":{credential.Port}" : "")};Database={credential.DatabaseName};UID={credential.DatabaseUsername};Password={{password}};CurrentSchema={credential.CurrentSchema};Encrypt={credential.Encrypt.ToString().ToLower()};SSLValidateCertificate={credential.SSLValidateCertificate.ToString().ToLower()};",
+                $"Server={credential.ServerInstance}{(credential.Port.HasValue ? $":{credential.Port}" : "")};Database={credential.DatabaseName};UID={credential.DatabaseUsername};Password={{password}};CurrentSchema={credential.CurrentSchema};Encrypt={credential.Encrypt.ToString().ToLower()};SSLValidateCertificate={credential.SSLValidateCertificate.ToString().ToLower()};ConnectionTimeout=30;CommandTimeout=60;TCPKeepAlive=true;",
             
             _ => throw new ArgumentException($"Unsupported database type: {credential.DatabaseType}")
         };
@@ -399,7 +399,7 @@ public static class DatabaseCredentialExtensions
                 $"Server={model.ServerInstance}{(model.Port.HasValue ? $",{model.Port}" : "")};Database={model.DatabaseName};User Id={model.DatabaseUsername};Password={{password}};TrustServerCertificate={model.TrustServerCertificate.ToString().ToLower()};",
             
             DatabaseType.HANA => 
-                $"Server={model.ServerInstance}{(model.Port.HasValue ? $":{model.Port}" : "")};Database={model.DatabaseName};UID={model.DatabaseUsername};Password={{password}};CurrentSchema={model.CurrentSchema};Encrypt={model.Encrypt.ToString().ToLower()};SSLValidateCertificate={model.SSLValidateCertificate.ToString().ToLower()};",
+                $"Server={model.ServerInstance}{(model.Port.HasValue ? $":{model.Port}" : "")};Database={model.DatabaseName};UID={model.DatabaseUsername};Password={{password}};CurrentSchema={model.CurrentSchema};Encrypt={model.Encrypt.ToString().ToLower()};SSLValidateCertificate={model.SSLValidateCertificate.ToString().ToLower()};ConnectionTimeout=30;CommandTimeout=60;TCPKeepAlive=true;",
             
             _ => throw new ArgumentException($"Unsupported database type: {model.DatabaseType}")
         };
