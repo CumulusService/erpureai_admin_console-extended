@@ -1021,7 +1021,25 @@ public class DatabaseCredentialService : IDatabaseCredentialService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Database connection test failed for {DatabaseType}", databaseType);
-            return (false, $"Connection failed: {ex.Message}");
+            
+            var errorMessage = $"Connection failed: {ex.Message}";
+            
+            // For HANA connection failures, include diagnostic information in the error message
+            if (databaseType == DatabaseType.HANA)
+            {
+                try
+                {
+                    var diagnostics = HanaNativeLibraryLoader.GetLibraryDiagnostics();
+                    errorMessage += $"\n\n🔍 SAP HANA Diagnostics:\n{diagnostics}";
+                }
+                catch (Exception diagEx)
+                {
+                    _logger.LogWarning(diagEx, "Failed to get HANA diagnostics");
+                    errorMessage += "\n\n⚠️ Could not retrieve HANA diagnostics";
+                }
+            }
+            
+            return (false, errorMessage);
         }
     }
 
