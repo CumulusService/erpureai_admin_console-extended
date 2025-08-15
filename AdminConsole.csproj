@@ -8,8 +8,9 @@
     
     <!-- 🚀 Performance Optimizations -->
     <BlazorEnableTimeZoneSupport>false</BlazorEnableTimeZoneSupport>
-    <BlazorEnableTrimming>true</BlazorEnableTrimming>
-    <PublishTrimmed>true</PublishTrimmed>
+    <!-- Trimming disabled for production stability -->
+    <BlazorEnableTrimming>false</BlazorEnableTrimming>
+    <PublishTrimmed>false</PublishTrimmed>
     <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
     <HttpsPort>7154</HttpsPort>
     
