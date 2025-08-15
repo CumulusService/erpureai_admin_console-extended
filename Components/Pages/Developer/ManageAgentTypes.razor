@@ -11,10 +11,6 @@
 
 <PageTitle>Manage Agent Types - Developer Portal</PageTitle>
 
-<FastNavigationWrapper LoadingTitle="Loading Agent Types" 
-                       LoadingMessage="Preparing agent type management..." 
-                       PagePath="/developer/agent-types"
-                       OnDataLoad="LoadAgentTypesDataAsync">
 <div class="container-fluid">
     <div class="row">
         <div class="col-12">
@@ -303,7 +299,6 @@
         </div>
     </div>
 }
-</FastNavigationWrapper>
 
 @code {
     private List<AgentTypeEntity> agentTypes = new();
@@ -317,17 +312,28 @@
     private UnsavedChangesTracker? unsavedChangesTracker;
     private bool hasFormChanges = false;
 
-    // 🚀 Fast Navigation Data Loading - called by FastNavigationWrapper
-    private async Task LoadAgentTypesDataAsync()
-    {
-        await LoadAgentTypes();
-    }
-
     protected override async Task OnInitializedAsync()
     {
-        // FastNavigationWrapper will handle data loading
-        // This method is kept minimal for backward compatibility
-        isLoading = false;
+        try
+        {
+            // Try to use cached data first for better performance
+            var cachedAgentTypes = NavigationOptimizer.GetCachedData<List<AgentTypeEntity>>(NavigationOptimizationService.AGENT_TYPES_CACHE_KEY);
+            if (cachedAgentTypes != null)
+            {
+                Logger.LogDebug("🚀 Using cached agent types for fast loading");
+            }
+            
+            await LoadAgentTypes();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing ManageAgentTypes page");
+            errorMessage = "Error loading page. Please refresh and try again.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
     }
 
     private async Task LoadAgentTypes()

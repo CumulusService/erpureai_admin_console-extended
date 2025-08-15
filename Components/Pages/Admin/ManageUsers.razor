@@ -26,10 +26,6 @@
 
 <PageTitle>My Users - Organization Admin</PageTitle>
 
-<FastNavigationWrapper LoadingTitle="Loading Users" 
-                       LoadingMessage="Preparing user list..." 
-                       PagePath="/admin/users"
-                       OnDataLoad="LoadUsersDataAsync">
 <div class="container-fluid">
     <div class="d-sm-flex align-items-center justify-content-between mb-4">
         <h1 class="h3 mb-0 admin-page-title">
@@ -758,7 +754,6 @@
                  IsProcessing="@isProcessingConfirmation"
                  RequireConfirmationText="@requireConfirmationText"
                  ConfirmationText="@requiredConfirmationText" />
-</FastNavigationWrapper>
 
 @code {
     // ADDITIVE: Helper class for reactivation results tracking (doesn't affect existing functionality)
@@ -923,9 +918,71 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // FastNavigationWrapper will handle data loading
-        // This method is kept minimal for backward compatibility
-        isLoading = false;
+        try
+        {
+            // Get current user role for access control
+            currentUserRole = DataIsolationService.GetCurrentUserRole();
+            
+            // Get current user's organization
+            var currentUserOrgIdStr = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
+            if (!string.IsNullOrEmpty(currentUserOrgIdStr))
+            {
+                // Try to parse as GUID, otherwise generate one from the string
+                if (!Guid.TryParse(currentUserOrgIdStr, out currentUserOrgId))
+                {
+                    // Generate deterministic GUID from organization ID string
+                    using (var md5 = System.Security.Cryptography.MD5.Create())
+                    {
+                        var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(currentUserOrgIdStr));
+                        currentUserOrgId = new Guid(hash);
+                    }
+                    Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgIdStr);
+                }
+                
+                await LoadOrganizationAgentTypes();
+                
+                // Initialize secrets asynchronously in the background - don't block page loading
+                // This prevents the heavy Key Vault operation from blocking page load
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        // Check if secrets already exist before creating them
+                        var existingSecrets = await KeyVaultService.GetSecretNamesAsync(currentUserOrgIdStr);
+                        if (!existingSecrets.Any())
+                        {
+                            Logger.LogInformation("No existing secrets found for organization {OrganizationId}, initializing defaults", currentUserOrgIdStr);
+                            await InitializeDefaultSecretsAsync(currentUserOrgIdStr);
+                        }
+                        else
+                        {
+                            Logger.LogDebug("Secrets already exist for organization {OrganizationId}, skipping initialization", currentUserOrgIdStr);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogWarning(ex, "Could not check existing secrets for organization {OrganizationId}, skipping secret initialization", currentUserOrgIdStr);
+                    }
+                });
+                
+                await LoadUsers();
+            }
+            else
+            {
+                errorMessage = "Unable to determine your organization. Please contact support.";
+                Logger.LogWarning("User organization ID could not be determined");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing ManageUsers page");
+            errorMessage = "Error loading page. Please refresh and try again.";
+        }
+        finally
+        {
+            isLoading = false;
+            // StateHasChanged(); // 🚀 Removed: ShouldRender() will handle this automatically
+        }
     }
 
     private async Task LoadUsers()

@@ -19,10 +19,6 @@
 @inject INavigationOptimizationService NavigationOptimizer
 @attribute [Authorize(Policy = "OrgAdminOrHigher")]
 
-<FastNavigationWrapper LoadingTitle="Loading User Details" 
-                       LoadingMessage="Preparing user information..." 
-                       PagePath="@($"/admin/users/{UserId}")"
-                       OnDataLoad="LoadUserDataAsync">
 <div class="container-fluid">
     <div class="row">
         <div class="col-12">
@@ -457,7 +453,6 @@
         </div>
     </div>
 </div>
-</FastNavigationWrapper>
 
 @code {
     [Parameter] public Guid UserId { get; set; }
@@ -546,9 +541,48 @@
 
     protected override async Task OnInitializedAsync()
     {
-        // FastNavigationWrapper will handle data loading
-        // This method is kept minimal for backward compatibility
-        isLoading = false;
+        try
+        {
+            currentUserRole = DataIsolationService.GetCurrentUserRole();
+            
+            var currentUserOrgIdStr = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
+            if (string.IsNullOrEmpty(currentUserOrgIdStr))
+            {
+                errorMessage = "Unable to determine your organization. Please contact support.";
+                return;
+            }
+
+            // Try to parse as GUID, otherwise generate one from the string
+            if (!Guid.TryParse(currentUserOrgIdStr, out currentUserOrgId))
+            {
+                // Generate deterministic GUID from organization ID string
+                using (var md5 = System.Security.Cryptography.MD5.Create())
+                {
+                    var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(currentUserOrgIdStr));
+                    currentUserOrgId = new Guid(hash);
+                }
+                Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgIdStr);
+            }
+            await LoadUser();
+            await LoadAvailableAgentTypes();
+            await LoadAvailableDatabases();
+            
+            // CRITICAL FIX: Automatically refresh invitation status on page load for accurate display
+            if (user != null && user.LastInvitationDate != null)
+            {
+                await RefreshInvitationStatus();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error initializing user details page for user {UserId}", UserId);
+            errorMessage = "Error loading page. Please refresh and try again.";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
     }
 
     private async Task LoadUser()
