@@ -3,6 +3,7 @@
 @rendermode InteractiveServer
 @using AdminConsole.Models
 @using AdminConsole.Services
+@using AdminConsole.Components.Shared
 @using System.Security.Cryptography
 @inject IOnboardedUserService OnboardedUserService
 @inject IDataIsolationService DataIsolationService
@@ -15,8 +16,13 @@
 @inject NavigationManager Navigation
 @inject IHttpContextAccessor HttpContextAccessor
 @inject IGraphService GraphService
+@inject INavigationOptimizationService NavigationOptimizer
 @attribute [Authorize(Policy = "OrgAdminOrHigher")]
 
+<FastNavigationWrapper LoadingTitle="Loading User Details" 
+                       LoadingMessage="Preparing user information..." 
+                       PagePath="@($"/admin/users/{UserId}")"
+                       OnDataLoad="LoadUserDataAsync">
 <div class="container-fluid">
     <div class="row">
         <div class="col-12">
@@ -451,6 +457,7 @@
         </div>
     </div>
 </div>
+</FastNavigationWrapper>
 
 @code {
     [Parameter] public Guid UserId { get; set; }
@@ -488,7 +495,8 @@
     // Current user agent types from database
     private List<AgentTypeEntity> currentUserAgentTypes = new();
 
-    protected override async Task OnInitializedAsync()
+    // 🚀 Fast Navigation Data Loading - called by FastNavigationWrapper
+    private async Task LoadUserDataAsync()
     {
         try
         {
@@ -512,9 +520,16 @@
                 }
                 Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgIdStr);
             }
-            await LoadUser();
-            await LoadAvailableAgentTypes();
-            await LoadAvailableDatabases();
+            
+            // Load data in parallel for better performance
+            var loadTasks = new List<Task>
+            {
+                LoadUser(),
+                LoadAvailableAgentTypes(),
+                LoadAvailableDatabases()
+            };
+            
+            await Task.WhenAll(loadTasks);
             
             // CRITICAL FIX: Automatically refresh invitation status on page load for accurate display
             if (user != null && user.LastInvitationDate != null)
@@ -524,21 +539,39 @@
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error initializing user details page for user {UserId}", UserId);
+            Logger.LogError(ex, "Error loading user details data for user {UserId}", UserId);
             errorMessage = "Error loading page. Please refresh and try again.";
         }
-        finally
-        {
-            isLoading = false;
-            StateHasChanged();
-        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // FastNavigationWrapper will handle data loading
+        // This method is kept minimal for backward compatibility
+        isLoading = false;
     }
 
     private async Task LoadUser()
     {
         try
         {
-            user = await OnboardedUserService.GetByIdAsync(UserId, currentUserOrgId);
+            // 🚀 Try to load user from cache first for faster performance  
+            var cachedUser = NavigationOptimizer.GetCachedData<OnboardedUser>($"{NavigationOptimizationService.USER_DETAILS_CACHE_PREFIX}{UserId}");
+            
+            if (cachedUser != null)
+            {
+                user = cachedUser;
+                Logger.LogDebug("🚀 Using cached user details data for fast loading");
+            }
+            else
+            {
+                user = await OnboardedUserService.GetByIdAsync(UserId, currentUserOrgId);
+                if (user != null)
+                {
+                    NavigationOptimizer.SetCachedData($"{NavigationOptimizationService.USER_DETAILS_CACHE_PREFIX}{UserId}", user, TimeSpan.FromMinutes(3));
+                    Logger.LogDebug("📦 User details loaded from database and cached");
+                }
+            }
             
             // Load current agent type assignments from database
             if (user != null)

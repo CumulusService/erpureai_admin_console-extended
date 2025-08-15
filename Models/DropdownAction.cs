@@ -22,6 +22,9 @@ public class DropdownAction
     /// <summary>Callback to execute when clicked</summary>
     public EventCallback OnClick { get; set; }
     
+    /// <summary>Callback to execute on mouse over (for preloading)</summary>
+    public EventCallback OnMouseOver { get; set; }
+    
     /// <summary>Whether this action is currently disabled</summary>
     public bool IsDisabled { get; set; } = false;
     

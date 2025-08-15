@@ -13,11 +13,16 @@
 @inject NavigationManager Navigation
 @inject IHttpContextAccessor HttpContextAccessor
 @inject ILogger<ManageAdmins> Logger
+@inject INavigationOptimizationService NavigationOptimizer
 @using System.Web
 @rendermode InteractiveServer
 
 <PageTitle>Manage Organization Admins</PageTitle>
 
+<FastNavigationWrapper LoadingTitle="Loading Admins" 
+                       LoadingMessage="Preparing admin list..." 
+                       PagePath="/owner/admins"
+                       OnDataLoad="LoadAdminsDataAsync">
 <div class="container-fluid">
     <div class="d-sm-flex align-items-center justify-content-between mb-4">
         <h1 class="h3 mb-0 text-white">
@@ -359,7 +364,7 @@
                    OnConfirm="ConfirmReactivateAccess"
                    OnCancel="CloseReactivateModal"
                    IsProcessing="@isReactivatingAccess" />
-
+</FastNavigationWrapper>
 
 @code {
     private List<GuestUser> allAdmins = new();
@@ -381,27 +386,67 @@
     // Cache for database user status to avoid repeated lookups
     private Dictionary<string, OnboardedUser?> userStatusCache = new();
 
-    protected override async Task OnInitializedAsync()
+    // 🚀 Fast Navigation Data Loading - called by FastNavigationWrapper
+    private async Task LoadAdminsDataAsync()
     {
-        // Load organizations first
         try
         {
-            var orgs = await OrganizationService.GetAllOrganizationsAsync();
-            organizations = orgs.ToList();
+            // Load organizations and admins in parallel for better performance
+            var loadTasks = new List<Task>
+            {
+                LoadOrganizationsAsync(),
+                LoadAdmins()
+            };
+            
+            await Task.WhenAll(loadTasks);
+            
+            // Check for organization filter in query parameters
+            var uri = new Uri(Navigation.Uri);
+            var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+            var orgFilter = query["org"];
+            if (!string.IsNullOrEmpty(orgFilter))
+            {
+                searchTerm = orgFilter;
+                FilterAdmins();
+            }
         }
-        catch { }
-        
-        await LoadAdmins();
-        
-        // Check for organization filter in query parameters
-        var uri = new Uri(Navigation.Uri);
-        var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
-        var orgFilter = query["org"];
-        if (!string.IsNullOrEmpty(orgFilter))
+        catch (Exception ex)
         {
-            searchTerm = orgFilter;
-            FilterAdmins();
+            Logger.LogError(ex, "Error loading admin data");
         }
+    }
+    
+    private async Task LoadOrganizationsAsync()
+    {
+        try
+        {
+            // 🚀 Try to load organizations from cache first for faster performance
+            var cachedOrgs = NavigationOptimizer.GetCachedData<List<Organization>>(NavigationOptimizationService.ADMIN_LIST_CACHE_KEY);
+            
+            if (cachedOrgs != null)
+            {
+                organizations = cachedOrgs;
+                Logger.LogDebug("🚀 Using cached organization list for fast loading");
+            }
+            else
+            {
+                var orgs = await OrganizationService.GetAllOrganizationsAsync();
+                organizations = orgs.ToList();
+                NavigationOptimizer.SetCachedData(NavigationOptimizationService.ADMIN_LIST_CACHE_KEY, organizations, TimeSpan.FromMinutes(5));
+                Logger.LogDebug("📦 Organization list loaded from database and cached");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading organizations");
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // FastNavigationWrapper will handle data loading
+        // This method is kept minimal for backward compatibility
+        await Task.CompletedTask;
     }
 
     private async Task LoadAdmins()

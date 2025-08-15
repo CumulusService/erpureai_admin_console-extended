@@ -1,16 +1,22 @@
 @page "/developer/system-users"
 @using AdminConsole.Services
 @using AdminConsole.Models
+@using AdminConsole.Components.Shared
 @using Microsoft.AspNetCore.Authorization
 @attribute [Authorize(Policy = "DevOnly")]
 @inject ISystemUserManagementService SystemUserService
 @inject IBusinessDomainValidationService BusinessDomainValidationService
 @inject IJSRuntime JSRuntime
 @inject ILogger<SystemUsers> Logger
+@inject INavigationOptimizationService NavigationOptimizer
 @rendermode InteractiveServer
 
 <PageTitle>System User Management - Master Developer</PageTitle>
 
+<FastNavigationWrapper LoadingTitle="Loading System Users" 
+                       LoadingMessage="Preparing system user management..." 
+                       PagePath="/developer/system-users"
+                       OnDataLoad="LoadSystemUsersDataAsync">
 <div class="container-fluid">
     <div class="row">
         <div class="col-12">
@@ -629,3 +635,4 @@
         </div>
     </div>
 }
+</FastNavigationWrapper>

@@ -1,6 +1,7 @@
 @page "/owner/organizations/{OrganizationId:guid}"
 @using AdminConsole.Models
 @using AdminConsole.Services
+@using AdminConsole.Components.Shared
 @inject IOrganizationService OrganizationService
 @inject IOnboardedUserService OnboardedUserService
 @inject IKeyVaultService KeyVaultService
@@ -10,9 +11,14 @@
 @inject IHttpContextAccessor HttpContextAccessor
 @inject NavigationManager Navigation
 @inject ILogger<OrganizationDetails> Logger
+@inject INavigationOptimizationService NavigationOptimizer
 @attribute [Authorize(Policy = "SuperAdminOnly")]
 @rendermode InteractiveServer
 
+<FastNavigationWrapper LoadingTitle="Loading Organization" 
+                       LoadingMessage="Preparing organization details..." 
+                       PagePath="@($"/owner/organizations/{OrganizationId}")"
+                       OnDataLoad="LoadOrganizationDataAsync">
 <div class="container-fluid">
     <div class="row">
         <div class="col-12">
@@ -360,6 +366,7 @@
         </div>
     </div>
 </div>
+</FastNavigationWrapper>
 
 @code {
     [Parameter] public Guid OrganizationId { get; set; }
@@ -389,7 +396,8 @@
     private List<UserOperationResult> resultSuccessfulOperations = new();
     private List<UserOperationResult> resultFailedOperations = new();
 
-    protected override async Task OnInitializedAsync()
+    // 🚀 Fast Navigation Data Loading - called by FastNavigationWrapper
+    private async Task LoadOrganizationDataAsync()
     {
         try
         {
@@ -397,22 +405,40 @@
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error initializing organization details page for organization {OrganizationId}", OrganizationId);
+            Logger.LogError(ex, "Error loading organization details data for organization {OrganizationId}", OrganizationId);
             errorMessage = "Error loading page. Please refresh and try again.";
         }
-        finally
-        {
-            isLoading = false;
-            StateHasChanged();
-        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // FastNavigationWrapper will handle data loading
+        // This method is kept minimal for backward compatibility
+        isLoading = false;
     }
 
     private async Task LoadOrganizationDetails()
     {
         try
         {
-            // Load organization
-            organization = await OrganizationService.GetByIdAsync(OrganizationId.ToString());
+            // 🚀 Try to load organization from cache first for faster performance
+            var cachedOrg = NavigationOptimizer.GetCachedData<Organization>($"{NavigationOptimizationService.ORG_DETAILS_CACHE_PREFIX}{OrganizationId}");
+            
+            if (cachedOrg != null)
+            {
+                organization = cachedOrg;
+                Logger.LogDebug("🚀 Using cached organization details data for fast loading");
+            }
+            else
+            {
+                // Load organization from service and cache it
+                organization = await OrganizationService.GetByIdAsync(OrganizationId.ToString());
+                if (organization != null)
+                {
+                    NavigationOptimizer.SetCachedData($"{NavigationOptimizationService.ORG_DETAILS_CACHE_PREFIX}{OrganizationId}", organization, TimeSpan.FromMinutes(5));
+                    Logger.LogDebug("📦 Organization details loaded from database and cached");
+                }
+            }
             
             if (organization != null)
             {

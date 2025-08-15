@@ -21,10 +21,15 @@
 @inject NavigationManager Navigation
 @inject ILogger<ManageUsers> Logger
 @inject IJSRuntime JSRuntime
+@inject INavigationOptimizationService NavigationOptimizer
 @attribute [Authorize(Policy = "OrgAdminOrHigher")]
 
 <PageTitle>My Users - Organization Admin</PageTitle>
 
+<FastNavigationWrapper LoadingTitle="Loading Users" 
+                       LoadingMessage="Preparing user list..." 
+                       PagePath="/admin/users"
+                       OnDataLoad="LoadUsersDataAsync">
 <div class="container-fluid">
     <div class="d-sm-flex align-items-center justify-content-between mb-4">
         <h1 class="h3 mb-0 admin-page-title">
@@ -753,6 +758,7 @@
                  IsProcessing="@isProcessingConfirmation"
                  RequireConfirmationText="@requireConfirmationText"
                  ConfirmationText="@requiredConfirmationText" />
+</FastNavigationWrapper>
 
 @code {
     // ADDITIVE: Helper class for reactivation results tracking (doesn't affect existing functionality)
@@ -845,7 +851,8 @@
     private List<Guid> selectedUserAgentTypes = new();
     private bool isUpdatingUserAgent = false;
 
-    protected override async Task OnInitializedAsync()
+    // 🚀 Fast Navigation Data Loading - called by FastNavigationWrapper
+    private async Task LoadUsersDataAsync()
     {
         try
         {
@@ -868,7 +875,14 @@
                     Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgIdStr);
                 }
                 
-                await LoadOrganizationAgentTypes();
+                // Load data in parallel for better performance
+                var loadTasks = new List<Task>
+                {
+                    LoadOrganizationAgentTypes(),
+                    LoadUsers()
+                };
+                
+                await Task.WhenAll(loadTasks);
                 
                 // Initialize secrets asynchronously in the background - don't block page loading
                 // This prevents the heavy Key Vault operation from blocking page load
@@ -893,8 +907,6 @@
                         Logger.LogWarning(ex, "Could not check existing secrets for organization {OrganizationId}, skipping secret initialization", currentUserOrgIdStr);
                     }
                 });
-                
-                await LoadUsers();
             }
             else
             {
@@ -904,14 +916,16 @@
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Error initializing ManageUsers page");
+            Logger.LogError(ex, "Error loading users data");
             errorMessage = "Error loading page. Please refresh and try again.";
         }
-        finally
-        {
-            isLoading = false;
-            // StateHasChanged(); // 🚀 Removed: ShouldRender() will handle this automatically
-        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // FastNavigationWrapper will handle data loading
+        // This method is kept minimal for backward compatibility
+        isLoading = false;
     }
 
     private async Task LoadUsers()
@@ -937,8 +951,22 @@
                 return;
             }
 
-            // Load users from OnboardedUserService
-            var onboardedUsers = await OnboardedUserService.GetByOrganizationAsync(currentUserOrgId);
+            // 🚀 Try to load users from cache first for faster performance
+            var cachedUsers = NavigationOptimizer.GetCachedData<List<OnboardedUser>>($"{NavigationOptimizationService.USER_LIST_CACHE_PREFIX}{currentUserOrgId}");
+            List<OnboardedUser> onboardedUsers;
+            
+            if (cachedUsers != null)
+            {
+                onboardedUsers = cachedUsers;
+                Logger.LogDebug("🚀 Using cached user list data for fast loading");
+            }
+            else
+            {
+                // Load users from OnboardedUserService and cache them
+                onboardedUsers = await OnboardedUserService.GetByOrganizationAsync(currentUserOrgId);
+                NavigationOptimizer.SetCachedData($"{NavigationOptimizationService.USER_LIST_CACHE_PREFIX}{currentUserOrgId}", onboardedUsers, TimeSpan.FromMinutes(5));
+                Logger.LogDebug("📦 User list loaded from database and cached");
+            }
             
             // Convert to GuestUser for backward compatibility and ensure unique users by email
             allUsers = onboardedUsers
@@ -1098,7 +1126,8 @@
             Description = "See complete user profile and settings",
             IconClass = "fas fa-user-circle",
             Type = ActionType.Info,
-            OnClick = EventCallback.Factory.Create(this, () => ViewUserDetails(user))
+            OnClick = EventCallback.Factory.Create(this, () => ViewUserDetails(user)),
+            OnMouseOver = EventCallback.Factory.Create(this, () => PreloadUserDetailsOnHover(user))
         });
         
         // Status-dependent actions
@@ -1347,6 +1376,22 @@
     private void ViewUserDetails(GuestUser user)
     {
         Navigation.NavigateTo($"/admin/users/{user.OnboardedUser.OnboardedUserId}");
+    }
+    
+    // 🚀 Preload user details on hover for faster navigation
+    private async void PreloadUserDetailsOnHover(GuestUser user)
+    {
+        try
+        {
+            _ = Task.Run(async () =>
+            {
+                await NavigationOptimizer.PreloadPageDataAsync($"/admin/users/{user.OnboardedUser.OnboardedUserId}");
+            });
+        }
+        catch
+        {
+            // Silently ignore preloading errors
+        }
     }
 
     private async Task RefreshUserStatus(GuestUser user)

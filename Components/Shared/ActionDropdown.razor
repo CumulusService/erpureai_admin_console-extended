@@ -26,6 +26,7 @@ Provides a clean dropdown menu with descriptive actions
                     <li>
                         <button class="dropdown-item @GetActionClass(action.Type)" 
                                 @onclick="@(() => action.OnClick.InvokeAsync())"
+                                @onmouseover="@(() => action.OnMouseOver.InvokeAsync())"
                                 disabled="@action.IsDisabled">
                             <div class="d-flex align-items-center">
                                 @if (!string.IsNullOrEmpty(action.IconClass))

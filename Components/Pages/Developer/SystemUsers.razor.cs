@@ -45,9 +45,17 @@ public partial class SystemUsers : ComponentBase
     // Computed properties - All users combined with filters applied
     private List<SystemUser> allUsers => FilterAllUsers();
 
-    protected override async Task OnInitializedAsync()
+    // 🚀 Fast Navigation Data Loading - called by FastNavigationWrapper
+    private async Task LoadSystemUsersDataAsync()
     {
         await RefreshData();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // FastNavigationWrapper will handle data loading
+        // This method is kept minimal for backward compatibility
+        isLoading = false;
     }
 
     private async Task RefreshData()

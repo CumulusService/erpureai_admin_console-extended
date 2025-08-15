@@ -5,11 +5,16 @@
 @inject IAgentTypeService AgentTypeService
 @inject ILogger<ManageAgentTypes> Logger
 @inject IJSRuntime JSRuntime
+@inject INavigationOptimizationService NavigationOptimizer
 @attribute [Authorize(Policy = "DevOnly")]
 @rendermode InteractiveServer
 
 <PageTitle>Manage Agent Types - Developer Portal</PageTitle>
 
+<FastNavigationWrapper LoadingTitle="Loading Agent Types" 
+                       LoadingMessage="Preparing agent type management..." 
+                       PagePath="/developer/agent-types"
+                       OnDataLoad="LoadAgentTypesDataAsync">
 <div class="container-fluid">
     <div class="row">
         <div class="col-12">
@@ -298,6 +303,7 @@
         </div>
     </div>
 }
+</FastNavigationWrapper>
 
 @code {
     private List<AgentTypeEntity> agentTypes = new();
@@ -311,9 +317,17 @@
     private UnsavedChangesTracker? unsavedChangesTracker;
     private bool hasFormChanges = false;
 
-    protected override async Task OnInitializedAsync()
+    // 🚀 Fast Navigation Data Loading - called by FastNavigationWrapper
+    private async Task LoadAgentTypesDataAsync()
     {
         await LoadAgentTypes();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // FastNavigationWrapper will handle data loading
+        // This method is kept minimal for backward compatibility
+        isLoading = false;
     }
 
     private async Task LoadAgentTypes()
@@ -321,7 +335,21 @@
         try
         {
             isLoading = true;
-            agentTypes = await AgentTypeService.GetAllAgentTypesAsync();
+            
+            // 🚀 Try to load agent types from cache first for faster performance
+            var cachedAgentTypes = NavigationOptimizer.GetCachedData<List<AgentTypeEntity>>(NavigationOptimizationService.AGENT_TYPES_CACHE_KEY);
+            
+            if (cachedAgentTypes != null)
+            {
+                agentTypes = cachedAgentTypes;
+                Logger.LogDebug("🚀 Using cached agent types for fast loading");
+            }
+            else
+            {
+                agentTypes = await AgentTypeService.GetAllAgentTypesAsync();
+                NavigationOptimizer.SetCachedData(NavigationOptimizationService.AGENT_TYPES_CACHE_KEY, agentTypes, TimeSpan.FromMinutes(10));
+                Logger.LogDebug("📦 Agent types loaded from database and cached");
+            }
         }
         catch (Exception ex)
         {

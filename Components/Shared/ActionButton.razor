@@ -5,6 +5,7 @@ Provides clear, descriptive buttons with consistent styling and accessibility
 
 <button class="@GetButtonClasses()" 
         @onclick="@OnClick" 
+        @onmouseover="@OnMouseOver"
         disabled="@IsDisabled"
         title="@FullDescription">
     @if (IsLoading)
@@ -36,6 +37,7 @@ Provides clear, descriptive buttons with consistent styling and accessibility
     [Parameter] public ActionType Type { get; set; } = ActionType.Primary;
     [Parameter] public ButtonSize Size { get; set; } = ButtonSize.Normal;
     [Parameter] public EventCallback OnClick { get; set; }
+    [Parameter] public EventCallback OnMouseOver { get; set; }
     [Parameter] public bool IsDisabled { get; set; } = false;
     [Parameter] public bool IsLoading { get; set; } = false;
     [Parameter] public string LoadingText { get; set; } = "Please wait...";
