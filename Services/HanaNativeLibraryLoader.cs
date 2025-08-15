@@ -9,6 +9,7 @@ namespace AdminConsole.Services
     {
         private static bool _librariesLoaded = false;
         private static readonly object _lockObject = new object();
+        private static readonly List<string> _loadingLog = new List<string>();
 
         [DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)]
         private static extern IntPtr LoadLibrary(string lpFileName);
@@ -40,24 +41,32 @@ namespace AdminConsole.Services
                         Path.Combine(basePath, "runtimes", "win", "lib", "net8.0"),
                         Path.Combine(basePath, "bin"),
                         Environment.CurrentDirectory,
-                        @"D:\home\site\wwwroot", // Azure App Service path
-                        @"D:\home\site\wwwroot\runtimes\win-x64\native" // Azure runtime path
+                        @"C:\home\site\wwwroot", // Azure App Service path (C: drive)
+                        @"C:\home\site\wwwroot\runtimes\win-x64\native", // Azure runtime path (C: drive)
+                        @"D:\home\site\wwwroot", // Azure App Service path (D: drive)
+                        @"D:\home\site\wwwroot\runtimes\win-x64\native" // Azure runtime path (D: drive)
                     };
 
                     var librariesToLoad = new[] { "libSQLDBCHDB.dll", "libadonetHDB.dll" };
 
-                    Console.WriteLine($"🔍 Starting explicit library loading for {librariesToLoad.Length} libraries...");
+                    var logMessage = $"🔍 Starting explicit library loading for {librariesToLoad.Length} libraries...";
+                    Console.WriteLine(logMessage);
+                    _loadingLog.Add(logMessage);
                     
                     foreach (var library in librariesToLoad)
                     {
-                        Console.WriteLine($"📋 Attempting to load {library}:");
+                        var libLogMessage = $"📋 Attempting to load {library}:";
+                        Console.WriteLine(libLogMessage);
+                        _loadingLog.Add(libLogMessage);
                         var loaded = false;
                         
                         foreach (var path in possiblePaths)
                         {
                             var libraryPath = Path.Combine(path, library);
                             var exists = File.Exists(libraryPath);
-                            Console.WriteLine($"  🔍 Checking {libraryPath}: {(exists ? "EXISTS" : "NOT FOUND")}");
+                            var checkLogMessage = $"  🔍 Checking {libraryPath}: {(exists ? "EXISTS" : "NOT FOUND")}";
+                            Console.WriteLine(checkLogMessage);
+                            _loadingLog.Add(checkLogMessage);
                             
                             if (exists)
                             {
@@ -66,35 +75,47 @@ namespace AdminConsole.Services
                                     var handle = LoadLibrary(libraryPath);
                                     if (handle != IntPtr.Zero)
                                     {
-                                        Console.WriteLine($"  ✅ Successfully loaded {library} from {libraryPath} (Handle: 0x{handle:X})");
+                                        var successLogMessage = $"  ✅ Successfully loaded {library} from {libraryPath} (Handle: 0x{handle:X})";
+                                        Console.WriteLine(successLogMessage);
+                                        _loadingLog.Add(successLogMessage);
                                         loaded = true;
                                         break;
                                     }
                                     else
                                     {
                                         var error = Marshal.GetLastWin32Error();
-                                        Console.WriteLine($"  ❌ LoadLibrary failed for {libraryPath} (Win32 Error: {error})");
+                                        var errorLogMessage = $"  ❌ LoadLibrary failed for {libraryPath} (Win32 Error: {error})";
+                                        Console.WriteLine(errorLogMessage);
+                                        _loadingLog.Add(errorLogMessage);
                                     }
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine($"  ❌ Exception loading {libraryPath}: {ex.Message}");
+                                    var exceptionLogMessage = $"  ❌ Exception loading {libraryPath}: {ex.Message}";
+                                    Console.WriteLine(exceptionLogMessage);
+                                    _loadingLog.Add(exceptionLogMessage);
                                 }
                             }
                         }
                         
                         if (!loaded)
                         {
-                            Console.WriteLine($"  ⚠️ Final result: Could not load {library} from any location");
+                            var finalLogMessage = $"  ⚠️ Final result: Could not load {library} from any location";
+                            Console.WriteLine(finalLogMessage);
+                            _loadingLog.Add(finalLogMessage);
                         }
                     }
 
                     _librariesLoaded = true;
-                    Console.WriteLine("🔍 SAP HANA native library loading completed");
+                    var completedLogMessage = "🔍 SAP HANA native library loading completed";
+                    Console.WriteLine(completedLogMessage);
+                    _loadingLog.Add(completedLogMessage);
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"❌ Error loading SAP HANA libraries: {ex.Message}");
+                    var errorLogMessage = $"❌ Error loading SAP HANA libraries: {ex.Message}";
+                    Console.WriteLine(errorLogMessage);
+                    _loadingLog.Add(errorLogMessage);
                     // Don't throw - let the connection attempt proceed and fail with better error info
                 }
             }
@@ -113,6 +134,13 @@ namespace AdminConsole.Services
             diagnostics.Add($"Runtime Identifier: {RuntimeInformation.RuntimeIdentifier}");
             diagnostics.Add($"OS Description: {RuntimeInformation.OSDescription}");
             diagnostics.Add($"Process Architecture: {RuntimeInformation.ProcessArchitecture}");
+            
+            // Add loading log if available
+            if (_loadingLog.Any())
+            {
+                diagnostics.Add("\nLibrary Loading Log:");
+                diagnostics.AddRange(_loadingLog);
+            }
             
             // Check for library files
             var possiblePaths = new[]
