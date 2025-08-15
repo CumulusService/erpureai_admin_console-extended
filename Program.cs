@@ -205,27 +205,63 @@ builder.Services.AddRazorComponents()
 // Configure SignalR for Blazor Server performance and responsiveness
 builder.Services.AddSignalR(options =>
 {
-    // Optimized for responsiveness in production
-    options.ClientTimeoutInterval = TimeSpan.FromMinutes(3);  // Reduced for faster detection of disconnects
-    options.KeepAliveInterval = TimeSpan.FromSeconds(5);      // More frequent keep-alives for responsiveness
-    options.HandshakeTimeout = TimeSpan.FromSeconds(15);      // Faster handshake
-    options.MaximumReceiveMessageSize = 32 * 1024;            // Smaller messages for speed
-    options.StreamBufferCapacity = 5;                         // Reduced buffer for lower latency
-    options.MaximumParallelInvocationsPerClient = 4;          // Allow more parallel operations
+    // 🚀 Enhanced performance optimizations
+    options.ClientTimeoutInterval = TimeSpan.FromMinutes(2);  // Faster disconnect detection
+    options.KeepAliveInterval = TimeSpan.FromSeconds(15);     // Balanced keep-alive frequency
+    options.HandshakeTimeout = TimeSpan.FromSeconds(10);      // Faster handshake
+    options.MaximumReceiveMessageSize = 64 * 1024;            // Optimized message size
+    options.StreamBufferCapacity = 10;                        // Better buffering for high throughput
+    options.MaximumParallelInvocationsPerClient = 6;          // More parallel operations
     options.EnableDetailedErrors = builder.Environment.IsDevelopment();
 });
 
 // Add Blazor authentication services
 builder.Services.AddCascadingAuthenticationState();
 
-// Add performance optimizations
+// 🚀 Enhanced performance optimizations
 builder.Services.AddResponseCompression(opts =>
 {
-    opts.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
-        new[] { "application/octet-stream" });
+    opts.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(new[]
+    {
+        "application/octet-stream",
+        "image/svg+xml",
+        "application/javascript",
+        "text/css",
+        "text/html",
+        "application/json",
+        "text/json"
+    });
+    opts.EnableForHttps = true;
+    opts.Providers.Add<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProvider>();
+    opts.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
 });
 
-builder.Services.AddResponseCaching();
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProviderOptions>(options =>
+{
+    options.Level = System.IO.Compression.CompressionLevel.Optimal;
+});
+
+builder.Services.Configure<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProviderOptions>(options =>
+{
+    options.Level = System.IO.Compression.CompressionLevel.Optimal;
+});
+
+builder.Services.AddResponseCaching(options =>
+{
+    options.MaximumBodySize = 64 * 1024 * 1024; // 64MB cache limit
+    options.UseCaseSensitivePaths = false;
+    options.SizeLimit = 200 * 1024 * 1024; // 200MB total cache
+});
+
+// Add output caching for static responses
+builder.Services.AddOutputCache(options =>
+{
+    options.AddBasePolicy(builder => builder.Cache());
+    options.AddPolicy("StaticAssets", builder => 
+        builder.Cache()
+               .Expire(TimeSpan.FromHours(24))
+               .SetVaryByHeader("Accept-Encoding"));
+});
 
 
 var app = builder.Build();
@@ -243,9 +279,28 @@ else
     app.UseDeveloperExceptionPage();
 }
 
-// Add performance middleware early in the pipeline
+// 🚀 Performance middleware optimized order
 app.UseResponseCompression();
+app.UseOutputCache();
 app.UseResponseCaching();
+
+// Static file optimizations
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        // Cache static assets for 1 year with version busting
+        if (ctx.File.Name.Contains('.') && 
+            (ctx.File.Name.EndsWith(".css") || 
+             ctx.File.Name.EndsWith(".js") || 
+             ctx.File.Name.EndsWith(".png") || 
+             ctx.File.Name.EndsWith(".jpg") ||
+             ctx.File.Name.EndsWith(".ico")))
+        {
+            ctx.Context.Response.Headers.Append("Cache-Control", "public,max-age=31536000");
+        }
+    }
+});
 
 // Add authentication middleware BEFORE authorization
 app.UseAuthentication();

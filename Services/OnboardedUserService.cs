@@ -1544,6 +1544,14 @@ public class OnboardedUserService : IOnboardedUserService
 
             var normalizedQuery = searchQuery.Trim().ToLowerInvariant();
             
+            // 🚀 Performance: Cache search results for short duration
+            var searchCacheKey = $"user_search_{organizationId}_{normalizedQuery}_{maxResults}";
+            if (_cache.TryGetValue(searchCacheKey, out List<OnboardedUser>? cachedResults))
+            {
+                _logger.LogInformation("🚀 PERFORMANCE: Using cached search results for '{SearchQuery}'", searchQuery);
+                return cachedResults ?? new List<OnboardedUser>();
+            }
+            
             _logger.LogInformation("🔍 PERFORMANCE: Efficient user search for '{SearchQuery}' in org {OrganizationId}", searchQuery, organizationId);
 
             // Optimized database search with indexing - much faster than loading all users
@@ -1560,6 +1568,9 @@ public class OnboardedUserService : IOnboardedUserService
                 .ToListAsync();
 
             _logger.LogInformation("🔍 PERFORMANCE: Found {ResultCount} users with optimized query", matchingUsers.Count);
+
+            // 🚀 Performance: Cache search results for 2 minutes
+            _cache.Set(searchCacheKey, matchingUsers, TimeSpan.FromMinutes(2));
 
             return matchingUsers;
         }

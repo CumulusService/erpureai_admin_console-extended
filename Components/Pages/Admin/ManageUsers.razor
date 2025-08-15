@@ -121,7 +121,7 @@
                         <tbody>
                             @foreach (var user in filteredUsers.OrderBy(u => u.DisplayName))
                             {
-                                <tr>
+                                <tr @key="user.Id">
                                     <td>
                                         <div class="d-flex align-items-center">
                                             <div class="avatar-sm me-3">
@@ -776,6 +776,16 @@
     private UserRole currentUserRole = UserRole.User;
     private bool isLoading = true;
     
+    // 🚀 Performance optimization: Prevent unnecessary re-renders
+    protected override bool ShouldRender()
+    {
+        // Only render when we have meaningful state changes or modal visibility changes
+        return !isLoading || allUsers.Any() || !string.IsNullOrEmpty(errorMessage) || 
+               !string.IsNullOrEmpty(successMessage) || showReactivateModal || 
+               showReactivationResultsModal || showBulkAgentAssignmentModal || 
+               showAssignToAllUsersModal;
+    }
+    
     // Modal states for reactivation functionality
     private bool showReactivateModal = false;
     private GuestUser? userToReactivate;
@@ -900,7 +910,7 @@
         finally
         {
             isLoading = false;
-            StateHasChanged();
+            // StateHasChanged(); // 🚀 Removed: ShouldRender() will handle this automatically
         }
     }
 
@@ -1397,7 +1407,7 @@
         finally
         {
             isLoading = false;
-            StateHasChanged();
+            // StateHasChanged(); // 🚀 Removed: ShouldRender() will handle this automatically
         }
     }
 
@@ -1468,7 +1478,7 @@
         finally
         {
             isLoading = false;
-            StateHasChanged();
+            // StateHasChanged(); // 🚀 Removed: ShouldRender() will handle this automatically
         }
     }
 
@@ -1840,7 +1850,7 @@
         finally
         {
             isLoading = false;
-            StateHasChanged();
+            // StateHasChanged(); // 🚀 Removed: ShouldRender() will handle this automatically
         }
     }
 

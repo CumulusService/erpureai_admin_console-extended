@@ -1,0 +1,93 @@
+@* 🚀 Performance Monitoring Component *@
+@implements IDisposable
+@inject IJSRuntime JSRuntime
+
+@if (ShowMetrics)
+{
+    <div class="performance-metrics position-fixed" style="bottom: 20px; right: 20px; z-index: 1000;">
+        <div class="card bg-dark text-white" style="width: 200px; opacity: 0.9;">
+            <div class="card-body p-2">
+                <h6 class="card-title text-warning mb-1">
+                    <i class="fas fa-tachometer-alt me-1"></i>Performance
+                </h6>
+                <div class="performance-metric">
+                    <small>Load Time: @($"{loadTime:F1}s")</small>
+                </div>
+                <div class="performance-metric">
+                    <small>Render Count: @renderCount</small>
+                </div>
+                <div class="performance-metric">
+                    <small>Memory: @($"{memoryUsage:F1}MB")</small>
+                </div>
+                <button class="btn btn-outline-light btn-sm mt-1" style="font-size: 0.7em;" @onclick="ToggleMetrics">
+                    Hide
+                </button>
+            </div>
+        </div>
+    </div>
+}
+else if (ShowToggle)
+{
+    <button class="btn btn-outline-secondary btn-sm position-fixed" 
+            style="bottom: 20px; right: 20px; z-index: 999;" 
+            @onclick="ToggleMetrics"
+            title="Show Performance Metrics">
+        <i class="fas fa-chart-line"></i>
+    </button>
+}
+
+@code {
+    [Parameter] public bool ShowMetrics { get; set; } = false;
+    [Parameter] public bool ShowToggle { get; set; } = true;
+    [Parameter] public string ComponentName { get; set; } = "Component";
+    
+    private readonly System.Diagnostics.Stopwatch _stopwatch = System.Diagnostics.Stopwatch.StartNew();
+    private double loadTime = 0;
+    private int renderCount = 0;
+    private double memoryUsage = 0;
+    private Timer? _metricsTimer;
+    
+    protected override void OnInitialized()
+    {
+        // Start metrics collection timer
+        _metricsTimer = new Timer(UpdateMetrics, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2));
+    }
+    
+    protected override void OnAfterRender(bool firstRender)
+    {
+        renderCount++;
+        
+        if (firstRender)
+        {
+            loadTime = _stopwatch.Elapsed.TotalSeconds;
+            StateHasChanged();
+        }
+    }
+    
+    private void UpdateMetrics(object? state)
+    {
+        try
+        {
+            // Get approximate memory usage
+            var totalMemory = GC.GetTotalMemory(false);
+            memoryUsage = totalMemory / (1024.0 * 1024.0); // Convert to MB
+            
+            InvokeAsync(StateHasChanged);
+        }
+        catch
+        {
+            // Ignore errors in metrics collection
+        }
+    }
+    
+    private void ToggleMetrics()
+    {
+        ShowMetrics = !ShowMetrics;
+    }
+    
+    public void Dispose()
+    {
+        _metricsTimer?.Dispose();
+        _stopwatch?.Stop();
+    }
+}

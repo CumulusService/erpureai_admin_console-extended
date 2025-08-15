@@ -33,7 +33,9 @@
       "Bash(dotnet pack:*)",
       "Bash(dotnet clean:*)",
       "Bash(dotnet nuget locals:*)",
-      "Bash(dotnet restore:*)"
+      "Bash(dotnet restore:*)",
+      "WebFetch(domain:www.c-sharpcorner.com)",
+      "WebSearch"
     ],
     "deny": []
   }

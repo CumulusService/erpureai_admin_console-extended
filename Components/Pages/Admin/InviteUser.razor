@@ -463,6 +463,14 @@
     // 🚀 PERFORMANCE OPTIMIZATION: Debounce timer for auto-suggestions
     private Timer? searchDebounceTimer;
     private const int DebounceDelayMs = 300;
+    
+    // 🚀 Performance optimization: Prevent unnecessary re-renders
+    protected override bool ShouldRender()
+    {
+        // Only render when we have meaningful state changes
+        return !isLoading || !string.IsNullOrEmpty(errorMessage) || !string.IsNullOrEmpty(successMessage) || 
+               hasFormChanges || searchResults.Any() || showExistingUserWarning;
+    }
 
     public class InvitationModel
     {
@@ -970,7 +978,7 @@
         finally
         {
             isSearching = false;
-            StateHasChanged();
+            // StateHasChanged(); // 🚀 Removed: ShouldRender() will handle this automatically
         }
     }
     

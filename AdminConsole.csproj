@@ -4,6 +4,22 @@
     <TargetFramework>net9.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    
+    <!-- 🚀 Performance Optimizations -->
+    <BlazorEnableTimeZoneSupport>false</BlazorEnableTimeZoneSupport>
+    <BlazorEnableTrimming>true</BlazorEnableTrimming>
+    <PublishTrimmed>true</PublishTrimmed>
+    <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+    <HttpsPort>7154</HttpsPort>
+    
+    <!-- Static web asset optimizations -->
+    <StaticWebAssetBasePath>/</StaticWebAssetBasePath>
+    <UseAppHost>true</UseAppHost>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    
+    <!-- Build performance optimizations -->
+    <UseSharedCompilation>true</UseSharedCompilation>
+    <AccelerateBuildsInVisualStudio>true</AccelerateBuildsInVisualStudio>
   </PropertyGroup>
 
   <ItemGroup>

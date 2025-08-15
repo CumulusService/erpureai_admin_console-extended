@@ -1,0 +1,83 @@
+@* 🚀 Performance Optimization: Lazy Loading Component *@
+
+@if (isVisible || forceLoad)
+{
+    if (hasLoaded || forceLoad)
+    {
+        @ChildContent
+    }
+    else if (isLoading)
+    {
+        <div class="text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <div class="mt-2">
+                <small class="text-muted">@LoadingText</small>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="text-center py-3">
+            <button class="btn btn-outline-primary btn-sm" @onclick="LoadContent">
+                <i class="fas fa-eye me-1"></i>
+                @LoadButtonText
+            </button>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public RenderFragment ChildContent { get; set; } = default!;
+    [Parameter] public bool ForceLoad { get; set; } = false;
+    [Parameter] public string LoadingText { get; set; } = "Loading...";
+    [Parameter] public string LoadButtonText { get; set; } = "Load Content";
+    [Parameter] public Func<Task>? OnLoad { get; set; }
+    [Parameter] public bool AutoLoad { get; set; } = true;
+    
+    private bool isVisible = false;
+    private bool hasLoaded = false;
+    private bool isLoading = false;
+    private bool forceLoad => ForceLoad;
+    
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender && AutoLoad)
+        {
+            isVisible = true;
+            StateHasChanged();
+        }
+    }
+    
+    private async Task LoadContent()
+    {
+        if (hasLoaded || isLoading) return;
+        
+        isLoading = true;
+        StateHasChanged();
+        
+        try
+        {
+            if (OnLoad != null)
+            {
+                await OnLoad();
+            }
+            
+            // Small delay for smooth transition
+            await Task.Delay(100);
+            
+            hasLoaded = true;
+        }
+        catch (Exception)
+        {
+            // Handle error silently and allow content to load anyway
+            hasLoaded = true;
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+}

@@ -81,7 +81,7 @@
                                     <tbody>
                                         @foreach (var agentType in agentTypes.OrderBy(at => at.DisplayOrder))
                                         {
-                                            <tr class="@(agentType.IsActive ? "" : "table-secondary")">
+                                            <tr class="@(agentType.IsActive ? "" : "table-secondary")" @key="agentType.Id">
                                                 <td>
                                                     <strong>@agentType.Name</strong>
                                                     @if (!string.IsNullOrEmpty(agentType.Description))

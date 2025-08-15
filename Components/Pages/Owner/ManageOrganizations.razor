@@ -65,7 +65,7 @@
         {
             @foreach (var org in filteredOrganizations)
             {
-                <div class="col-lg-6 col-xl-4 mb-4">
+                <div class="col-lg-6 col-xl-4 mb-4" @key="org.Id">
                     <div class="card shadow h-100 @(org.IsActive ? "" : "opacity-75")">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <div>
