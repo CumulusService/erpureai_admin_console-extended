@@ -20,6 +20,47 @@ namespace AdminConsole.Services
         [DllImport("kernel32", CharSet = CharSet.Ansi, ExactSpelling = true, SetLastError = true)]
         private static extern IntPtr GetProcAddress(IntPtr hModule, string procName);
 
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetEnvironmentVariable(string lpName, string lpValue);
+
+        /// <summary>
+        /// Setup Azure App Service environment for SAP HANA client
+        /// </summary>
+        private static void SetupAzureEnvironment()
+        {
+            try
+            {
+                var logMessage = "🔧 Setting up Azure environment for SAP HANA client";
+                Console.WriteLine(logMessage);
+                _loadingLog.Add(logMessage);
+
+                // Set TEMP directory for Azure App Service
+                var tempPath = @"D:\local\Temp";
+                if (Directory.Exists(tempPath))
+                {
+                    SetEnvironmentVariable("TEMP", tempPath);
+                    SetEnvironmentVariable("TMP", tempPath);
+                    _loadingLog.Add($"  ✅ Set TEMP directory to {tempPath}");
+                }
+
+                // Disable certificate validation for Azure environment
+                SetEnvironmentVariable("SAP_SSL_DISABLE_HOSTNAME_VERIFICATION", "1");
+                SetEnvironmentVariable("SAP_SSL_DISABLE_CERTIFICATE_VALIDATION", "1");
+                _loadingLog.Add("  ✅ Disabled SSL certificate validation for Azure");
+
+                // Set current directory as library path
+                var currentDir = AppContext.BaseDirectory;
+                SetEnvironmentVariable("PATH", Environment.GetEnvironmentVariable("PATH") + ";" + currentDir);
+                _loadingLog.Add($"  ✅ Added {currentDir} to PATH");
+            }
+            catch (Exception ex)
+            {
+                var errorMessage = $"  ⚠️ Failed to setup Azure environment: {ex.Message}";
+                Console.WriteLine(errorMessage);
+                _loadingLog.Add(errorMessage);
+            }
+        }
+
         /// <summary>
         /// Explicitly load SAP HANA native libraries before any HANA operations
         /// </summary>
@@ -33,6 +74,9 @@ namespace AdminConsole.Services
 
                 try
                 {
+                    // Set up Azure-specific environment for SAP HANA client
+                    SetupAzureEnvironment();
+                    
                     var basePath = AppContext.BaseDirectory;
                     var possiblePaths = new[]
                     {
