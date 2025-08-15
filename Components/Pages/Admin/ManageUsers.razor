@@ -281,8 +281,8 @@
     <!-- Bulk Agent Assignment Modal -->
     @if (showBulkAgentAssignmentModal)
     {
-        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
-            <div class="modal-dialog modal-lg">
+        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onclick="CloseBulkAgentAssignmentModal">
+            <div class="modal-dialog modal-lg" @onclick:stopPropagation="true">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title text-info">
@@ -390,8 +390,8 @@
     <!-- Assign to ALL Users Modal -->
     @if (showAssignToAllUsersModal)
     {
-        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
-            <div class="modal-dialog modal-md">
+        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onclick="CloseAssignToAllUsersModal">
+            <div class="modal-dialog modal-md" @onclick:stopPropagation="true">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title text-success">
@@ -483,8 +483,8 @@
     <!-- Individual User Agent Management Modal -->
     @if (showUserAgentManagementModal && selectedUserForAgentManagement != null)
     {
-        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
-            <div class="modal-dialog modal-md">
+        <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onclick="CloseUserAgentManagementModal">
+            <div class="modal-dialog modal-md" @onclick:stopPropagation="true">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title text-info">
@@ -650,8 +650,8 @@
 <!-- Reactivate Confirmation Modal -->
 @if (userToReactivate != null && showReactivateModal)
 {
-    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);">
-        <div class="modal-dialog">
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.5);" @onclick="CloseReactivateModal">
+        <div class="modal-dialog" @onclick:stopPropagation="true">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title text-success">
