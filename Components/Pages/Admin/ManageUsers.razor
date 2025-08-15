@@ -903,9 +903,17 @@
 
     /// <summary>
     /// 🚀 PERFORMANCE OPTIMIZATION: Prevents unnecessary re-renders to improve SignalR performance
+    /// CRITICAL FIX: Always render when modals are visible to ensure responsiveness
     /// </summary>
     protected override bool ShouldRender()
     {
+        // ALWAYS render when modals are visible or changing state
+        if (showBulkAgentAssignmentModal || showAssignToAllUsersModal || 
+            showUserAgentManagementModal || showReactivateModal)
+        {
+            return true; // Always render when modals are visible
+        }
+        
         if (!shouldRender)
         {
             return false;
