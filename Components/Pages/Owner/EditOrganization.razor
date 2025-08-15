@@ -803,11 +803,11 @@
         }
     }
 
-    private async Task LoadOrganizationAgentTypeConfiguration()
+    private Task LoadOrganizationAgentTypeConfiguration()
     {
         try
         {
-            if (organization == null) return;
+            if (organization == null) return Task.CompletedTask;
 
             // ✅ CORRECT: Load organization-level agent type allocation from organization record (SOURCE-OF-TRUTH)
             var orgAgentTypeIds = organization.GetOrganizationAgentTypeIds();
@@ -823,6 +823,7 @@
             Logger.LogError(ex, "Error loading organization agent type configuration for {OrganizationId}", OrganizationId);
             agentTypeErrorMessage = "Failed to load organization agent type configuration.";
         }
+        return Task.CompletedTask;
     }
 
     private void ToggleOrganizationAgentType(Guid agentTypeId, bool isSelected)

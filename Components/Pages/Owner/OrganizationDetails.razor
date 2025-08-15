@@ -410,11 +410,12 @@
         }
     }
 
-    protected override async Task OnInitializedAsync()
+    protected override Task OnInitializedAsync()
     {
         // FastNavigationWrapper will handle data loading
         // This method is kept minimal for backward compatibility
         isLoading = false;
+        return Task.CompletedTask;
     }
 
     private async Task LoadOrganizationDetails()

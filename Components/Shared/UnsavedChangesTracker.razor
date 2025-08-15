@@ -127,12 +127,13 @@
         }
     }
 
-    public async Task<bool> ConfirmNavigation(string? customMessage = null)
+    public Task<bool> ConfirmNavigation(string? customMessage = null)
     {
         // DISABLED: Browser notifications completely removed - always allow navigation
         System.Diagnostics.Debug.WriteLine("ConfirmNavigation: Browser notifications DISABLED - allowing navigation");
-        return true;
-
+        return Task.FromResult(true);
+        
+        /* ORIGINAL CODE - DISABLED
         try
         {
             // Use the modern modal service instead of JavaScript alerts
@@ -163,6 +164,7 @@
                 return false;
             }
         }
+        */
     }
 
 

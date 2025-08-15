@@ -1096,7 +1096,7 @@ public class GraphService : IGraphService
         }
     }
 
-    public async Task<bool> DeleteSecurityGroupAsync(string groupId)
+    public Task<bool> DeleteSecurityGroupAsync(string groupId)
     {
         // 🚨 FINAL SECURITY VALIDATOR - This will throw if group deletion is detected
         ValidateNoGroupDeletion("DeleteSecurityGroup", groupId, "DeleteSecurityGroupAsync");
@@ -1111,7 +1111,7 @@ public class GraphService : IGraphService
         var stackTrace = System.Environment.StackTrace;
         _logger.LogCritical("🕵️ CALL STACK for blocked group deletion:\n{StackTrace}", stackTrace);
         
-        return false; // Always fail - never delete groups via code
+        return Task.FromResult(false); // Always fail - never delete groups via code
         
         /* ORIGINAL DANGEROUS CODE - PERMANENTLY DISABLED
         try
@@ -2366,7 +2366,7 @@ public class GraphService : IGraphService
         }
     }
 
-    public async Task<bool> DeleteTeamsGroupAsync(string teamsGroupId)
+    public Task<bool> DeleteTeamsGroupAsync(string teamsGroupId)
     {
         // 🚨 FINAL SECURITY VALIDATOR - This will throw if group deletion is detected
         ValidateNoGroupDeletion("DeleteTeamsGroup", teamsGroupId, "DeleteTeamsGroupAsync");
@@ -2381,7 +2381,7 @@ public class GraphService : IGraphService
         var stackTrace = System.Environment.StackTrace;
         _logger.LogCritical("🕵️ CALL STACK for blocked Teams group deletion:\n{StackTrace}", stackTrace);
         
-        return false; // Always fail - never delete Teams groups via code
+        return Task.FromResult(false); // Always fail - never delete Teams groups via code
         
         /* ORIGINAL DANGEROUS CODE - PERMANENTLY DISABLED
         try
@@ -3148,19 +3148,19 @@ public class GraphService : IGraphService
     /// <summary>
     /// Gets the most recent active revocation record for a user
     /// </summary>
-    private async Task<UserRevocationRecord?> GetActiveRevocationRecordAsync(string userId, Guid organizationId)
+    private Task<UserRevocationRecord?> GetActiveRevocationRecordAsync(string userId, Guid organizationId)
     {
         try
         {
             // This would need to be implemented with proper database access
             // For now, we'll return null to indicate no database integration yet
             _logger.LogWarning("⚠️ Database integration for UserRevocationRecord not yet implemented");
-            return null;
+            return Task.FromResult<UserRevocationRecord?>(null);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving revocation record for user {UserId}", userId);
-            return null;
+            return Task.FromResult<UserRevocationRecord?>(null);
         }
     }
 
@@ -3196,7 +3196,7 @@ public class GraphService : IGraphService
     /// <summary>
     /// Updates a revocation record to mark it as restored
     /// </summary>
-    private async Task UpdateRevocationRecordAsRestoredAsync(UserRevocationRecord record, UserReactivationResult result)
+    private Task UpdateRevocationRecordAsRestoredAsync(UserRevocationRecord record, UserReactivationResult result)
     {
         try
         {
@@ -3213,6 +3213,7 @@ public class GraphService : IGraphService
         {
             _logger.LogError(ex, "Error updating revocation record {RecordId}", record.RevocationRecordId);
         }
+        return Task.CompletedTask;
     }
 
     /// <summary>

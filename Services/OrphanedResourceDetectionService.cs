@@ -496,7 +496,7 @@ public class OrphanedResourceDetectionService : IOrphanedResourceDetectionServic
     /// <summary>
     /// Get cleanup recommendations for detected orphaned resources (admin approval required)
     /// </summary>
-    public async Task<List<CleanupRecommendation>> GenerateCleanupRecommendationsAsync(ComprehensiveOrphanedResourceResult orphanedResult)
+    public Task<List<CleanupRecommendation>> GenerateCleanupRecommendationsAsync(ComprehensiveOrphanedResourceResult orphanedResult)
     {
         var recommendations = new List<CleanupRecommendation>();
 
@@ -585,7 +585,7 @@ public class OrphanedResourceDetectionService : IOrphanedResourceDetectionServic
             });
         }
 
-        return recommendations;
+        return Task.FromResult(recommendations);
     }
 
     /// <summary>

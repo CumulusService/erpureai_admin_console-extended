@@ -476,7 +476,7 @@ public class TeamsGroupService : ITeamsGroupService
     /// 🚨 SECURITY LOCKDOWN: Teams group deletion disabled for security
     /// This method is PERMANENTLY DISABLED to prevent accidental group deletion
     /// </summary>
-    public async Task<bool> DeleteOrganizationTeamsGroupAsync(Guid organizationId)
+    public Task<bool> DeleteOrganizationTeamsGroupAsync(Guid organizationId)
     {
         // 🚨 CRITICAL SECURITY BLOCK: Prevent any Teams group deletion at service level
         _logger.LogCritical("🚨 SECURITY ALERT: DeleteOrganizationTeamsGroupAsync called for org {OrganizationId} - OPERATION BLOCKED", organizationId);

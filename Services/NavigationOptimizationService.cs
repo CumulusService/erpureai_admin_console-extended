@@ -253,7 +253,7 @@ public class NavigationOptimizationService : INavigationOptimizationService
         }
     }
 
-    private async Task PreloadSystemUsersAsync()
+    private Task PreloadSystemUsersAsync()
     {
         try
         {
@@ -266,6 +266,7 @@ public class NavigationOptimizationService : INavigationOptimizationService
         {
             _logger.LogWarning(ex, "⚠️ Failed to preload system users data");
         }
+        return Task.CompletedTask;
     }
 
     // Helper methods to extract IDs from URLs

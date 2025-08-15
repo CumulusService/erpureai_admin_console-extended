@@ -534,8 +534,6 @@ public class KeyVaultService : IKeyVaultService
             _logger.LogError(ex, "Failed to store secret {SecretName} with tags for organization {OrganizationId}", secretName, organizationId);
             return false;
         }
-
-        return false;
     }
 
     public async Task<IEnumerable<string>> GetSecretNamesAsync(string organizationId)

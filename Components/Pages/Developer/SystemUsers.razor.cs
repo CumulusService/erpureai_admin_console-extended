@@ -51,11 +51,12 @@ public partial class SystemUsers : ComponentBase
         await RefreshData();
     }
 
-    protected override async Task OnInitializedAsync()
+    protected override Task OnInitializedAsync()
     {
         // FastNavigationWrapper will handle data loading
         // This method is kept minimal for backward compatibility
         isLoading = false;
+        return Task.CompletedTask;
     }
 
     private async Task RefreshData()
@@ -158,7 +159,7 @@ public partial class SystemUsers : ComponentBase
         return combinedUsers.OrderBy(u => u.DisplayName).ToList();
     }
 
-    private async Task OnDomainFilterChange(ChangeEventArgs e)
+    private Task OnDomainFilterChange(ChangeEventArgs e)
     {
         domainFilter = e.Value?.ToString() ?? "";
         if (domainFilter != "custom")
@@ -166,27 +167,31 @@ public partial class SystemUsers : ComponentBase
             customDomain = "";
         }
         StateHasChanged();
+        return Task.CompletedTask;
     }
     
-    private async Task OnRoleFilterChange(ChangeEventArgs e)
+    private Task OnRoleFilterChange(ChangeEventArgs e)
     {
         roleFilter = e.Value?.ToString() ?? "";
         StateHasChanged();
+        return Task.CompletedTask;
     }
     
-    private async Task OnStatusFilterChange(ChangeEventArgs e)
+    private Task OnStatusFilterChange(ChangeEventArgs e)
     {
         statusFilter = e.Value?.ToString() ?? "";
         StateHasChanged();
+        return Task.CompletedTask;
     }
 
-    private async Task ApplyCustomDomainFilter()
+    private Task ApplyCustomDomainFilter()
     {
         if (domainFilter == "custom" && !string.IsNullOrWhiteSpace(customDomain))
         {
             // Trigger refresh of filtered data
             StateHasChanged();
         }
+        return Task.CompletedTask;
     }
 
     #region Invite System User Modal
@@ -201,21 +206,21 @@ public partial class SystemUsers : ComponentBase
         StateHasChanged();
     }
 
-    private async Task ValidateInviteEmail()
+    private Task ValidateInviteEmail()
     {
         inviteValidationErrors.Remove("email");
         
         if (string.IsNullOrWhiteSpace(inviteModel.Email))
         {
             inviteValidationErrors["email"] = "Email address is required";
-            return;
+            return Task.CompletedTask;
         }
 
         // Validate email format
         if (!IsValidEmail(inviteModel.Email))
         {
             inviteValidationErrors["email"] = "Please enter a valid email address";
-            return;
+            return Task.CompletedTask;
         }
 
         // Validate business domain (block private emails)
@@ -223,10 +228,11 @@ public partial class SystemUsers : ComponentBase
         if (!domainValidation.IsValid)
         {
             inviteValidationErrors["email"] = domainValidation.Message;
-            return;
+            return Task.CompletedTask;
         }
 
         StateHasChanged();
+        return Task.CompletedTask;
     }
 
     private async Task SendInvitation()

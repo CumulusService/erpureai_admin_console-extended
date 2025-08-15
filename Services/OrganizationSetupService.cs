@@ -160,7 +160,7 @@ public class OrganizationSetupService : IOrganizationSetupService
         return result;
     }
 
-    public async Task<bool> CreateDefaultSecretsAsync(string organizationId, string organizationName, string organizationDomain)
+    public Task<bool> CreateDefaultSecretsAsync(string organizationId, string organizationName, string organizationDomain)
     {
         try
         {
@@ -179,12 +179,12 @@ public class OrganizationSetupService : IOrganizationSetupService
             // 3. Organization-level SAP settings as fallback
             
             _logger.LogInformation("Organization {OrganizationId} setup completed without template secrets - using consolidated per-database approach", organizationId);
-            return true;
+            return Task.FromResult(true);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in CreateDefaultSecretsAsync for organization {OrganizationId}", organizationId);
-            return false;
+            return Task.FromResult(false);
         }
     }
 
@@ -263,7 +263,7 @@ public class OrganizationSetupService : IOrganizationSetupService
     /// Creates default secrets for an Organization Admin when they first sign in
     /// This is called separately from the initial organization setup
     /// </summary>
-    public async Task<bool> CreateDefaultSecretsForOrgAdminAsync(string organizationId, string organizationName, string organizationDomain)
+    public Task<bool> CreateDefaultSecretsForOrgAdminAsync(string organizationId, string organizationName, string organizationDomain)
     {
         try
         {
@@ -277,12 +277,12 @@ public class OrganizationSetupService : IOrganizationSetupService
             // Database-specific secrets will be created when database credentials are added
             
             _logger.LogInformation("Organization Admin setup completed for organization {OrganizationId} - ready for database credential creation", organizationId);
-            return true;
+            return Task.FromResult(true);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error in CreateDefaultSecretsForOrgAdminAsync for organization {OrganizationId}", organizationId);
-            return false;
+            return Task.FromResult(false);
         }
     }
 }
