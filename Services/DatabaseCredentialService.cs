@@ -990,24 +990,45 @@ public class DatabaseCredentialService : IDatabaseCredentialService
             switch (databaseType)
             {
                 case DatabaseType.MSSQL:
-                    using (var connection = new SqlConnection(connectionString))
+                    // Add connection timeout to prevent SignalR circuit disconnection
+                    var sqlConnectionString = connectionString;
+                    if (!connectionString.ToLower().Contains("connection timeout") && !connectionString.ToLower().Contains("timeout"))
                     {
-                        await connection.OpenAsync();
+                        sqlConnectionString += ";Connection Timeout=30"; // 30 seconds max - well under SignalR 2-minute timeout
+                    }
+                    
+                    using (var connection = new SqlConnection(sqlConnectionString))
+                    {
+                        // Use CancellationToken with timeout as additional safety
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45)); // 45 second absolute max
+                        
+                        await connection.OpenAsync(cts.Token);
                         stopwatch.Stop();
                         _logger.LogInformation("SQL Server connection test successful in {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
                         return (true, $"Connection successful ({stopwatch.ElapsedMilliseconds}ms)");
                     }
 
                 case DatabaseType.HANA:
-                    using (var connection = new HanaConnection(connectionString))
+                    // Add connection timeout to prevent SignalR circuit disconnection
+                    var hanaConnectionString = connectionString;
+                    if (!connectionString.ToLower().Contains("connecttimeout") && !connectionString.ToLower().Contains("timeout"))
                     {
-                        await connection.OpenAsync();
+                        hanaConnectionString += ";ConnectTimeout=30"; // 30 seconds max for HANA
+                    }
+                    
+                    using (var connection = new HanaConnection(hanaConnectionString))
+                    {
+                        // Use CancellationToken with timeout as additional safety
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45)); // 45 second absolute max
+                        
+                        await connection.OpenAsync(cts.Token);
                         stopwatch.Stop();
                         
                         // Get database version info
                         using var command = connection.CreateCommand();
                         command.CommandText = "SELECT VERSION FROM SYS.M_DATABASE";
-                        var version = await command.ExecuteScalarAsync();
+                        command.CommandTimeout = 10; // Quick version check
+                        var version = await command.ExecuteScalarAsync(cts.Token);
                         
                         _logger.LogInformation("SAP HANA connection test successful in {ElapsedMs}ms, Version: {Version}", 
                             stopwatch.ElapsedMilliseconds, version);
@@ -1017,6 +1038,16 @@ public class DatabaseCredentialService : IDatabaseCredentialService
                 default:
                     return (false, $"Unsupported database type: {databaseType}");
             }
+        }
+        catch (OperationCanceledException ex) when (ex.CancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning("Database connection test timed out for {DatabaseType} after 45 seconds", databaseType);
+            return (false, "Connection timed out after 45 seconds. Please check your server address and network connectivity.");
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(ex, "Database connection test timed out for {DatabaseType}", databaseType);
+            return (false, $"Connection timed out: {ex.Message}. Please check your server address and network connectivity.");
         }
         catch (Exception ex)
         {
@@ -1767,10 +1798,24 @@ public class DatabaseCredentialService : IDatabaseCredentialService
             }
             
             _logger.LogInformation("🎉 Creating consolidated secret with {TagCount} total tags in SINGLE operation (fixing double-creation bug)", allTags.Count + 5); // +5 for default tags (org, type, created, secretName, isActive)
-            var success = await _keyVaultService.SetSecretWithTagsAsync(secretName, sapPassword, organizationId, allTags);
+            
+            // CRITICAL DEBUG: Log all tags being sent to Key Vault
+            _logger.LogInformation("🔍 CONSOLIDATED SECRET DEBUG - About to create secret {SecretName}:", secretName);
+            _logger.LogInformation("  Organization ID: {OrganizationId}", organizationId);
+            _logger.LogInformation("  SAP Password Length: {PasswordLength}", sapPassword?.Length ?? 0);
+            _logger.LogInformation("  Connection String Length: {ConnectionStringLength}", connectionString.Length);
+            _logger.LogInformation("  Total Additional Tags: {TagCount}", allTags.Count);
+            foreach (var tag in allTags)
+            {
+                var tagValue = tag.Value?.Length > 100 ? $"{tag.Value[..100]}..." : tag.Value;
+                _logger.LogInformation("    Tag: {TagKey} = '{TagValue}' (Length: {Length})", 
+                    tag.Key, tagValue, tag.Value?.Length ?? 0);
+            }
+            
+            var success = await _keyVaultService.SetSecretWithTagsAsync(secretName, sapPassword ?? string.Empty, organizationId, allTags);
             if (!success)
             {
-                _logger.LogError("Failed to create consolidated secret {SecretName} with all tags", secretName);
+                _logger.LogError("🚨 CRITICAL: Failed to create consolidated secret {SecretName} with all tags - this causes ConsolidatedSecretName to be empty!", secretName);
                 return false;
             }
             

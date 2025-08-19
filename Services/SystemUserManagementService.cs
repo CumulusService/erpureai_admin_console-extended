@@ -282,7 +282,7 @@ public class SystemUserManagementService : ISystemUserManagementService
         try
         {
             // Send B2B invitation
-            var inviteResult = await _graphService.InviteGuestUserAsync(email, "System Administrator");
+            var inviteResult = await _graphService.InviteGuestUserAsync(email, displayName, "System Administrator", "https://localhost:5243", new List<string>(), true);
             if (!inviteResult.Success)
             {
                 result.Errors.AddRange(inviteResult.Errors);

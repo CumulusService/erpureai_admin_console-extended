@@ -1078,6 +1078,20 @@ public class AgentGroupAssignmentService : IAgentGroupAssignmentService
                         // CRITICAL: Always deactivate database record for security, regardless of Azure success
                         assignment.Deactivate();
                         
+                        // CRITICAL FIX: Remove agent type from user's AgentTypeIds
+                        var user = await _context.OnboardedUsers
+                            .FirstOrDefaultAsync(u => u.AzureObjectId == assignment.UserId && u.OrganizationLookupId == organizationId);
+                        
+                        if (user != null && user.AgentTypeIds.Contains(agentTypeId))
+                        {
+                            user.AgentTypeIds.Remove(agentTypeId);
+                            user.ModifiedOn = DateTime.UtcNow;
+                            user.ModifiedBy = Guid.TryParse(modifiedBy, out var modifiedByGuid) ? modifiedByGuid : Guid.NewGuid();
+                            
+                            _logger.LogInformation("✅ Removed agent type {AgentTypeName} from user {Email} AgentTypeIds", 
+                                agentType.Name, user.Email);
+                        }
+                        
                         if (removedFromGroup)
                         {
                             _logger.LogInformation("✅ Successfully removed user {UserId} from security group {GroupId} for agent type {AgentTypeName}", 
@@ -1095,6 +1109,21 @@ public class AgentGroupAssignmentService : IAgentGroupAssignmentService
                     {
                         // User is not a member - just deactivate database record
                         assignment.Deactivate();
+                        
+                        // CRITICAL FIX: Remove agent type from user's AgentTypeIds even if not in Azure group
+                        var user = await _context.OnboardedUsers
+                            .FirstOrDefaultAsync(u => u.AzureObjectId == assignment.UserId && u.OrganizationLookupId == organizationId);
+                        
+                        if (user != null && user.AgentTypeIds.Contains(agentTypeId))
+                        {
+                            user.AgentTypeIds.Remove(agentTypeId);
+                            user.ModifiedOn = DateTime.UtcNow;
+                            user.ModifiedBy = Guid.TryParse(modifiedBy, out var modifiedByGuid) ? modifiedByGuid : Guid.NewGuid();
+                            
+                            _logger.LogInformation("✅ Removed agent type {AgentTypeName} from user {Email} AgentTypeIds (user was not in Azure group)", 
+                                agentType.Name, user.Email);
+                        }
+                        
                         _logger.LogInformation("✅ User {UserId} was not a member of security group {GroupId} - deactivated database assignment", 
                             assignment.UserId, agentType.GlobalSecurityGroupId);
                         successCount++;
@@ -1121,6 +1150,146 @@ public class AgentGroupAssignmentService : IAgentGroupAssignmentService
         catch (Exception ex)
         {
             _logger.LogError(ex, "❌ CRITICAL ERROR: Failed to remove all users from agent type {AgentTypeId} in organization {OrganizationId}", 
+                agentTypeId, organizationId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// CRITICAL: Assigns ALL users in an organization to a specific agent type's security group
+    /// Used when SuperAdmin assigns an agent type at organization level with auto-assign option
+    /// </summary>
+    public async Task<bool> AssignAllUsersToAgentTypeAsync(Guid organizationId, Guid agentTypeId, string modifiedBy)
+    {
+        try
+        {
+            _logger.LogInformation("🎯 ORG-LEVEL ASSIGNMENT: Starting assignment of ALL users in organization {OrganizationId} to agent type {AgentTypeId}", 
+                organizationId, agentTypeId);
+
+            // Get the agent type to find its security group ID (SOURCE-OF-TRUTH)
+            var agentType = await _agentTypeService.GetByIdAsync(agentTypeId);
+            if (agentType == null || string.IsNullOrEmpty(agentType.GlobalSecurityGroupId))
+            {
+                _logger.LogWarning("⚠️ Agent type {AgentTypeId} not found or has no GlobalSecurityGroupId. Cannot assign users to security group.", agentTypeId);
+                return false;
+            }
+
+            // Get all active users in the organization
+            var organizationUsers = await _context.OnboardedUsers
+                .Where(u => u.OrganizationLookupId == organizationId && u.StateCode == StateCode.Active)
+                .ToListAsync();
+
+            if (!organizationUsers.Any())
+            {
+                _logger.LogInformation("✅ No active users found in organization {OrganizationId}", organizationId);
+                return true;
+            }
+
+            _logger.LogInformation("🔄 Found {UserCount} active users to assign to agent type {AgentTypeName}", 
+                organizationUsers.Count, agentType.Name);
+
+            var successCount = 0;
+            var totalUsers = organizationUsers.Count;
+
+            foreach (var user in organizationUsers)
+            {
+                try
+                {
+                    _logger.LogInformation("🔄 Processing user {UserId} ({Email}) assignment to agent type {AgentTypeName}", 
+                        user.OnboardedUserId, user.Email, agentType.Name);
+
+                    // Check if user is already assigned to avoid duplicates
+                    var existingAssignment = await _context.UserAgentTypeGroupAssignments
+                        .FirstOrDefaultAsync(a => a.UserId == user.AzureObjectId 
+                                                && a.AgentTypeId == agentTypeId 
+                                                && a.OrganizationId == organizationId 
+                                                && a.IsActive);
+
+                    if (existingAssignment == null)
+                    {
+                        // Create new assignment in database
+                        var newAssignment = new UserAgentTypeGroupAssignment
+                        {
+                            Id = Guid.NewGuid(),
+                            UserId = user.AzureObjectId,
+                            AgentTypeId = agentTypeId,
+                            OrganizationId = organizationId,
+                            SecurityGroupId = agentType.GlobalSecurityGroupId,
+                            AssignedDate = DateTime.UtcNow,
+                            AssignedBy = modifiedBy,
+                            IsActive = true
+                        };
+
+                        _context.UserAgentTypeGroupAssignments.Add(newAssignment);
+                        _logger.LogInformation("✅ Created database assignment for user {Email} to agent type {AgentTypeName}", 
+                            user.Email, agentType.Name);
+                    }
+                    else
+                    {
+                        _logger.LogInformation("ℹ️ User {Email} already assigned to agent type {AgentTypeName} - skipping database creation", 
+                            user.Email, agentType.Name);
+                    }
+
+                    // Check if user is actually a member of the Azure AD group (bidirectional validation)
+                    var userGroups = await _graphService.GetUserGroupMembershipsAsync(user.AzureObjectId);
+                    var isMember = userGroups.Any(g => g.Id == agentType.GlobalSecurityGroupId);
+                    
+                    if (!isMember)
+                    {
+                        // User is not a member - add them to the group
+                        var addedToGroup = await _graphService.AddUserToGroupAsync(user.AzureObjectId, agentType.GlobalSecurityGroupId);
+                        
+                        if (addedToGroup)
+                        {
+                            _logger.LogInformation("✅ Added user {Email} to Azure AD security group {GroupId}", 
+                                user.Email, agentType.GlobalSecurityGroupId);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("⚠️ Failed to add user {Email} to Azure AD security group {GroupId}", 
+                                user.Email, agentType.GlobalSecurityGroupId);
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogInformation("ℹ️ User {Email} already member of Azure AD security group {GroupId}", 
+                            user.Email, agentType.GlobalSecurityGroupId);
+                    }
+
+                    // Update user's assigned agent types in database
+                    if (!user.AgentTypeIds.Contains(agentTypeId))
+                    {
+                        user.AgentTypeIds.Add(agentTypeId);
+                        user.ModifiedOn = DateTime.UtcNow;
+                        user.ModifiedBy = Guid.TryParse(modifiedBy, out var modifiedByGuid) ? modifiedByGuid : Guid.NewGuid();
+                        
+                        _logger.LogInformation("✅ Updated user {Email} AgentTypeIds to include {AgentTypeName}", 
+                            user.Email, agentType.Name);
+                    }
+
+                    successCount++;
+                }
+                catch (Exception userEx)
+                {
+                    _logger.LogError(userEx, "❌ Error assigning user {UserId} ({Email}) to agent type {AgentTypeId}", 
+                        user.OnboardedUserId, user.Email, agentTypeId);
+                    // Continue processing other users even if one fails
+                }
+            }
+
+            // Save all changes
+            await _context.SaveChangesAsync();
+
+            var successRate = (double)successCount / totalUsers * 100;
+            _logger.LogInformation("🎯 ORG-LEVEL ASSIGNMENT COMPLETED: {SuccessCount}/{TotalCount} users assigned to agent type {AgentTypeName} ({SuccessRate:F1}%)", 
+                successCount, totalUsers, agentType.Name, successRate);
+
+            // Return true if we had reasonable success (80% threshold)
+            return successRate >= 80.0;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ CRITICAL ERROR: Failed to assign all users to agent type {AgentTypeId} in organization {OrganizationId}", 
                 agentTypeId, organizationId);
             return false;
         }

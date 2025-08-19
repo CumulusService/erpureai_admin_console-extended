@@ -1,6 +1,7 @@
 using AdminConsole.Data;
 using AdminConsole.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace AdminConsole.Services;
 
@@ -14,6 +15,7 @@ public class AgentTypeService : IAgentTypeService
     private readonly ILogger<AgentTypeService> _logger;
     private readonly IGraphService _graphService;
     private readonly IOrganizationService _organizationService;
+    private readonly IMemoryCache _cache;
 
     private static readonly SemaphoreSlim _tableInitSemaphore = new(1, 1);
     private static bool _tablesInitialized = false;
@@ -22,12 +24,14 @@ public class AgentTypeService : IAgentTypeService
         AdminConsoleDbContext context,
         ILogger<AgentTypeService> logger,
         IGraphService graphService,
-        IOrganizationService organizationService)
+        IOrganizationService organizationService,
+        IMemoryCache cache)
     {
         _context = context;
         _logger = logger;
         _graphService = graphService;
         _organizationService = organizationService;
+        _cache = cache;
     }
 
     private async Task EnsureTablesExistAsync()
@@ -152,6 +156,17 @@ public class AgentTypeService : IAgentTypeService
         }
     }
 
+    /// <summary>
+    /// Invalidates agent types cache to ensure fresh data after CRUD operations
+    /// </summary>
+    private void InvalidateAgentTypesCache()
+    {
+        // Remove the main cache key used by NavigationOptimizationService
+        // Using the same key as defined in NavigationOptimizationService.AGENT_TYPES_CACHE_KEY
+        _cache.Remove("nav_agent_types");
+        _logger.LogDebug("🗑️ Invalidated agent types cache");
+    }
+
     public async Task<List<AgentTypeEntity>> GetActiveAgentTypesAsync()
     {
         try
@@ -234,7 +249,10 @@ public class AgentTypeService : IAgentTypeService
             _context.AgentTypes.Add(agentType);
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Created agent type {Name} with ID {Id}", agentType.Name, agentType.Id);
+            // Invalidate cache so UI shows fresh data
+            InvalidateAgentTypesCache();
+
+            _logger.LogInformation("✅ Created agent type {Name} with ID {Id} and invalidated cache", agentType.Name, agentType.Id);
             return agentType;
         }
         catch (Exception ex)
@@ -280,7 +298,10 @@ public class AgentTypeService : IAgentTypeService
 
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("✅ Updated agent type {Name} with ID {Id}", agentType.Name, agentType.Id);
+            // Invalidate cache so UI shows fresh data
+            InvalidateAgentTypesCache();
+
+            _logger.LogInformation("✅ Updated agent type {Name} with ID {Id} and invalidated cache", agentType.Name, agentType.Id);
 
             // 🚀 TRIGGER TEAMS APP INSTALL/UNINSTALL if TeamsAppId changed
             if (teamsAppIdChanged)
@@ -416,7 +437,10 @@ public class AgentTypeService : IAgentTypeService
 
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Soft deleted agent type {Name} with ID {Id}", agentType.Name, id);
+            // Invalidate cache so UI shows fresh data
+            InvalidateAgentTypesCache();
+
+            _logger.LogInformation("✅ Soft deleted agent type {Name} with ID {Id} and invalidated cache", agentType.Name, id);
             return true;
         }
         catch (Exception ex)
@@ -446,7 +470,10 @@ public class AgentTypeService : IAgentTypeService
 
             await _context.SaveChangesAsync();
 
-            _logger.LogInformation("Reordered {Count} agent types", orderedIds.Count);
+            // Invalidate cache so UI shows fresh data
+            InvalidateAgentTypesCache();
+
+            _logger.LogInformation("✅ Reordered {Count} agent types and invalidated cache", orderedIds.Count);
             return true;
         }
         catch (Exception ex)

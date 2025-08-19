@@ -99,7 +99,7 @@
                                                                     IconClass="fas fa-check-circle"
                                                                     Type="ActionType.Info"
                                                                     Size="ButtonSize.Small"
-                                                                    OnClick="@(async () => { ValidateSecurityGroup(agentType.GlobalSecurityGroupId); await Task.CompletedTask; })"
+                                                                    OnClick="@(async () => await ValidateSecurityGroup(agentType.GlobalSecurityGroupId))"
                                                                     FullDescription="Validate that this security group exists in Azure AD"
                                                                     ConsequenceText="Check group accessibility"
                                                                     ShowConsequence="true"
@@ -142,7 +142,7 @@
                                                                     IconClass="@(agentType.IsActive ? "fas fa-pause" : "fas fa-play")"
                                                                     Type="@(agentType.IsActive ? ActionType.Warning : ActionType.Success)"
                                                                     Size="ButtonSize.Small"
-                                                                    OnClick="@(async () => { ToggleActiveStatus(agentType); await Task.CompletedTask; })"
+                                                                    OnClick="@(async () => await ToggleActiveStatus(agentType))"
                                                                     FullDescription="@(agentType.IsActive ? "Deactivate this agent type" : "Activate this agent type")"
                                                                     ConsequenceText="@(agentType.IsActive ? "Agent type will be disabled" : "Agent type will be enabled")"
                                                                     ShowConsequence="true" />
@@ -151,7 +151,7 @@
                                                                     IconClass="fas fa-trash"
                                                                     Type="ActionType.Delete"
                                                                     Size="ButtonSize.Small"
-                                                                    OnClick="@(async () => { DeleteAgentType(agentType); await Task.CompletedTask; })"
+                                                                    OnClick="@(async () => await DeleteAgentType(agentType))"
                                                                     FullDescription="Permanently delete this agent type"
                                                                     ConsequenceText="This action cannot be undone"
                                                                     ShowConsequence="true" />
@@ -243,7 +243,7 @@
                                             IconClass="fas fa-check"
                                             Type="ActionType.Secondary"
                                             Size="ButtonSize.Normal"
-                                            OnClick="@(async () => { ValidateSecurityGroup(editingAgentType.GlobalSecurityGroupId); await Task.CompletedTask; })"
+                                            OnClick="@(async () => await ValidateSecurityGroup(editingAgentType.GlobalSecurityGroupId))"
                                             FullDescription="Verify that this security group exists in Azure AD"
                                             ConsequenceText="Check Azure AD connectivity"
                                             ShowConsequence="false" />
@@ -323,7 +323,7 @@
                 Logger.LogDebug("🚀 Using cached agent types for fast loading");
             }
             
-            await LoadAgentTypes();
+            await LoadAgentTypes(forceRefresh: true);
         }
         catch (Exception ex)
         {
@@ -336,25 +336,30 @@
         }
     }
 
-    private async Task LoadAgentTypes()
+    private async Task LoadAgentTypes(bool forceRefresh = false)
     {
         try
         {
             isLoading = true;
             
-            // 🚀 Try to load agent types from cache first for faster performance
-            var cachedAgentTypes = NavigationOptimizer.GetCachedData<List<AgentTypeEntity>>(NavigationOptimizationService.AGENT_TYPES_CACHE_KEY);
+            // 🚀 Try to load agent types from cache first for faster performance (unless force refresh)
+            List<AgentTypeEntity>? cachedAgentTypes = null;
+            if (!forceRefresh)
+            {
+                cachedAgentTypes = NavigationOptimizer.GetCachedData<List<AgentTypeEntity>>(NavigationOptimizationService.AGENT_TYPES_CACHE_KEY);
+            }
             
-            if (cachedAgentTypes != null)
+            if (cachedAgentTypes != null && !forceRefresh)
             {
                 agentTypes = cachedAgentTypes;
                 Logger.LogDebug("🚀 Using cached agent types for fast loading");
             }
             else
             {
+                // Load fresh data from database
                 agentTypes = await AgentTypeService.GetAllAgentTypesAsync();
                 NavigationOptimizer.SetCachedData(NavigationOptimizationService.AGENT_TYPES_CACHE_KEY, agentTypes, TimeSpan.FromMinutes(10));
-                Logger.LogDebug("📦 Agent types loaded from database and cached");
+                Logger.LogDebug("📦 Agent types loaded from database and cached (forceRefresh: {ForceRefresh})", forceRefresh);
             }
         }
         catch (Exception ex)
@@ -425,7 +430,7 @@
             }
 
             CloseModal();
-            await LoadAgentTypes();
+            await LoadAgentTypes(forceRefresh: true);
         }
         catch (Exception ex)
         {
@@ -449,7 +454,7 @@
                 if (success)
                 {
                     successMessage = $"Agent type '{agentType.DisplayName}' {(agentType.IsActive ? "activated" : "deactivated")} successfully.";
-                    await LoadAgentTypes();
+                    await LoadAgentTypes(forceRefresh: true);
                 }
                 else
                 {
@@ -478,7 +483,7 @@
                 if (success)
                 {
                     successMessage = $"Agent type '{agentType.DisplayName}' deleted successfully.";
-                    await LoadAgentTypes();
+                    await LoadAgentTypes(forceRefresh: true);
                 }
                 else
                 {

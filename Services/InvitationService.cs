@@ -94,13 +94,14 @@ public class InvitationService : IInvitationService
         // Call the enhanced method with empty agent type IDs and database IDs for backward compatibility
         // Default role based on legacy agent types: Admin agents -> OrgAdmin, others -> User
         var role = agentTypes.Contains(LegacyAgentType.Admin) ? UserRole.OrgAdmin : UserRole.User;
-        return await InviteUserAsync(organizationId, emailToInvite, invitedBy, agentTypes, new List<Guid>(), new List<Guid>(), role);
+        var displayName = emailToInvite.Split('@')[0]; // Use email prefix as default display name for legacy calls
+        return await InviteUserAsync(organizationId, emailToInvite, displayName, invitedBy, agentTypes, new List<Guid>(), new List<Guid>(), role);
     }
 
     /// <summary>
     /// Enhanced invitation method that supports both legacy and new agent-based group assignment
     /// </summary>
-    public async Task<InvitationResult> InviteUserAsync(Guid organizationId, string emailToInvite, Guid invitedBy, List<LegacyAgentType> agentTypes, List<Guid> agentTypeIds, List<Guid> selectedDatabaseIds, UserRole assignedRole = UserRole.User, string? currentUserEmail = null)
+    public async Task<InvitationResult> InviteUserAsync(Guid organizationId, string emailToInvite, string displayName, Guid invitedBy, List<LegacyAgentType> agentTypes, List<Guid> agentTypeIds, List<Guid> selectedDatabaseIds, UserRole assignedRole = UserRole.User, string? currentUserEmail = null)
     {
         var operationId = Guid.NewGuid().ToString();
         await _operationStatusService.StartOperationAsync(operationId, "UserInvitation", $"Inviting {emailToInvite} to join organization");
@@ -182,6 +183,7 @@ public class InvitationService : IInvitationService
             await _operationStatusService.UpdateStatusAsync(operationId, "Creating user in directory...");
             var graphInvitation = await _graphService.InviteGuestUserAsync(
                 emailToInvite, 
+                displayName, 
                 organization.Name, 
                 redirectUri, 
                 agentShareUrls, 
@@ -236,7 +238,7 @@ public class InvitationService : IInvitationService
                 onboardedUser = new OnboardedUser
                 {
                     OnboardedUserId = Guid.NewGuid(),
-                    Name = emailToInvite.Split('@')[0], // Use email prefix as default name
+                    Name = displayName, // Use provided display name
                     Email = emailToInvite,
                     AzureObjectId = graphInvitation.UserId, // 🔑 CRITICAL: Store Azure AD Object ID for reliable lookups
                     OrganizationLookupId = organizationId,
@@ -254,7 +256,7 @@ public class InvitationService : IInvitationService
                     ModifiedOn = DateTime.UtcNow,
                     ModifiedBy = invitedBy,
                     // Set required fields with defaults
-                    FullName = emailToInvite.Split('@')[0], // Use email prefix as display name
+                    FullName = displayName, // Use provided display name
                     AssignedDatabaseIds = new List<Guid>(), // Will be assigned by admin later
                     OwnerId = invitedBy, // Set the required OwnerId field
                     OwningUser = invitedBy // Set the owning user as well
@@ -351,41 +353,74 @@ public class InvitationService : IInvitationService
             }
 
             // Step 5.6: FIXED M365 Teams group creation and assignment - CHECK FOR EXISTING GROUP FIRST
-            _logger.LogInformation("Starting M365 Teams group creation/assignment for organization {OrganizationId}", organizationId);
+            _logger.LogInformation("🚀 Starting M365 Teams group creation/assignment for organization {OrganizationId}", organizationId);
             
             var orgForTeams = await _organizationService.GetByIdAsync(organizationId.ToString());
             if (orgForTeams != null)
             {
+                _logger.LogInformation("🔍 Organization found: Name='{Name}', M365GroupId='{M365GroupId}'", 
+                    orgForTeams.Name, orgForTeams.M365GroupId ?? "null");
+                    
                 string groupIdToUse = null;
                 bool groupWasCreated = false;
                 
-                // CHECK FOR EXISTING M365 GROUP - CRITICAL FIX FOR DUPLICATION
+                // CHECK FOR EXISTING M365 GROUP - WITH VALIDATION
                 if (!string.IsNullOrEmpty(orgForTeams.M365GroupId))
                 {
-                    _logger.LogInformation("Organization {OrganizationId} already has M365GroupId {GroupId} - reusing existing group", 
+                    _logger.LogInformation("🔍 Organization {OrganizationId} has M365GroupId {GroupId} - validating if it still exists", 
                         organizationId, orgForTeams.M365GroupId);
-                    groupIdToUse = orgForTeams.M365GroupId;
+                    
+                    // Validate that the Teams group still exists in Azure AD
+                    bool groupExists = false;
+                    try
+                    {
+                        groupExists = await _graphService.GroupExistsAsync(orgForTeams.M365GroupId);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Error validating existing Teams group {GroupId} - treating as non-existent", orgForTeams.M365GroupId);
+                        groupExists = false;
+                    }
+                    
+                    if (groupExists)
+                    {
+                        _logger.LogInformation("✅ Existing Teams group {GroupId} verified - reusing", orgForTeams.M365GroupId);
+                        groupIdToUse = orgForTeams.M365GroupId;
+                    }
+                    else
+                    {
+                        _logger.LogWarning("🚫 Existing M365GroupId {GroupId} no longer exists in Azure AD - will create new Teams group and update organization", 
+                            orgForTeams.M365GroupId);
+                        // Clear the invalid M365GroupId so we create a new one
+                        var oldGroupId = orgForTeams.M365GroupId;
+                        orgForTeams.M365GroupId = null;
+                        var updateResult = await _organizationService.UpdateOrganizationAsync(orgForTeams);
+                        _logger.LogInformation("📝 Cleared invalid M365GroupId {OldGroupId} from organization - update result: {UpdateResult}", 
+                            oldGroupId, updateResult);
+                    }
                 }
-                else
+                
+                // Create new Teams group if we don't have a valid existing one
+                if (string.IsNullOrEmpty(groupIdToUse))
                 {
-                    // Only create new group if organization doesn't have one
+                    // Only create new group if organization doesn't have a valid one
                     var teamName = $"{orgForTeams.Name} - Team";
                     var description = $"Microsoft Teams collaboration space for {orgForTeams.Name}";
                     
-                    _logger.LogInformation("Creating new Teams group: {TeamName} for organization {OrganizationId}", 
+                    _logger.LogInformation("🆕 Organization has no M365GroupId - creating new Teams group: {TeamName} for organization {OrganizationId}", 
                         teamName, organizationId);
                     
                     try
                     {
                         var teamsResult = await _graphService.CreateTeamsGroupAsync(teamName, description, organizationId.ToString(), teamsAppIds);
                     
-                        _logger.LogInformation("CreateTeamsGroupAsync result - Success: {Success}, GroupId: {GroupId}", 
-                            teamsResult.Success, teamsResult.GroupId);
+                        _logger.LogInformation("📊 CreateTeamsGroupAsync result - Success: {Success}, GroupId: {GroupId}, ErrorCount: {ErrorCount}", 
+                            teamsResult.Success, teamsResult.GroupId ?? "null", teamsResult.Errors?.Count ?? 0);
                         
                         if (teamsResult.Errors.Any())
                         {
-                            _logger.LogWarning("Errors during Teams group creation: {Errors}", 
-                                string.Join(", ", teamsResult.Errors));
+                            _logger.LogError("❌ ERRORS during Teams group creation: {Errors}", 
+                                string.Join(" | ", teamsResult.Errors));
                         }
                         
                         if (teamsResult.Success && !string.IsNullOrEmpty(teamsResult.GroupId))
@@ -671,6 +706,7 @@ public class InvitationService : IInvitationService
             
             var graphResult = await _graphService.InviteGuestUserAsync(
                 user.Email, 
+                user.FullName ?? user.Name ?? user.Email.Split('@')[0], // Use stored display name or fallback
                 organization.Name,
                 user.RedirectUri ?? "/home", // Use stored redirect URI or default
                 new List<string>(), // Agent share URLs - would need to rebuild from user's agent types

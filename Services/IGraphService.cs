@@ -25,7 +25,7 @@ public interface IGraphService
     
     // NEW: B2B Invitation methods
     Task<GraphInvitationResult> InviteGuestUserAsync(string email, string organizationName);
-    Task<GraphInvitationResult> InviteGuestUserAsync(string email, string organizationName, string redirectUri, List<string> agentShareUrls, bool isAdminUser);
+    Task<GraphInvitationResult> InviteGuestUserAsync(string email, string displayName, string organizationName, string redirectUri, List<string> agentShareUrls, bool isAdminUser);
     Task<bool> CancelInvitationAsync(string invitationId);
     Task<bool> ResendInvitationAsync(string userId);
     Task<InvitationStatusResult> CheckInvitationStatusAsync(string email);

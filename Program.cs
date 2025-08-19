@@ -540,45 +540,42 @@ app.MapPost("/debug/disable-user", async (IGraphService graphService, HttpContex
 }).RequireAuthorization("SuperAdminOnly");
 
 // Test endpoint to diagnose exact permission issue
-app.MapPost("/debug/test-permissions", async (IGraphService graphService) =>
+app.MapPost("/debug/test-permissions", async (IGraphService graphService, ILogger<Program> logger) =>
 {
-    var logPath = "C:\\temp\\permission-test.log";
-    Directory.CreateDirectory("C:\\temp");
-    
     try
     {
         // Test 1: Can we read groups?
-        await File.AppendAllTextAsync(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEST: Testing group read permissions\n");
+        logger.LogInformation("TEST: Testing group read permissions");
         var groupExists = await graphService.GroupExistsAsync("e63773eb-ab43-4ca3-b461-9000a54be5b3");
-        await File.AppendAllTextAsync(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEST: Group exists check result: {groupExists}\n");
+        logger.LogInformation("TEST: Group exists check result: {GroupExists}", groupExists);
         
         // Test 2: Can we read users?
-        await File.AppendAllTextAsync(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEST: Testing user read permissions\n");
+        logger.LogInformation("TEST: Testing user read permissions");
         var testUser = await graphService.GetUserByEmailAsync("m.nachman@erpure.ai");
-        await File.AppendAllTextAsync(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEST: User read result: {(testUser != null ? "SUCCESS" : "FAILED")}\n");
+        logger.LogInformation("TEST: User read result: {UserResult}", testUser != null ? "SUCCESS" : "FAILED");
         
         if (testUser != null)
         {
-            await File.AppendAllTextAsync(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEST: User ID: {testUser.Id}\n");
+            logger.LogInformation("TEST: User ID: {UserId}", testUser.Id);
             
             // Test 3: Try to add user to group (this is what's failing)
-            await File.AppendAllTextAsync(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEST: Testing group membership assignment\n");
+            logger.LogInformation("TEST: Testing group membership assignment");
             try 
             {
                 var result = await graphService.AddUserToGroupAsync(testUser.Id, "e63773eb-ab43-4ca3-b461-9000a54be5b3");
-                await File.AppendAllTextAsync(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEST: Group membership result: {result}\n");
+                logger.LogInformation("TEST: Group membership result: {Result}", result);
             }
             catch (Exception ex)
             {
-                await File.AppendAllTextAsync(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEST: Group membership EXCEPTION: {ex.Message}\n");
+                logger.LogError(ex, "TEST: Group membership EXCEPTION: {Message}", ex.Message);
             }
         }
         
-        return Results.Json(new { message = "Permission test completed - check C:\\temp\\permission-test.log" });
+        return Results.Json(new { message = "Permission test completed - check application logs for details" });
     }
     catch (Exception ex)
     {
-        await File.AppendAllTextAsync(logPath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - TEST: CRITICAL ERROR: {ex.Message}\n");
+        logger.LogError(ex, "TEST: CRITICAL ERROR: {Message}", ex.Message);
         return Results.Json(new { error = ex.Message });
     }
 }).RequireAuthorization("SuperAdminOnly");

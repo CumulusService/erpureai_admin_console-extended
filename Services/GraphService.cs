@@ -828,19 +828,21 @@ public class GraphService : IGraphService
     public async Task<GraphInvitationResult> InviteGuestUserAsync(string email, string organizationName)
     {
         // Call the enhanced method with default values for backward compatibility
-        return await InviteGuestUserAsync(email, organizationName, "https://localhost:5243", new List<string>(), false);
+        var displayName = email.Split('@')[0]; // Default to email prefix for legacy compatibility
+        return await InviteGuestUserAsync(email, displayName, organizationName, "https://localhost:5243", new List<string>(), false);
     }
 
     /// <summary>
     /// Enhanced invitation method with custom redirect URI and agent share URLs
     /// </summary>
     /// <param name="email">Email address to invite</param>
+    /// <param name="displayName">Display name for the user in Azure AD</param>
     /// <param name="organizationName">Organization name for the invitation</param>
     /// <param name="redirectUri">Custom redirect URI for this user type</param>
     /// <param name="agentShareUrls">List of agent share URLs to include in invitation</param>
     /// <param name="isAdminUser">Whether this is an admin user (affects message content)</param>
     /// <returns>Invitation result</returns>
-    public async Task<GraphInvitationResult> InviteGuestUserAsync(string email, string organizationName, string redirectUri, List<string> agentShareUrls, bool isAdminUser)
+    public async Task<GraphInvitationResult> InviteGuestUserAsync(string email, string displayName, string organizationName, string redirectUri, List<string> agentShareUrls, bool isAdminUser)
     {
         try
         {
@@ -886,7 +888,7 @@ public class GraphService : IGraphService
             var invitation = new Invitation
             {
                 InvitedUserEmailAddress = email,
-                InvitedUserDisplayName = email.Split('@')[0],
+                InvitedUserDisplayName = displayName, // Use provided display name instead of email prefix
                 InviteRedirectUrl = redirectUri,
                 SendInvitationMessage = true,
                 InvitedUserMessageInfo = new InvitedUserMessageInfo
@@ -1043,8 +1045,12 @@ public class GraphService : IGraphService
             // Step 3: Create new B2B invitation (this effectively "resends" the invitation)
             _logger.LogInformation("🔄 Creating new B2B invitation for {Email} to resend", userEmail);
             
-            // Use existing GraphService invitation method
-            var invitationResult = await InviteGuestUserAsync(userEmail, "Your Organization");
+            // Try to get existing user's display name, fall back to email prefix
+            var existingUser = await GetUserByEmailAsync(userEmail);
+            var displayName = existingUser?.DisplayName ?? userEmail.Split('@')[0];
+            
+            // Use existing GraphService invitation method with proper display name
+            var invitationResult = await InviteGuestUserAsync(userEmail, displayName, "Your Organization", "https://localhost:5243", new List<string>(), false);
             
             if (invitationResult.Success)
             {

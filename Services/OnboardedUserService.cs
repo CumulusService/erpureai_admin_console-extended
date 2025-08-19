@@ -137,7 +137,7 @@ public class OnboardedUserService : IOnboardedUserService
                 user.AssignedDatabaseIds = relationalAssignments;
                 user.ModifiedOn = DateTime.UtcNow;
                 
-                _logger.LogInformation("=== SYNCING TO RELATIONAL TABLE ===");
+                // Sync to relational table
                 _logger.LogInformation("  Updated JSON field to: [{SyncedAssignments}]", 
                     string.Join(", ", relationalAssignments));
                     
@@ -224,7 +224,7 @@ public class OnboardedUserService : IOnboardedUserService
             var user = await GetByEmailAsync(email, organizationId);
             if (user?.AzureObjectId != null)
             {
-                _logger.LogInformation("✅ Found cached Azure Object ID {AzureObjectId} for user {Email}", 
+                _logger.LogInformation("Found cached Azure Object ID {AzureObjectId} for user {Email}", 
                     user.AzureObjectId, email);
                 return user.AzureObjectId;
             }
@@ -235,7 +235,7 @@ public class OnboardedUserService : IOnboardedUserService
             var azureUser = await _graphService.GetUserByEmailAsync(email);
             if (azureUser?.Id != null)
             {
-                _logger.LogInformation("✅ Found Azure Object ID {AzureObjectId} for user {Email} from Azure AD", 
+                _logger.LogInformation("Retrieved Azure Object ID {AzureObjectId} for user {Email} from Azure AD", 
                     azureUser.Id, email);
                 
                 // Update the database record with the Azure Object ID for future use
@@ -244,7 +244,7 @@ public class OnboardedUserService : IOnboardedUserService
                     user.AzureObjectId = azureUser.Id;
                     user.ModifiedOn = DateTime.UtcNow;
                     await _context.SaveChangesAsync();
-                    _logger.LogInformation("💾 Updated database with Azure Object ID for user {Email}", email);
+                    _logger.LogInformation("Updated database with Azure Object ID for user {Email}", email);
                 }
                 
                 return azureUser.Id;
@@ -606,9 +606,7 @@ public class OnboardedUserService : IOnboardedUserService
         using var transaction = await _context.Database.BeginTransactionAsync();
         try
         {
-            _logger.LogInformation("=== CRITICAL FIX: UpdateDatabaseAssignmentsAsync ===");
-            _logger.LogInformation("  UserId: {UserId}, OrganizationId: {OrganizationId}", userId, organizationId);
-            _logger.LogInformation("  New DatabaseIds: [{DatabaseIds}]", string.Join(", ", databaseIds));
+            _logger.LogInformation("Updating database assignments for user {UserId}", userId);
             
             // Get user and validate organization
             var user = await _context.OnboardedUsers
@@ -616,12 +614,13 @@ public class OnboardedUserService : IOnboardedUserService
 
             if (user != null)
             {
-                // CRITICAL FIX: Update BOTH storage systems to maintain consistency
-                
-                // 1. Update JSON field (legacy system)
+                // Update JSON field (legacy system)
                 user.AssignedDatabaseIds = databaseIds;
                 user.ModifiedOn = DateTime.UtcNow;
                 user.ModifiedBy = modifiedBy;
+                
+                _logger.LogInformation("Updated user database assignments for {UserId}: [{NewIds}]", 
+                    userId, string.Join(", ", user.AssignedDatabaseIds));
                 
                 // 2. Update UserDatabaseAssignments table (relational system used by stored procedure)
                 // Remove existing assignments for this user
@@ -656,6 +655,21 @@ public class OnboardedUserService : IOnboardedUserService
 
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
+                
+                // VERIFICATION: Reload user from database to verify the save worked
+                var verificationUser = await _context.OnboardedUsers
+                    .Where(u => u.OnboardedUserId == userId && u.OrganizationLookupId == organizationId)
+                    .FirstOrDefaultAsync();
+                    
+                if (verificationUser != null)
+                {
+                    _logger.LogInformation("VERIFICATION: User {UserId} now has AssignedDatabaseIds = [{VerifiedIds}] in database", 
+                        userId, string.Join(", ", verificationUser.AssignedDatabaseIds));
+                }
+                else
+                {
+                    _logger.LogError("VERIFICATION FAILED: Could not reload user {UserId} from database after save", userId);
+                }
                 
                 InvalidateCache(organizationId);
 
@@ -1228,7 +1242,7 @@ public class OnboardedUserService : IOnboardedUserService
                                 
                             if (azureSyncSuccess)
                             {
-                                _logger.LogInformation("✅ Azure AD group memberships synchronized successfully for user {Email}", user.Email);
+                                _logger.LogInformation("Synchronized Azure AD group memberships for user {Email}", user.Email);
                             }
                             else
                             {
@@ -1261,8 +1275,7 @@ public class OnboardedUserService : IOnboardedUserService
             if (azureSyncSuccess)
             {
                 await _context.SaveChangesAsync();
-                _logger.LogInformation("✅ Database saved: Updated agent type assignments for user {Email}", user.Email);
-                _logger.LogInformation("✅ Agent type update completed successfully for user {Email} - database and Azure AD in sync", user.Email);
+                _logger.LogInformation("Updated agent type assignments for user {Email}", user.Email);
                 return true;
             }
             else
@@ -1407,11 +1420,10 @@ public class OnboardedUserService : IOnboardedUserService
             result.AzureADSynced = azureSyncSuccess;
             result.Success = true;
             
-            _logger.LogInformation("✅ Database saved: Updated agent type assignments for user {Email}", user.Email);
+            _logger.LogInformation("Updated agent type assignments for user {Email}", user.Email);
             
             if (azureSyncSuccess)
             {
-                _logger.LogInformation("✅ Agent type update completed successfully for user {Email} - database and Azure AD in sync", user.Email);
             }
             else
             {

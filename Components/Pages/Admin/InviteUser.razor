@@ -750,6 +750,7 @@
             var result = await InvitationService.InviteUserAsync(
                 orgGuid,
                 invitationModel.Email,
+                invitationModel.DisplayName, // Pass the exact display name from the form
                 inviterGuid, // Use actual current user ID
                 new List<LegacyAgentType>(), // Empty legacy types for backward compatibility
                 agentTypeIdsList, // Use selected agent type IDs

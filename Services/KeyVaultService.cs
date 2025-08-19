@@ -479,7 +479,10 @@ public class KeyVaultService : IKeyVaultService
         
         if (!IsKeyVaultAvailable() || _secretClient == null)
         {
-            _logger.LogError("Key Vault is not available - cannot store secret {SecretName} for organization {OrganizationId}", secretName, organizationId);
+            _logger.LogError("🚨 CRITICAL: Key Vault is not available - cannot store secret {SecretName} for organization {OrganizationId}", secretName, organizationId);
+            _logger.LogError("🔍 Key Vault Configuration Check:");
+            _logger.LogError("  - IsKeyVaultAvailable(): {IsAvailable}", IsKeyVaultAvailable());
+            _logger.LogError("  - _secretClient is null: {SecretClientNull}", _secretClient == null);
             return false;
         }
 
@@ -487,8 +490,17 @@ public class KeyVaultService : IKeyVaultService
         {
             // Enhanced tenant isolation validation
             _logger.LogInformation("  Step 1: Validating tenant access...");
-            await _tenantValidator.ValidateSecretAccessAsync(secretName, organizationId, "write");
-            _logger.LogInformation("  Step 1: Tenant validation passed");
+            try
+            {
+                await _tenantValidator.ValidateSecretAccessAsync(secretName, organizationId, "write");
+                _logger.LogInformation("  Step 1: Tenant validation passed");
+            }
+            catch (Exception tenantEx)
+            {
+                _logger.LogError(tenantEx, "🚨 STEP 1 FAILED: Tenant validation failed for secret {SecretName}, org {OrganizationId}. Exception: {ExceptionType} - {Message}", 
+                    secretName, organizationId, tenantEx.GetType().Name, tenantEx.Message);
+                throw; // Re-throw to be caught by outer catch block
+            }
             
             _logger.LogInformation("  Step 2: Generating tenant secret name...");
             var tenantSecretName = await GenerateTenantSecretName(secretName, organizationId);
@@ -517,8 +529,65 @@ public class KeyVaultService : IKeyVaultService
             _logger.LogInformation("  Total tags to be set: {TotalTagCount}", secretOptions.Properties.Tags.Count);
 
             _logger.LogInformation("  Step 4: Calling Azure Key Vault SetSecretAsync with ALL tags...");
-            await _secretClient.SetSecretAsync(secretOptions);
-            _logger.LogInformation("  Step 4: Azure Key Vault call succeeded with all tags");
+            try
+            {
+                await _secretClient.SetSecretAsync(secretOptions);
+                _logger.LogInformation("  Step 4: Azure Key Vault call succeeded with all tags");
+            }
+            catch (Azure.RequestFailedException ex) when (ex.Status == 409 && ex.ErrorCode == "Conflict")
+            {
+                // If creating a new secret encounters a deleted secret, auto-purge and retry
+                if (ex.Message.Contains("deleted but recoverable"))
+                {
+                    _logger.LogWarning("Secret {TenantSecretName} is in deleted but recoverable state during consolidated creation. Auto-purging and retrying...", tenantSecretName);
+                    
+                    var purgeSuccess = await PurgeDeletedSecretAsync(secretName, organizationId);
+                    
+                    if (purgeSuccess)
+                    {
+                        _logger.LogInformation("Successfully purged deleted secret, retrying consolidated creation with exponential backoff...");
+                        
+                        // Retry with exponential backoff (Azure purge can take time)
+                        for (int attempt = 1; attempt <= 3; attempt++)
+                        {
+                            var delay = TimeSpan.FromSeconds(2 * Math.Pow(2, attempt - 1)); // 2s, 4s, 8s
+                            _logger.LogInformation("Attempt {Attempt}/3: Waiting {Delay}s for Azure purge to complete...", attempt, delay.TotalSeconds);
+                            await Task.Delay(delay);
+                            
+                            try
+                            {
+                                await _secretClient.SetSecretAsync(secretOptions);
+                                _logger.LogInformation("Successfully created consolidated secret after auto-purge on attempt {Attempt}", attempt);
+                                break; // Success - exit retry loop
+                            }
+                            catch (Azure.RequestFailedException retryEx) when (retryEx.Status == 409 && retryEx.Message.Contains("currently being deleted"))
+                            {
+                                if (attempt == 3)
+                                {
+                                    _logger.LogError("Consolidated secret still being deleted after 3 attempts (total {TotalSeconds}s). Azure purge is taking longer than expected.", (2 + 4 + 8));
+                                    throw new InvalidOperationException($"Secret {tenantSecretName} is still being deleted by Azure after {(2 + 4 + 8)}s. Please retry the operation in a few minutes.", retryEx);
+                                }
+                                _logger.LogWarning("Attempt {Attempt} failed - consolidated secret still being deleted, will retry...", attempt);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogError("Failed to purge deleted consolidated secret {TenantSecretName}. Manual intervention required.", tenantSecretName);
+                        throw new InvalidOperationException($"Cannot create consolidated secret {tenantSecretName}. Auto-purge failed. Please manually purge the secret from Key Vault.", ex);
+                    }
+                }
+                else
+                {
+                    throw; // Re-throw if it's a different conflict error
+                }
+            }
+            catch (Exception kvEx)
+            {
+                _logger.LogError(kvEx, "🚨 STEP 4 FAILED: Azure Key Vault SetSecretAsync failed for secret {TenantSecretName}. Exception: {ExceptionType} - {Message}", 
+                    tenantSecretName, kvEx.GetType().Name, kvEx.Message);
+                throw; // Re-throw to be caught by outer catch block
+            }
 
             _logger.LogInformation("🎉 Successfully created secret {SecretName} with {TagCount} total tags in SINGLE operation", 
                 secretName, secretOptions.Properties.Tags.Count);
@@ -531,7 +600,22 @@ public class KeyVaultService : IKeyVaultService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to store secret {SecretName} with tags for organization {OrganizationId}", secretName, organizationId);
+            _logger.LogError(ex, "🚨 CRITICAL: Failed to store secret {SecretName} with tags for organization {OrganizationId}. Exception Type: {ExceptionType}, Message: {Message}", 
+                secretName, organizationId, ex.GetType().Name, ex.Message);
+            
+            // Additional diagnostic logging
+            _logger.LogError("🔍 Key Vault Diagnostic Info:");
+            _logger.LogError("  - SecretClient Available: {SecretClientAvailable}", _secretClient != null);
+            _logger.LogError("  - Organization ID: {OrganizationId}", organizationId);
+            _logger.LogError("  - Secret Name: {SecretName}", secretName);
+            _logger.LogError("  - Total Additional Tags: {TagCount}", additionalTags.Count);
+            
+            if (ex.InnerException != null)
+            {
+                _logger.LogError("🔍 Inner Exception: {InnerExceptionType} - {InnerExceptionMessage}", 
+                    ex.InnerException.GetType().Name, ex.InnerException.Message);
+            }
+            
             return false;
         }
     }

@@ -461,11 +461,8 @@
 
     private async Task HandleInviteSubmit()
     {
-        Directory.CreateDirectory("C:\\temp");
-        await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - FORM: HandleInviteSubmit called - ENTRY POINT\n");
-        await File.AppendAllTextAsync("C:\\temp\\invitation-debug.log", 
-            $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - FORM: Selected agent types: {string.Join(", ", inviteModel.SelectedAgentTypeIds)}\n");
+        Logger.LogInformation("FORM: HandleInviteSubmit called - ENTRY POINT");
+        Logger.LogInformation("FORM: Selected agent types: {AgentTypes}", string.Join(", ", inviteModel.SelectedAgentTypeIds));
         
         if (isSubmitting) return;
         
@@ -582,6 +579,7 @@
             var invitationResult = await InvitationService.InviteUserAsync(
                 organizationId,
                 inviteModel.AdminEmail,
+                inviteModel.AdminName, // Pass the admin name as display name
                 inviterGuid, // Use actual current user ID
                 new List<LegacyAgentType> { LegacyAgentType.Admin }, // Admin user (legacy field for compatibility)
                 inviteModel.SelectedAgentTypeIds, // Agent types selected in UI

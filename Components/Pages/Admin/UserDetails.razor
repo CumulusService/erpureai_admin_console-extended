@@ -5,6 +5,7 @@
 @using AdminConsole.Services
 @using AdminConsole.Components.Shared
 @using System.Security.Cryptography
+@using Microsoft.Extensions.Caching.Memory
 @inject IOnboardedUserService OnboardedUserService
 @inject IDataIsolationService DataIsolationService
 @inject IOrganizationService OrganizationService
@@ -17,6 +18,7 @@
 @inject IHttpContextAccessor HttpContextAccessor
 @inject IGraphService GraphService
 @inject INavigationOptimizationService NavigationOptimizer
+@inject IMemoryCache MemoryCache
 @attribute [Authorize(Policy = "OrgAdminOrHigher")]
 
 <div class="container-fluid">
@@ -180,7 +182,7 @@
                                             </p>
                                             <button type="button" class="btn btn-outline-primary btn-sm" @onclick="ToggleDatabaseAssignment">
                                                 <i class="fas fa-database me-1"></i>
-                                                @(showDatabaseAssignment ? "Hide" : (user.AssignedDatabaseIds.Any() ? "Manage Databases" : "Assign Databases"))
+                                                @(showDatabaseAssignment ? "Hide" : (user.AssignedDatabaseIds.Any() ? "Manage/Unassign Databases" : "Assign Databases"))
                                             </button>
                                             
                                             @if (showDatabaseAssignment)
@@ -189,6 +191,10 @@
                                                     <div class="assignment-header">
                                                         <i class="fas fa-database me-2"></i>
                                                         Database Assignment
+                                                    </div>
+                                                    <div class="text-muted mb-3">
+                                                        <small><i class="fas fa-info-circle me-1"></i>
+                                                        Click databases to assign/unassign them. Checked = Assigned, Unchecked = Unassigned.</small>
                                                     </div>
                                                     @if (availableDatabases.Any())
                                                     {
@@ -201,6 +207,14 @@
                                                                     <div class="assignment-item-info">@database.DatabaseType - @database.ServerInstance</div>
                                                                 </div>
                                                             }
+                                                        </div>
+                                                        <div class="mb-3">
+                                                            <button type="button" class="btn btn-outline-success btn-sm me-2" @onclick="SelectAllDatabases">
+                                                                <i class="fas fa-check-square me-1"></i>Select All
+                                                            </button>
+                                                            <button type="button" class="btn btn-outline-danger btn-sm" @onclick="UnassignAllDatabases">
+                                                                <i class="fas fa-times-circle me-1"></i>Unassign All
+                                                            </button>
                                                         </div>
                                                         <div class="assignment-controls">
                                                             <button type="button" class="btn btn-primary btn-sm" @onclick="SaveDatabaseAssignments" disabled="@isSavingDatabaseAssignment">
@@ -809,6 +823,9 @@
             if (success)
             {
                 successMessage = $"Database assignments updated successfully for {user.Name}.";
+                
+                // CRITICAL FIX: Clear cache before reloading to ensure fresh database data
+                MemoryCache.Remove($"{NavigationOptimizationService.USER_DETAILS_CACHE_PREFIX}{UserId}");
                 await LoadUser(); // Reload to get updated assignments
                 showDatabaseAssignment = false;
             }
@@ -832,6 +849,19 @@
     private void CancelDatabaseAssignment()
     {
         showDatabaseAssignment = false;
+        selectedDatabaseIds.Clear();
+        StateHasChanged();
+    }
+
+    private void SelectAllDatabases()
+    {
+        selectedDatabaseIds.Clear();
+        selectedDatabaseIds.AddRange(availableDatabases.Select(db => db.Id));
+        StateHasChanged();
+    }
+
+    private void UnassignAllDatabases()
+    {
         selectedDatabaseIds.Clear();
         StateHasChanged();
     }
@@ -1185,6 +1215,9 @@
                 }
                 currentUserOrgId = organizationGuid;
             }
+            
+            // CRITICAL FIX: Clear cache before reloading to ensure fresh database data
+            MemoryCache.Remove($"{NavigationOptimizationService.USER_DETAILS_CACHE_PREFIX}{UserId}");
             
             // Reload all data
             await LoadUser();

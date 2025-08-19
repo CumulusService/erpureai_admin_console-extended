@@ -311,11 +311,29 @@
                                         @if (hasAgentTypeChanges)
                                         {
                                             <div class="mt-3 p-3 bg-warning bg-opacity-10 border border-warning rounded">
+                                                <div class="mb-3">
+                                                    <i class="fas fa-exclamation-triangle text-warning me-2"></i>
+                                                    <strong>Pending Changes:</strong>
+                                                    <span class="ms-2">Agent type configuration changes detected.</span>
+                                                </div>
+                                                
+                                                @{
+                                                    var agentTypesToAdd = selectedAgentTypeIds.Except(originalAgentTypeIds).ToList();
+                                                }
+                                                @if (agentTypesToAdd.Any())
+                                                {
+                                                    <div class="form-check mb-3">
+                                                        <input class="form-check-input" type="checkbox" id="autoAssignUsers" @bind="autoAssignExistingUsers">
+                                                        <label class="form-check-label" for="autoAssignUsers">
+                                                            <strong>Auto-assign all existing organization users to new agent types</strong>
+                                                            <br><small class="text-muted">If unchecked, users must be manually assigned via their individual profiles.</small>
+                                                        </label>
+                                                    </div>
+                                                }
+                                                
                                                 <div class="d-flex align-items-center justify-content-between">
-                                                    <div>
-                                                        <i class="fas fa-exclamation-triangle text-warning me-2"></i>
-                                                        <strong>Pending Changes:</strong>
-                                                        <span class="ms-2">Agent type configuration changes will apply to all organization users.</span>
+                                                    <div class="text-muted">
+                                                        <small>Click "Apply Changes" to save the configuration.</small>
                                                     </div>
                                                     <button type="button" class="btn btn-warning btn-sm" @onclick="SaveAgentTypeChanges" disabled="@isSavingAgentTypes">
                                                         @if (isSavingAgentTypes)
@@ -515,6 +533,7 @@
     private string agentTypeErrorMessage = string.Empty;
     private string agentTypeValidationMessage = string.Empty;
     private bool hasAgentTypeChanges => !selectedAgentTypeIds.SetEquals(originalAgentTypeIds);
+    private bool autoAssignExistingUsers = true; // Default to true for better UX
 
     // Database Type Detection
     private List<DatabaseCredential> activeDatabaseConnections = new();
@@ -709,7 +728,7 @@
 
         try
         {
-            Logger.LogInformation("=== REFRESH ORGANIZATION DEBUG ===");
+            Logger.LogInformation("Refreshing organization data for {OrganizationId}", OrganizationId);
             Logger.LogInformation("Route Parameter OrganizationId: {OrganizationId}", OrganizationId);
             Logger.LogInformation("Current Organization in memory: {CurrentOrgId} - {CurrentOrgName}", 
                 organization?.OrganizationId, organization?.Name);
@@ -815,7 +834,7 @@
             selectedAgentTypeIds = new HashSet<Guid>(orgAgentTypeIds);
             originalAgentTypeIds = new HashSet<Guid>(orgAgentTypeIds);
 
-            Logger.LogInformation("✅ ORGANIZATION-LEVEL: Loaded agent types allocated to organization {OrganizationName}: {AgentTypeIds}", 
+            Logger.LogInformation("Loaded agent types for organization {OrganizationName}: {AgentTypeIds}", 
                 organization.Name, string.Join(", ", orgAgentTypeIds));
         }
         catch (Exception ex)
@@ -865,21 +884,21 @@
 
         try
         {
-            Logger.LogInformation("🎯 ORGANIZATION-LEVEL AGENT TYPE MANAGEMENT: Starting for organization {OrganizationId}", OrganizationId);
+            Logger.LogInformation("Updating agent type configuration for organization {OrganizationId}", OrganizationId);
 
             // Determine what changed (ASSIGN vs UNASSIGN)
             var agentTypesToAdd = selectedAgentTypeIds.Except(originalAgentTypeIds).ToList();
             var agentTypesToRemove = originalAgentTypeIds.Except(selectedAgentTypeIds).ToList();
             
-            Logger.LogInformation("🔄 Agent types to ADD to organization: {AgentTypesToAdd}", string.Join(", ", agentTypesToAdd));
-            Logger.LogInformation("🔄 Agent types to REMOVE from organization: {AgentTypesToRemove}", string.Join(", ", agentTypesToRemove));
+            Logger.LogInformation("Agent types to add: {AgentTypesToAdd}, to remove: {AgentTypesToRemove}", string.Join(", ", agentTypesToAdd), string.Join(", ", agentTypesToRemove));
 
             var operationMessages = new List<string>();
 
-            // PHASE 1: ASSIGN agent types to organization (NO user updates)
+            // PHASE 1: ASSIGN agent types to organization
             if (agentTypesToAdd.Any())
             {
-                Logger.LogInformation("✅ ASSIGN: Adding {Count} agent types to organization - NO users automatically assigned", agentTypesToAdd.Count);
+                Logger.LogInformation("Adding {Count} agent types to organization. Auto-assign users: {AutoAssign}", 
+                    agentTypesToAdd.Count, autoAssignExistingUsers);
                 
                 var addedAgentNames = new List<string>();
                 foreach (var agentTypeId in agentTypesToAdd)
@@ -890,13 +909,66 @@
                 }
                 
                 operationMessages.Add($"✅ {agentTypesToAdd.Count} agent types allocated to organization: {string.Join(", ", addedAgentNames)}");
-                operationMessages.Add("📋 OrgAdmin can now assign these agents to users in their profile");
+                
+                // AUTO-ASSIGN existing users if requested
+                if (autoAssignExistingUsers)
+                {
+                    Logger.LogInformation("Auto-assigning organization users to new agent types");
+                    
+                    try
+                    {
+                        var assignmentResults = new List<string>();
+                        var totalUsersAssigned = 0;
+                        
+                        foreach (var agentTypeId in agentTypesToAdd)
+                        {
+                            var agentType = availableAgentTypes.FirstOrDefault(at => at.Id == agentTypeId);
+                            var agentName = agentType?.Name ?? agentTypeId.ToString();
+                            
+                            Logger.LogInformation("Assigning organization users to agent type: {AgentName}", agentName);
+                            
+                            // Assign ALL users in organization to this agent type
+                            var assignSuccess = await AgentGroupAssignmentService.AssignAllUsersToAgentTypeAsync(
+                                organization.OrganizationId, agentTypeId, "SuperAdmin-OrgLevel");
+                            
+                            if (assignSuccess)
+                            {
+                                assignmentResults.Add($"✅ {agentName}: All users assigned");
+                                totalUsersAssigned++;
+                            }
+                            else
+                            {
+                                assignmentResults.Add($"⚠️ {agentName}: Some users may need manual assignment");
+                            }
+                        }
+                        
+                        if (totalUsersAssigned == agentTypesToAdd.Count)
+                        {
+                            operationMessages.Add($"🎯 All organization users automatically assigned to {agentTypesToAdd.Count} new agent types");
+                        }
+                        else
+                        {
+                            operationMessages.Add($"⚠️ {totalUsersAssigned}/{agentTypesToAdd.Count} agent types successfully auto-assigned - check logs for details");
+                        }
+                        
+                        operationMessages.AddRange(assignmentResults);
+                    }
+                    catch (Exception autoAssignEx)
+                    {
+                        Logger.LogError(autoAssignEx, "❌ Error during auto-assignment of users to new agent types");
+                        operationMessages.Add("❌ Auto-assignment failed - users must be manually assigned via their profiles");
+                    }
+                }
+                else
+                {
+                    operationMessages.Add("📋 OrgAdmin can now assign these agents to users in their individual profiles");
+                }
             }
 
             // PHASE 2: UNASSIGN agent types from organization + remove ALL users
             if (agentTypesToRemove.Any())
             {
-                Logger.LogInformation("🔄 UNASSIGN: Removing {Count} agent types from organization + removing ALL users from these agents", agentTypesToRemove.Count);
+                Logger.LogInformation("Removing {Count} agent types from organization", agentTypesToRemove.Count);
                 
                 var removeResults = new List<string>();
                 var removeSuccessCount = 0;
@@ -908,7 +980,7 @@
                         var agentType = availableAgentTypes.FirstOrDefault(at => at.Id == agentTypeId);
                         var agentName = agentType?.Name ?? agentTypeId.ToString();
                         
-                        Logger.LogInformation("🔄 Removing all users from agent type: {AgentName}", agentName);
+                        Logger.LogInformation("Removing users from agent type: {AgentName}", agentName);
                         
                         // Remove ALL users in organization from this agent type
                         var removeSuccess = await AgentGroupAssignmentService.RemoveAllUsersFromAgentTypeAsync(
@@ -944,7 +1016,7 @@
             }
 
             // PHASE 3: Update organization record with new agent type allocation
-            Logger.LogInformation("🔄 Updating organization record with new agent type allocation");
+            Logger.LogInformation("Updating organization database record");
             var updateSuccess = await OrganizationService.UpdateOrganizationAgentTypesAsync(
                 OrganizationId.ToString(), selectedAgentTypeIds.ToList());
 
@@ -957,7 +1029,7 @@
                 await ProcessTeamsAppChangesAsync(agentTypesToAdd, agentTypesToRemove, operationMessages);
                 
                 successMessage = string.Join("<br>", operationMessages);
-                Logger.LogInformation("✅ Organization-level agent type allocation completed successfully for {OrganizationId}", OrganizationId);
+                Logger.LogInformation("Agent type allocation completed for organization {OrganizationId}", OrganizationId);
             }
             else
             {
@@ -1031,7 +1103,7 @@
                         if (installSuccess)
                         {
                             teamsAppOperations.Add($"✅ Installed Teams app for {agentType.Name}");
-                            Logger.LogInformation("✅ Successfully installed Teams app {TeamsAppId} for agent type {AgentTypeName}", 
+                            Logger.LogInformation("Installed Teams app {TeamsAppId} for agent type {AgentTypeName}", 
                                 agentType.TeamsAppId, agentType.Name);
                         }
                         else
@@ -1080,7 +1152,7 @@
                         if (uninstallSuccess)
                         {
                             teamsAppOperations.Add($"✅ Uninstalled Teams app for {agentType.Name}");
-                            Logger.LogInformation("✅ Successfully uninstalled Teams app {TeamsAppId} for agent type {AgentTypeName}", 
+                            Logger.LogInformation("Uninstalled Teams app {TeamsAppId} for agent type {AgentTypeName}", 
                                 agentType.TeamsAppId, agentType.Name);
                         }
                         else
