@@ -21,9 +21,12 @@ public class OrganizationService : IOrganizationService
     {
         try
         {
-            // For now, return the first organization where user is created by
+            // CRITICAL FIX: Super Admins must see their organizations regardless of state (active/inactive)  
+            // This ensures Super Admins can manage organizations they created even after deactivation
+            _logger.LogInformation("Loading organization for user {UserId} (including inactive ones for Super Admin management)", userId);
+            
             var organization = await _context.Organizations
-                .Where(o => o.CreatedBy == Guid.Parse(userId) && o.StateCode == StateCode.Active)
+                .Where(o => o.CreatedBy == Guid.Parse(userId))
                 .FirstOrDefaultAsync();
 
             if (organization != null)
@@ -87,7 +90,7 @@ public class OrganizationService : IOrganizationService
         }
     }
 
-    public async Task<Organization> CreateOrganizationAsync(string name, string domain, string adminUserId, string adminEmail)
+    public async Task<Organization> CreateOrganizationAsync(string name, string domain, string adminUserId, string adminEmail, bool allowUserInvitations = true)
     {
         // Generate deterministic GUID from domain (same logic as GetByIdAsync)
         var domainBasedOrgId = domain.Replace(".", "_").ToLowerInvariant();
@@ -127,6 +130,8 @@ public class OrganizationService : IOrganizationService
                 SAPAPIGatewayHostname = null, 
                 SAPBusinessOneWebClientHost = null,
                 DocumentCode = null,
+                // USER INVITATION PERMISSIONS - Set based on SuperAdmin choice during invitation
+                AllowUserInvitations = allowUserInvitations,
                 // Counters
                 UserCount = 0,
                 SecretCount = 0,
@@ -185,8 +190,11 @@ public class OrganizationService : IOrganizationService
     {
         try
         {
+            // CRITICAL FIX: Super Admins must see ALL organizations (active and inactive) for management purposes
+            // This ensures deactivated organizations remain visible for monitoring and management
+            _logger.LogInformation("Loading ALL organizations for Super Admin management (including inactive ones)");
+            
             var organizations = await _context.Organizations
-                .Where(o => o.StateCode == StateCode.Active)
                 .OrderByDescending(o => o.CreatedOn)
                 .ToListAsync();
 
@@ -227,6 +235,7 @@ public class OrganizationService : IOrganizationService
                 existingOrg.M365GroupId = organization.M365GroupId;
                 existingOrg.StateCode = organization.StateCode;
                 existingOrg.StatusCode = organization.StatusCode;
+                existingOrg.AllowUserInvitations = organization.AllowUserInvitations; // CRITICAL FIX: Update user invitation permissions
                 existingOrg.ModifiedOn = DateTime.UtcNow;
 
                 await _context.SaveChangesAsync();

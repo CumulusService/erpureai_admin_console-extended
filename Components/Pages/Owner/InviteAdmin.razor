@@ -172,6 +172,16 @@
 
                         <div class="mb-3">
                             <div class="form-check">
+                                <InputCheckbox @bind-Value="inviteModel.AllowUserInvitations" class="form-check-input border-2 border-gray-400 dark:border-gray-500 rounded focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400" id="allowUserInvitations" @onchange="@(async (e) => await MarkFormAsChanged())" />
+                                <label class="form-check-label text-gray-900 dark:text-gray-100" for="allowUserInvitations">
+                                    <strong>Allow organization admin to invite users</strong>
+                                    <br><small class="text-muted">When unchecked, creates a restricted admin who cannot invite users to their organization later. <em>This invitation will still proceed normally.</em></small>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <div class="form-check">
                                 <InputCheckbox @bind-Value="inviteModel.SendWelcomeEmail" class="form-check-input border-2 border-gray-400 dark:border-gray-500 rounded focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400" id="sendWelcome" @onchange="@(async (e) => await MarkFormAsChanged())" />
                                 <label class="form-check-label text-gray-900 dark:text-gray-100" for="sendWelcome">
                                     Send welcome email with setup instructions
@@ -427,14 +437,10 @@
                 Logger.LogInformation("Claim: {Type} = {Value}", claim.Type, claim.Value);
             }
             
-            isAuthorized = email?.EndsWith("@erpure.ai") == true;
-            Logger.LogInformation("User authorization check - Email: {Email}, Authorized: {Auth}", email, isAuthorized);
-            
-            if (!isAuthorized)
-            {
-                errorMessage = "Access denied. Only erpure.ai domain users can access this page.";
-                return;
-            }
+            // AUTHORIZATION REMOVED: Page already uses [Authorize(Policy = "SuperAdminOnly")] attribute
+            // which properly checks database roles. No need for additional domain-based checks.
+            isAuthorized = true;
+            Logger.LogInformation("User authorization - relying on SuperAdminOnly policy for {Email}", email);
         }
         else
         {
@@ -531,7 +537,8 @@
                 inviteModel.OrganizationName,
                 inviteModel.OrganizationDomain,
                 inviteModel.AdminEmail,
-                inviteModel.AdminName);
+                inviteModel.AdminName,
+                inviteModel.AllowUserInvitations);
 
             if (!setupResult.Success)
             {
@@ -857,6 +864,8 @@
         public List<Guid> SelectedAgentTypeIds { get; set; } = new();
 
         public string CustomMessage { get; set; } = string.Empty;
+
+        public bool AllowUserInvitations { get; set; } = true;
 
         public bool SendWelcomeEmail { get; set; } = true;
     }

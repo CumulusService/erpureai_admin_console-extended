@@ -24,6 +24,7 @@ public class InvitationService : IInvitationService
     private readonly IOperationStatusService _operationStatusService;
     private readonly IUserDatabaseAccessService _userDatabaseAccessService;
     private readonly IConfiguration _configuration;
+    private readonly IDataIsolationService _dataIsolationService;
 
     public InvitationService(
         IOrganizationService organizationService,
@@ -38,7 +39,8 @@ public class InvitationService : IInvitationService
         IStateValidationService stateValidationService,
         IOperationStatusService operationStatusService,
         IUserDatabaseAccessService userDatabaseAccessService,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IDataIsolationService dataIsolationService)
     {
         _organizationService = organizationService;
         _graphService = graphService;
@@ -53,6 +55,7 @@ public class InvitationService : IInvitationService
         _operationStatusService = operationStatusService;
         _userDatabaseAccessService = userDatabaseAccessService;
         _configuration = configuration;
+        _dataIsolationService = dataIsolationService;
     }
 
     private bool IsDataverseAvailable()
@@ -146,6 +149,29 @@ public class InvitationService : IInvitationService
                     Message = "Organization not found",
                     Errors = { "Invalid organization ID" }
                 };
+            }
+
+            // Step 1.5: CRITICAL - Check organization user invitation permissions
+            // This prevents restricted org admins from inviting users, but allows Super Admins full access
+            var currentUserRole = _dataIsolationService.GetCurrentUserRole();
+            var isSuperAdminOrHigher = currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer;
+            
+            if (!organization.AllowUserInvitations && !isSuperAdminOrHigher)
+            {
+                await _operationStatusService.CompleteOperationAsync(operationId, false, "User invitations disabled for this organization");
+                _logger.LogWarning("🚫 USER INVITATION BLOCKED: Organization {OrganizationName} ({OrganizationId}) has user invitations disabled. Org Admin (role: {UserRole}) attempted to invite {EmailToInvite}", 
+                    organization.Name, organizationId, currentUserRole, emailToInvite);
+                return new InvitationResult
+                {
+                    Success = false,
+                    Message = "User invitations are disabled for your organization",
+                    Errors = { "Contact your Super Administrator to enable user invitation permissions for your organization" }
+                };
+            }
+            else if (!organization.AllowUserInvitations && isSuperAdminOrHigher)
+            {
+                _logger.LogInformation("✅ SUPER ADMIN OVERRIDE: User {UserRole} bypassing organization invitation restrictions for {OrganizationName} to invite {EmailToInvite}", 
+                    currentUserRole, organization.Name, emailToInvite);
             }
 
             // Step 2: Determine redirect URI and collect agent share URLs
@@ -267,6 +293,12 @@ public class InvitationService : IInvitationService
 
             // Save to SQL Server (create or update)
             await SaveOrUpdateOnboardedUserToSqlServer(onboardedUser, userWasCreated);
+            
+            // CRITICAL SECURITY ENHANCEMENT: Assign app roles to newly created users
+            if (userWasCreated)
+            {
+                await AssignAppRoleToInvitedUserAsync(onboardedUser, assignedRole);
+            }
 
             // Step 4.5: Assign selected databases to the user
             if (selectedDatabaseIds.Any())
@@ -361,7 +393,7 @@ public class InvitationService : IInvitationService
                 _logger.LogInformation("🔍 Organization found: Name='{Name}', M365GroupId='{M365GroupId}'", 
                     orgForTeams.Name, orgForTeams.M365GroupId ?? "null");
                     
-                string groupIdToUse = null;
+                string? groupIdToUse = null;
                 bool groupWasCreated = false;
                 
                 // CHECK FOR EXISTING M365 GROUP - WITH VALIDATION
@@ -417,7 +449,7 @@ public class InvitationService : IInvitationService
                         _logger.LogInformation("📊 CreateTeamsGroupAsync result - Success: {Success}, GroupId: {GroupId}, ErrorCount: {ErrorCount}", 
                             teamsResult.Success, teamsResult.GroupId ?? "null", teamsResult.Errors?.Count ?? 0);
                         
-                        if (teamsResult.Errors.Any())
+                        if (teamsResult.Errors?.Any() == true)
                         {
                             _logger.LogError("❌ ERRORS during Teams group creation: {Errors}", 
                                 string.Join(" | ", teamsResult.Errors));
@@ -471,7 +503,7 @@ public class InvitationService : IInvitationService
                         }
                         else
                         {
-                            throw new Exception($"CreateTeamsGroupAsync failed: {string.Join(", ", teamsResult.Errors)}");
+                            throw new Exception($"CreateTeamsGroupAsync failed: {string.Join(", ", teamsResult.Errors ?? new List<string>())};");
                         }
                     }
                     catch (Exception ex)
@@ -584,6 +616,27 @@ public class InvitationService : IInvitationService
             }
 
             await _operationStatusService.CompleteOperationAsync(operationId, true, message);
+
+            // CRITICAL FIX: Clear caches immediately so invited user appears in UI right away
+            try
+            {
+                _logger.LogInformation("🚀 Clearing user list caches after successful invitation for organization {OrganizationId}", organizationId);
+                
+                // Clear NavigationOptimizer cache (used by ManageUsers page)
+                var navigationCacheKey = $"{NavigationOptimizationService.USER_LIST_CACHE_PREFIX}{organizationId}";
+                _cache.Remove(navigationCacheKey);
+                
+                // Clear OnboardedUserService cache
+                var userCacheKey = $"users_org_{organizationId}";
+                _cache.Remove(userCacheKey);
+                
+                _logger.LogInformation("✅ Successfully cleared caches - newly invited user should appear immediately");
+            }
+            catch (Exception cacheEx)
+            {
+                // Cache clearing is not critical - log warning but don't fail the invitation
+                _logger.LogWarning(cacheEx, "⚠️ Failed to clear caches after invitation - user may not appear immediately in UI");
+            }
 
             return new InvitationResult
             {
@@ -722,6 +775,20 @@ public class InvitationService : IInvitationService
 
                 _logger.LogInformation("✅ Successfully resent invitation to {Email}", user.Email);
                 
+                // Clear caches after successful resend (user status may have changed)
+                try
+                {
+                    var organizationId = user.OrganizationLookupId ?? Guid.Empty;
+                    var navigationCacheKey = $"{NavigationOptimizationService.USER_LIST_CACHE_PREFIX}{organizationId}";
+                    _cache.Remove(navigationCacheKey);
+                    _cache.Remove($"users_org_{organizationId}");
+                    _logger.LogInformation("🚀 Cleared caches after invitation resend");
+                }
+                catch (Exception cacheEx)
+                {
+                    _logger.LogWarning(cacheEx, "⚠️ Failed to clear caches after invitation resend");
+                }
+                
                 return new InvitationResult
                 {
                     Success = true,
@@ -822,6 +889,76 @@ public class InvitationService : IInvitationService
                 user.OnboardedUserId, user.Email, ex.Message);
             throw; // Re-throw to be handled by the calling method
         }
+    }
+    
+    /// <summary>
+    /// CRITICAL SECURITY ENHANCEMENT: Assigns appropriate app role to invited users
+    /// Ensures invited users have proper Azure AD app role assignments
+    /// </summary>
+    /// <param name="user">The invited user</param>
+    /// <param name="assignedRole">The role assigned to the user</param>
+    private async Task AssignAppRoleToInvitedUserAsync(OnboardedUser user, UserRole assignedRole)
+    {
+        try
+        {
+            _logger.LogInformation("🔒 INVITATION APP ROLE: Processing invited user {Email} for app role assignment (Role: {Role})", 
+                user.Email, assignedRole);
+            
+            // Check if user has Azure Object ID (they should from the invitation process)
+            if (string.IsNullOrEmpty(user.AzureObjectId))
+            {
+                _logger.LogWarning("⚠️ INVITATION APP ROLE: No Azure Object ID found for invited user {Email} - app role assignment skipped", user.Email);
+                return;
+            }
+            
+            // Determine appropriate app role based on assigned role
+            string targetAppRole = DetermineAppRoleFromUserRole(assignedRole);
+            
+            if (string.IsNullOrEmpty(targetAppRole))
+            {
+                _logger.LogInformation("ℹ️ INVITATION APP ROLE: No app role determined for invited user {Email} with role {Role}", 
+                    user.Email, assignedRole);
+                return;
+            }
+            
+            _logger.LogInformation("🎯 INVITATION APP ROLE: Assigning {AppRole} to invited user {Email} ({AzureObjectId})", 
+                targetAppRole, user.Email, user.AzureObjectId);
+            
+            // Assign the app role using GraphService
+            bool roleAssigned = await _graphService.AssignAppRoleToUserAsync(user.AzureObjectId, targetAppRole);
+            
+            if (roleAssigned)
+            {
+                _logger.LogInformation("✅ INVITATION APP ROLE SUCCESS: Assigned {AppRole} to invited user {Email}", 
+                    targetAppRole, user.Email);
+            }
+            else
+            {
+                _logger.LogWarning("⚠️ INVITATION APP ROLE WARNING: Failed to assign {AppRole} to invited user {Email}", 
+                    targetAppRole, user.Email);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ INVITATION APP ROLE ERROR: Failed to assign app role to invited user {Email}", user.Email);
+            // Don't throw - app role assignment failure shouldn't block invitation
+        }
+    }
+    
+    /// <summary>
+    /// Determines the appropriate app role based on the user's assigned role
+    /// </summary>
+    /// <param name="userRole">The role assigned to the user</param>
+    /// <returns>App role name to assign</returns>
+    private string DetermineAppRoleFromUserRole(UserRole userRole)
+    {
+        return userRole switch
+        {
+            UserRole.SuperAdmin or UserRole.Developer => "SuperAdmin",
+            UserRole.OrgAdmin => "OrgAdmin",
+            UserRole.User => "OrgUser",
+            _ => "OrgUser" // Default to OrgUser for any unrecognized roles
+        };
     }
 
 }

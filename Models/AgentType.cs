@@ -65,6 +65,12 @@ public class AgentTypeEntity
     public int DisplayOrder { get; set; } = 0;
     
     /// <summary>
+    /// Whether this agent type requires a supervisor email to be assigned to users
+    /// When true, users cannot be assigned this agent type without a valid supervisor email
+    /// </summary>
+    public bool RequireSupervisorEmail { get; set; } = false;
+    
+    /// <summary>
     /// When this agent type was created
     /// </summary>
     public DateTime CreatedDate { get; set; } = DateTime.UtcNow;

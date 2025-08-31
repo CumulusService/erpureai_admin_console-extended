@@ -28,7 +28,8 @@ public class OrganizationSetupService : IOrganizationSetupService
         string organizationName, 
         string organizationDomain, 
         string adminEmail, 
-        string adminName)
+        string adminName,
+        bool allowUserInvitations = true)
     {
         var result = new OrganizationSetupResult();
         
@@ -46,7 +47,8 @@ public class OrganizationSetupService : IOrganizationSetupService
                     organizationName, 
                     organizationDomain, 
                     Guid.NewGuid().ToString(), // TODO: Get actual admin user ID from claims
-                    adminEmail);
+                    adminEmail,
+                    allowUserInvitations);
 
                 if (organization != null)
                 {

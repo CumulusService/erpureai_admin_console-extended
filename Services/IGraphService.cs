@@ -72,6 +72,10 @@ public interface IGraphService
     Task<Dictionary<string, bool>> InstallMultipleTeamsAppsAsync(string teamId, List<string> teamsAppIds);
     Task<bool> UninstallTeamsAppAsync(string teamId, string teamsAppId);
     Task<Dictionary<string, bool>> UninstallMultipleTeamsAppsAsync(string teamId, List<string> teamsAppIds);
+    
+    // NEW: Teams App Permission Policy management
+    Task<bool> ConfigureTeamsAppPermissionPoliciesAsync(string groupId, string groupName, List<string> teamsAppIds);
+    Task<bool> ConfigureTenantLevelTeamsAppApprovalAsync(string teamsAppId);
 }
 
 /// <summary>

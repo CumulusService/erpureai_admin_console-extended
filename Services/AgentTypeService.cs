@@ -2,6 +2,7 @@ using AdminConsole.Data;
 using AdminConsole.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AdminConsole.Services;
 
@@ -16,6 +17,7 @@ public class AgentTypeService : IAgentTypeService
     private readonly IGraphService _graphService;
     private readonly IOrganizationService _organizationService;
     private readonly IMemoryCache _cache;
+    private readonly IServiceProvider _serviceProvider;
 
     private static readonly SemaphoreSlim _tableInitSemaphore = new(1, 1);
     private static bool _tablesInitialized = false;
@@ -25,13 +27,15 @@ public class AgentTypeService : IAgentTypeService
         ILogger<AgentTypeService> logger,
         IGraphService graphService,
         IOrganizationService organizationService,
-        IMemoryCache cache)
+        IMemoryCache cache,
+        IServiceProvider serviceProvider)
     {
         _context = context;
         _logger = logger;
         _graphService = graphService;
         _organizationService = organizationService;
         _cache = cache;
+        _serviceProvider = serviceProvider;
     }
 
     private async Task EnsureTablesExistAsync()
@@ -211,7 +215,7 @@ public class AgentTypeService : IAgentTypeService
                 return new List<AgentTypeEntity>();
 
             return await _context.AgentTypes
-                .Where(at => agentTypeIds.Contains(at.Id))
+                .Where(at => agentTypeIds.Contains(at.Id) && at.IsActive)
                 .OrderBy(at => at.DisplayOrder)
                 .ThenBy(at => at.Name)
                 .ToListAsync();
@@ -280,10 +284,17 @@ public class AgentTypeService : IAgentTypeService
             var newTeamsAppId = agentType.TeamsAppId;
             var teamsAppIdChanged = !string.Equals(oldTeamsAppId, newTeamsAppId, StringComparison.OrdinalIgnoreCase);
 
-            _logger.LogInformation("🔄 Agent Type Update: {Name} (ID: {Id}) - Teams App ID Changed: {Changed} " +
-                                 "(Old: '{OldAppId}', New: '{NewAppId}')", 
+            // 🔐 DETECT AGENT TYPE DEACTIVATION before updating
+            var oldIsActive = existingAgentType.IsActive;
+            var newIsActive = agentType.IsActive;
+            var isBeingDeactivated = oldIsActive && !newIsActive;
+
+            _logger.LogWarning("🔄 *** AGENT TYPE UPDATE *** {Name} (ID: {Id}) - Teams App ID Changed: {TeamsAppChanged} " +
+                                 "(Old: '{OldAppId}', New: '{NewAppId}') - *** DEACTIVATION: {IsBeingDeactivated} *** " +
+                                 "(Active: {OldActive} → {NewActive})", 
                 agentType.Name, agentType.Id, teamsAppIdChanged, 
-                oldTeamsAppId ?? "null", newTeamsAppId ?? "null");
+                oldTeamsAppId ?? "null", newTeamsAppId ?? "null", isBeingDeactivated,
+                oldIsActive, newIsActive);
 
             // Update properties
             existingAgentType.Name = agentType.Name;
@@ -293,6 +304,7 @@ public class AgentTypeService : IAgentTypeService
             existingAgentType.GlobalSecurityGroupId = agentType.GlobalSecurityGroupId;
             existingAgentType.TeamsAppId = agentType.TeamsAppId;
             existingAgentType.IsActive = agentType.IsActive;
+            existingAgentType.RequireSupervisorEmail = agentType.RequireSupervisorEmail;
             existingAgentType.DisplayOrder = agentType.DisplayOrder;
             existingAgentType.ModifiedDate = DateTime.UtcNow;
 
@@ -310,6 +322,36 @@ public class AgentTypeService : IAgentTypeService
                     agentType.Name);
                 
                 await ProcessTeamsAppUpdateForOrganizationsAsync(agentType.Id, oldTeamsAppId, newTeamsAppId);
+            }
+
+            // 🔐 REMOVE ALL USERS FROM SECURITY GROUPS if agent type is being deactivated
+            if (isBeingDeactivated)
+            {
+                _logger.LogError("🔐 *** CRITICAL SECURITY ACTION *** AGENT TYPE DEACTIVATION: Agent type '{Name}' is being deactivated - removing ALL users from associated security groups across ALL organizations", 
+                    agentType.Name);
+
+                try
+                {
+                    // Resolve IAgentGroupAssignmentService at runtime to avoid circular dependency
+                    var agentGroupAssignmentService = _serviceProvider.GetRequiredService<IAgentGroupAssignmentService>();
+                    var removalSuccess = await agentGroupAssignmentService.RemoveAllUsersFromAgentTypeGloballyAsync(agentType.Id, "SYSTEM_AGENT_DEACTIVATION");
+
+                    if (removalSuccess)
+                    {
+                        _logger.LogInformation("✅ SECURITY COMPLIANCE: Successfully removed all users from security groups for deactivated agent type '{Name}'", 
+                            agentType.Name);
+                    }
+                    else
+                    {
+                        _logger.LogError("❌ SECURITY RISK: Failed to remove some/all users from security groups for deactivated agent type '{Name}' - manual cleanup may be required", 
+                            agentType.Name);
+                    }
+                }
+                catch (Exception removalEx)
+                {
+                    _logger.LogError(removalEx, "💥 CRITICAL SECURITY ERROR: Exception occurred while removing users from security groups for deactivated agent type '{Name}' - manual cleanup required", 
+                        agentType.Name);
+                }
             }
 
             return true;
@@ -394,6 +436,49 @@ public class AgentTypeService : IAgentTypeService
                         {
                             _logger.LogInformation("✅ Successfully installed new Teams app {NewAppId} to organization {OrgName}", 
                                 newTeamsAppId, organization.Name);
+                            
+                            // 🔐 AUTOMATICALLY CONFIGURE TEAMS APP PERMISSION POLICIES
+                            // This eliminates the need for users to request IT admin approval
+                            _logger.LogInformation("🔐 Configuring Teams App permission policies for organization {OrgName} to eliminate approval requests", 
+                                organization.Name);
+                            
+                            try
+                            {
+                                var policyConfigured = await _graphService.ConfigureTeamsAppPermissionPoliciesAsync(
+                                    organization.M365GroupId, 
+                                    organization.Name, 
+                                    new List<string> { newTeamsAppId });
+                                
+                                if (policyConfigured)
+                                {
+                                    _logger.LogInformation("✅ Successfully configured Teams App permission policies for organization {OrgName}", 
+                                        organization.Name);
+                                    
+                                    // 🌐 ADDITIONALLY ATTEMPT TENANT-LEVEL APPROVAL CONFIGURATION
+                                    _logger.LogInformation("🌐 Attempting tenant-level app approval configuration to eliminate user approval requests...");
+                                    var tenantApprovalConfigured = await _graphService.ConfigureTenantLevelTeamsAppApprovalAsync(newTeamsAppId);
+                                    
+                                    if (tenantApprovalConfigured)
+                                    {
+                                        _logger.LogInformation("✅ Tenant-level app approval configured - users should not see approval requests");
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning("⚠️ Tenant-level approval could not be configured automatically - manual Teams Admin Center configuration may be needed");
+                                        _logger.LogInformation("💡 Manual fix: Teams Admin Center > Teams apps > Permission policies > Allow app {AppId}", newTeamsAppId);
+                                    }
+                                }
+                                else
+                                {
+                                    _logger.LogWarning("⚠️ Teams App permission policies could not be configured for organization {OrgName} - users may need to request approval", 
+                                        organization.Name);
+                                }
+                            }
+                            catch (Exception policyEx)
+                            {
+                                _logger.LogError(policyEx, "❌ Error configuring Teams App permission policies for organization {OrgName} - continuing with installation", 
+                                    organization.Name);
+                            }
                         }
                         else
                         {

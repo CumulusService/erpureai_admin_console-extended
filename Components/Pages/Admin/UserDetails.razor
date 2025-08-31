@@ -66,14 +66,14 @@
                         }
                         @if (user.StateCode == StateCode.Active)
                         {
-                            <button type="button" class="btn btn-outline-warning" @onclick="() => ToggleUserStatus(false)">
+                            <button type="button" class="btn btn-outline-warning" @onclick="ShowDeactivateModal">
                                 <i class="fas fa-pause me-1"></i>
                                 Deactivate
                             </button>
                         }
                         else
                         {
-                            <button type="button" class="btn btn-outline-success" @onclick="() => ToggleUserStatus(true)">
+                            <button type="button" class="btn btn-outline-success" @onclick="ShowReactivateModal">
                                 <i class="fas fa-play me-1"></i>
                                 Reactivate
                             </button>
@@ -92,8 +92,25 @@
 
             @if (!string.IsNullOrEmpty(successMessage))
             {
-                <div class="alert alert-success alert-dismissible fade show" role="alert">
-                    <strong>Success:</strong> @successMessage
+                <div class="alert @(successMessage.Contains("IMPORTANT") ? "alert-warning" : "alert-success") alert-dismissible fade show" role="alert">
+                    <div class="d-flex align-items-start">
+                        <i class="fas @(successMessage.Contains("IMPORTANT") ? "fa-exclamation-triangle" : "fa-check-circle") me-2 mt-1"></i>
+                        <div class="flex-grow-1">
+                            @if (successMessage.Contains("\n"))
+                            {
+                                @foreach (var line in successMessage.Split("\n", StringSplitOptions.RemoveEmptyEntries))
+                                {
+                                    <div class="@(line.Contains("IMPORTANT") ? "fw-bold" : "")">
+                                        @line
+                                    </div>
+                                }
+                            }
+                            else
+                            {
+                                <strong>Success:</strong> @successMessage
+                            }
+                        </div>
+                    </div>
                     <button type="button" class="btn-close" @onclick="ClearMessages"></button>
                 </div>
             }
@@ -161,8 +178,16 @@
                                             <label class="form-label text-muted">Assigned Databases</label>
                                             <p class="fw-bold">
                                                 @{
-                                                    // Filter to only show valid/existing database assignments
-                                                    var validAssignedDatabases = availableDatabases.Where(db => user.AssignedDatabaseIds.Contains(db.Id)).ToList();
+                                                    // ENHANCED DEBUG: Log database assignment state for troubleshooting
+                                                    Logger.LogInformation("🔍 DATABASE UI DEBUG: User {Email} has {AssignedCount} assigned database IDs: [{AssignedIds}]", 
+                                                        user.Email, 
+                                                        user.AssignedDatabaseIds?.Count ?? 0,
+                                                        user.AssignedDatabaseIds != null ? string.Join(", ", user.AssignedDatabaseIds) : "null");
+                                                    Logger.LogInformation("🔍 DATABASE UI DEBUG: Available databases count: {AvailableCount}", availableDatabases.Count);
+                                                    
+                                                    // Filter to only show valid/existing database assignments (with null safety)
+                                                    var validAssignedDatabases = availableDatabases.Where(db => user.AssignedDatabaseIds?.Contains(db.Id) == true).ToList();
+                                                    Logger.LogInformation("🔍 DATABASE UI DEBUG: Valid assigned databases after filtering: {ValidCount}", validAssignedDatabases.Count);
                                                 }
                                                 @if (validAssignedDatabases.Any())
                                                 {
@@ -182,7 +207,7 @@
                                             </p>
                                             <button type="button" class="btn btn-outline-primary btn-sm" @onclick="ToggleDatabaseAssignment">
                                                 <i class="fas fa-database me-1"></i>
-                                                @(showDatabaseAssignment ? "Hide" : (user.AssignedDatabaseIds.Any() ? "Manage/Unassign Databases" : "Assign Databases"))
+                                                @(showDatabaseAssignment ? "Hide" : (user.AssignedDatabaseIds?.Any() == true ? "Manage/Unassign Databases" : "Assign Databases"))
                                             </button>
                                             
                                             @if (showDatabaseAssignment)
@@ -295,7 +320,7 @@
                             </div>
                         </div>
 
-                        <div class="card">
+                        <div class="card" id="agent-types-section">
                             <div class="card-header admin-card-header">
                                 <h5 class="card-title mb-0">
                                     <i class="fas fa-robot me-2"></i>
@@ -468,6 +493,133 @@
     </div>
 </div>
 
+<!-- Deactivate User Confirmation Modal -->
+<div class="modal fade" id="deactivateModal" tabindex="-1" aria-labelledby="deactivateModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deactivateModalLabel">
+                    <i class="fas fa-exclamation-triangle text-warning me-2"></i>
+                    Confirm User Deactivation
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                @if (user != null)
+                {
+                    <div class="alert alert-warning">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Warning:</strong> This action will deactivate the user and remove their access to the system.
+                    </div>
+                    
+                    <p><strong>User:</strong> @user.FullName (@user.Email)</p>
+                    
+                    <p class="text-muted">
+                        The following actions will be performed:
+                    </p>
+                    <ul class="text-muted">
+                        <li>User will be deactivated in the database</li>
+                        <li>Azure AD app roles will be revoked</li>
+                        <li>User will be removed from security groups</li>
+                        <li>User will be removed from M365 groups</li>
+                        <li>User account will be disabled in Entra ID</li>
+                    </ul>
+                    
+                    <p><strong>Are you sure you want to proceed?</strong></p>
+                }
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="fas fa-times me-1"></i>
+                    Cancel
+                </button>
+                <button type="button" class="btn btn-warning" @onclick="ConfirmDeactivation" data-bs-dismiss="modal">
+                    <i class="fas fa-pause me-1"></i>
+                    Yes, Deactivate User
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Reactivate User Confirmation Modal -->
+<div class="modal fade" id="reactivateModal" tabindex="-1" aria-labelledby="reactivateModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="reactivateModalLabel">
+                    <i class="fas fa-info-circle text-info me-2"></i>
+                    Confirm User Reactivation
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                @if (user != null)
+                {
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Important:</strong> This action will reactivate the user with limited access.
+                    </div>
+                    
+                    <p><strong>User:</strong> @user.FullName (@user.Email)</p>
+                    
+                    <p class="text-muted">
+                        The following actions will be performed:
+                    </p>
+                    <ul class="text-muted">
+                        <li>User will be reactivated in the database</li>
+                        <li>User account will be re-enabled in Entra ID</li>
+                        <li>Basic app role (OrgUser) will be assigned</li>
+                        <li>User will be added back to M365/Teams group</li>
+                        <li class="text-danger fw-bold">⚠️ ALL agent types will be cleared (manual reassignment required)</li>
+                        <li class="text-danger fw-bold">⚠️ ALL database assignments will be cleared (manual reassignment required)</li>
+                    </ul>
+                    
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <strong>You will need to manually reassign:</strong>
+                        <ul class="mb-0 mt-2">
+                            <li>Agent types for system access</li>
+                            <li>Database assignments for data access</li>
+                        </ul>
+                    </div>
+                    
+                    <p><strong>Are you sure you want to proceed with reactivation?</strong></p>
+                }
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="fas fa-times me-1"></i>
+                    Cancel
+                </button>
+                <button type="button" class="btn btn-success" @onclick="ConfirmReactivation" data-bs-dismiss="modal">
+                    <i class="fas fa-play me-1"></i>
+                    Yes, Reactivate User
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Agent Share URL Popup -->
+<AgentShareUrlPopup IsVisible="@showAgentShareUrlPopup" 
+                   AgentType="@currentAgentTypeForPopup" 
+                   OnClose="@CloseAgentShareUrlPopup" />
+
+<script>
+    window.showModal = function (modalId) {
+        const modal = new bootstrap.Modal(document.getElementById(modalId));
+        modal.show();
+    };
+    
+    window.scrollToElement = function (elementId) {
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    };
+</script>
+
 @code {
     [Parameter] public Guid UserId { get; set; }
     
@@ -503,6 +655,10 @@
     
     // Current user agent types from database
     private List<AgentTypeEntity> currentUserAgentTypes = new();
+
+    // Agent Share URL Popup state
+    private bool showAgentShareUrlPopup = false;
+    private AgentTypeEntity? currentAgentTypeForPopup = null;
 
     // 🚀 Fast Navigation Data Loading - called by FastNavigationWrapper
     private async Task LoadUserDataAsync()
@@ -557,7 +713,9 @@
     {
         try
         {
-            currentUserRole = DataIsolationService.GetCurrentUserRole();
+            // CRITICAL FIX: Use async version with database checks for accurate role detection
+            currentUserRole = await DataIsolationService.GetCurrentUserRoleAsync();
+            Logger.LogInformation("🔍 ROLE DEBUG: Current user role detected as: {CurrentUserRole}", currentUserRole);
             
             var currentUserOrgIdStr = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
             if (string.IsNullOrEmpty(currentUserOrgIdStr))
@@ -626,13 +784,22 @@
             {
                 var allUserAgentTypes = await OnboardedUserService.GetUserAgentTypesAsync(user.OnboardedUserId, currentUserOrgId);
                 
-                // CRITICAL FIX: Filter user agent types to only show those currently allocated to the organization
+                // CRITICAL BUG FIX: Get the organization's currently allocated agent types
                 var orgAgentTypeIds = await OrganizationService.GetOrganizationAgentTypesAsync(currentUserOrgId.ToString());
                 var orgAgentTypeIdSet = orgAgentTypeIds.ToHashSet();
+                
+                // Filter user agent types to only show those currently allocated to the organization
                 currentUserAgentTypes = allUserAgentTypes.Where(at => orgAgentTypeIdSet.Contains(at.Id)).ToList();
                 
-                Logger.LogInformation("Loaded {AllCount} total agent types for user, showing {FilteredCount} (org-allocated only)", 
+                Logger.LogInformation("Loaded {AllCount} total user agent types, filtered to {ValidCount} valid assignments (org-allocated and properly synchronized)", 
                     allUserAgentTypes.Count, currentUserAgentTypes.Count);
+                
+                // ADDITIONAL DEBUG: Log which agent types are being shown
+                if (currentUserAgentTypes.Any())
+                {
+                    var agentNames = string.Join(", ", currentUserAgentTypes.Select(at => at.Name));
+                    Logger.LogInformation("Current user agent types being displayed: {AgentNames}", agentNames);
+                }
             }
         }
         catch (Exception ex)
@@ -711,12 +878,19 @@
 
     private async Task ToggleUserStatus(bool activate)
     {
-        if (user == null) return;
+        Logger.LogInformation("🔍 TOGGLE DEBUG: ToggleUserStatus called with activate={Activate} for user {Email}", activate, user?.Email);
+        
+        if (user == null) 
+        {
+            Logger.LogWarning("🔍 TOGGLE DEBUG: User is null, returning early");
+            return;
+        }
 
         try
         {
             ClearMessages();
             var currentUserId = GetCurrentUserId();
+            Logger.LogInformation("🔍 TOGGLE DEBUG: Current user ID: {CurrentUserId}", currentUserId);
 
             // CRITICAL SECURITY CHECK: Validate user permissions before allowing deactivation
             if (!activate) // Only check for deactivation, not reactivation
@@ -736,7 +910,11 @@
                 success = await OnboardedUserService.ReactivateAsync(user.OnboardedUserId, currentUserOrgId, currentUserId);
                 if (success)
                 {
-                    successMessage = $"User {user.Name} has been reactivated successfully.";
+                    successMessage = $"✅ User {user.Name} has been reactivated successfully!\n\n⚠️ IMPORTANT: All agent types and database assignments have been cleared for security.\n\n📝 ACTION REQUIRED: You must manually reassign below:\n• Agent types (for system access)\n• Database assignments (for data access)\n\nCurrent Status: Basic access + M365/Teams collaboration only";
+                    
+                    // Auto-scroll to agent types section to guide admin
+                    _ = Task.Delay(500).ContinueWith(_ => 
+                        JSRuntime.InvokeVoidAsync("scrollToElement", "agent-types-section"));
                 }
             }
             else
@@ -750,7 +928,26 @@
 
             if (success)
             {
+                // CRITICAL FIX: Clear all caches before reloading to ensure fresh data
+                MemoryCache.Remove($"{NavigationOptimizationService.USER_DETAILS_CACHE_PREFIX}{UserId}");
+                
                 await LoadUser(); // Reload to get updated status
+                
+                // Force complete UI refresh to ensure all sections update
+                StateHasChanged();
+                
+                // ADDITIONAL FIX: Specifically reload available databases to ensure assignment UI updates
+                await LoadAvailableDatabases();
+                
+                // Add small delay then force another complete refresh to ensure database changes are reflected in UI
+                await Task.Delay(1000);
+                
+                // ENHANCED FIX: Clear cache again and reload everything to ensure UI is fully updated
+                MemoryCache.Remove($"{NavigationOptimizationService.USER_DETAILS_CACHE_PREFIX}{UserId}");
+                await LoadUser();
+                await LoadAvailableDatabases(); // Ensure database assignment UI is updated
+                
+                StateHasChanged();
             }
             else
             {
@@ -1130,6 +1327,10 @@
 
             var currentUserId = GetCurrentUserId();
             
+            // Capture current agent type IDs before update to identify newly assigned ones
+            var previousAgentTypeIds = currentUserAgentTypes.Select(at => at.Id).ToHashSet();
+            var newlyAssignedAgentTypeIds = selectedAgentTypeIds.Except(previousAgentTypeIds).ToList();
+            
             Logger.LogInformation("🔍 DEBUG: About to update agent types for user {UserId} with types: {AgentTypeIds}", 
                 user.OnboardedUserId, string.Join(", ", selectedAgentTypeIds));
             
@@ -1161,6 +1362,9 @@
                 await LoadUser(); // Reload to get updated assignments
                 showAgentTypesAssignment = false;
                 Logger.LogInformation("Successfully updated agent types for user {UserId} - Azure AD synced: {AzureSynced}", user.OnboardedUserId, result.AzureADSynced);
+
+                // 🎉 Show Agent Share URL popup for newly assigned agent types
+                await ShowPopupsForNewlyAssignedAgents(newlyAssignedAgentTypeIds);
             }
             else
             {
@@ -1216,16 +1420,25 @@
                 currentUserOrgId = organizationGuid;
             }
             
-            // CRITICAL FIX: Clear cache before reloading to ensure fresh database data
+            // ENHANCED FIX: Clear ALL caches and reset UI state to ensure fresh data
             MemoryCache.Remove($"{NavigationOptimizationService.USER_DETAILS_CACHE_PREFIX}{UserId}");
             
-            // Reload all data
+            // Clear local UI state to force complete refresh
+            currentUserAgentTypes.Clear();
+            availableDatabases.Clear();
+            availableAgentTypes.Clear();
+            
+            // Reload all data with fresh data from database
             await LoadUser();
             await LoadAvailableAgentTypes();
             await LoadAvailableDatabases();
             
+            // Force complete UI refresh after data reload
+            StateHasChanged();
+            
             successMessage = "User data refreshed successfully.";
-            Logger.LogInformation("Successfully refreshed user data for user {UserId}", UserId);
+            Logger.LogInformation("Successfully refreshed user data for user {UserId} - Database assignments count: {DbCount}", 
+                UserId, user?.AssignedDatabaseIds?.Count ?? 0);
         }
         catch (Exception ex)
         {
@@ -1252,6 +1465,10 @@
                               HttpContextAccessor.HttpContext?.User.FindFirst("preferred_username")?.Value;
         Logger.LogInformation("Current User Email: {CurrentUserEmail}", currentUserEmail);
         
+        // ENHANCED DEBUG: Check target user role early
+        var targetUserRole = GetUserRole(targetUser);
+        Logger.LogInformation("TARGET USER ROLE DETECTED: {TargetRole}", targetUserRole);
+        
         // CRITICAL SECURITY CHECK: No one can deactivate themselves - this is the primary issue to fix
         if (IsCurrentUser(targetUser))
         {
@@ -1269,7 +1486,7 @@
         // Org Admins can only remove regular organization users (OrgUsers), not other Org Admins
         if (currentUserRole == UserRole.OrgAdmin)
         {
-            var targetUserRole = GetUserRole(targetUser);
+            // targetUserRole already declared above
             
             // Additional safety check for same domain users
             if (!string.IsNullOrEmpty(currentUserEmail))
@@ -1277,16 +1494,31 @@
                 var currentUserDomain = currentUserEmail.Split('@').LastOrDefault();
                 var targetUserDomain = targetUser.Email?.Split('@').LastOrDefault();
                 
+                Logger.LogInformation("DOMAIN CHECK: Current={CurrentDomain}, Target={TargetDomain}", currentUserDomain, targetUserDomain);
+                
                 if (!string.IsNullOrEmpty(currentUserDomain) && 
                     !string.IsNullOrEmpty(targetUserDomain) &&
                     string.Equals(currentUserDomain, targetUserDomain, StringComparison.OrdinalIgnoreCase))
                 {
+                    Logger.LogInformation("SAME DOMAIN DETECTED - checking if target is OrgAdmin");
                     if (targetUserRole == UserRole.OrgAdmin)
                     {
                         Logger.LogInformation("RESULT: FALSE - OrgAdmin cannot remove other OrgAdmin from same domain: {UserEmail}", targetUser.Email);
                         return false;
                     }
+                    else
+                    {
+                        Logger.LogInformation("SAME DOMAIN: Target is NOT OrgAdmin ({TargetRole}), continuing to final check", targetUserRole);
+                    }
                 }
+                else 
+                {
+                    Logger.LogInformation("DIFFERENT DOMAINS or NULL domains detected");
+                }
+            }
+            else
+            {
+                Logger.LogInformation("CURRENT USER EMAIL IS NULL/EMPTY");
             }
             
             // OrgAdmins can remove regular users but NOT other OrgAdmins
@@ -1382,4 +1614,86 @@
             _ => (status, "bg-info", "fas fa-info-circle", lastChecked)
         };
     }
+    
+    /// <summary>
+    /// Shows the deactivation confirmation modal
+    /// </summary>
+    private async Task ShowDeactivateModal()
+    {
+        Logger.LogInformation("🔍 MODAL DEBUG: ShowDeactivateModal called for user {Email}", user?.Email);
+        await JSRuntime.InvokeVoidAsync("showModal", "deactivateModal");
+        Logger.LogInformation("🔍 MODAL DEBUG: Modal should now be visible");
+    }
+    
+    /// <summary>
+    /// Confirms and executes the deactivation after user confirmation
+    /// </summary>
+    private async Task ConfirmDeactivation()
+    {
+        Logger.LogInformation("🔍 CONFIRM DEBUG: ConfirmDeactivation called for user {Email}", user?.Email);
+        await ToggleUserStatus(false); // Proceed with deactivation
+        Logger.LogInformation("🔍 CONFIRM DEBUG: ToggleUserStatus(false) completed");
+    }
+    
+    /// <summary>
+    /// Shows the reactivation confirmation modal
+    /// </summary>
+    private async Task ShowReactivateModal()
+    {
+        await JSRuntime.InvokeVoidAsync("showModal", "reactivateModal");
+    }
+    
+    /// <summary>
+    /// Confirms and executes the reactivation after user confirmation
+    /// </summary>
+    private async Task ConfirmReactivation()
+    {
+        await ToggleUserStatus(true); // Proceed with reactivation
+    }
+
+    #region Agent Share URL Popup Methods
+
+    /// <summary>
+    /// Shows the Agent Share URL popup for a specific agent type
+    /// </summary>
+    private async Task ShowAgentShareUrlPopup(AgentTypeEntity agentType)
+    {
+        currentAgentTypeForPopup = agentType;
+        showAgentShareUrlPopup = true;
+        StateHasChanged();
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Closes the Agent Share URL popup
+    /// </summary>
+    private async Task CloseAgentShareUrlPopup()
+    {
+        showAgentShareUrlPopup = false;
+        currentAgentTypeForPopup = null;
+        StateHasChanged();
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Shows popups for newly assigned agent types
+    /// </summary>
+    private async Task ShowPopupsForNewlyAssignedAgents(List<Guid> newlyAssignedAgentTypeIds)
+    {
+        if (!newlyAssignedAgentTypeIds.Any()) return;
+
+        // Show popup for each newly assigned agent type that has a share URL
+        foreach (var agentTypeId in newlyAssignedAgentTypeIds)
+        {
+            var agentType = availableAgentTypes.FirstOrDefault(at => at.Id == agentTypeId);
+            if (agentType != null && !string.IsNullOrEmpty(agentType.AgentShareUrl))
+            {
+                await ShowAgentShareUrlPopup(agentType);
+                break; // Show only the first one for now, to avoid multiple popups
+            }
+        }
+    }
+
+    #endregion
+
 }

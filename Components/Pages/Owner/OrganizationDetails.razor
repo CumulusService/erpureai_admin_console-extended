@@ -8,6 +8,7 @@
 @inject IModalService ModalService
 @inject IGraphService GraphService
 @inject IUserAccessValidationService UserAccessValidationService
+@inject IAgentTypeService AgentTypeService
 @inject IHttpContextAccessor HttpContextAccessor
 @inject NavigationManager Navigation
 @inject ILogger<OrganizationDetails> Logger
@@ -315,7 +316,7 @@
                                 {
                                     @foreach (var user in organizationUsers.Take(5))
                                     {
-                                        <div class="d-flex align-items-center mb-2">
+                                        <div class="d-flex align-items-center mb-3 border-bottom pb-2">
                                             <div class="avatar-sm me-2">
                                                 <div class="avatar-title bg-info rounded-circle">
                                                     @user.Name.FirstOrDefault()
@@ -324,10 +325,41 @@
                                             <div class="flex-grow-1">
                                                 <div class="fw-bold small">@user.Name</div>
                                                 <div class="text-muted small">@user.Email</div>
+                                                @* ENHANCED: Show assigned agent types for each user *@
+                                                @if (user.AgentTypeIds?.Any() == true)
+                                                {
+                                                    <div class="mt-1">
+                                                        @foreach (var agentTypeId in user.AgentTypeIds.Take(3))
+                                                        {
+                                                            var agentTypeName = GetAgentTypeName(agentTypeId);
+                                                            <span class="badge bg-primary me-1 small">@agentTypeName</span>
+                                                        }
+                                                        @if (user.AgentTypeIds.Count > 3)
+                                                        {
+                                                            <span class="badge bg-secondary me-1 small">+@(user.AgentTypeIds.Count - 3) more</span>
+                                                        }
+                                                    </div>
+                                                }
+                                                else
+                                                {
+                                                    <div class="mt-1">
+                                                        <span class="badge bg-warning small">No agents assigned</span>
+                                                    </div>
+                                                }
                                             </div>
-                                            <span class="badge @(user.StateCode == StateCode.Active ? "bg-success" : "bg-secondary")">
-                                                @(user.StateCode == StateCode.Active ? "Active" : "Inactive")
-                                            </span>
+                                            <div class="text-end">
+                                                <div class="mb-1">
+                                                    <span class="badge @(user.StateCode == StateCode.Active ? "bg-success" : "bg-secondary")">
+                                                        @(user.StateCode == StateCode.Active ? "Active" : "Inactive")
+                                                    </span>
+                                                </div>
+                                                @if (user.GetUserRole() == UserRole.OrgAdmin)
+                                                {
+                                                    <div>
+                                                        <span class="badge bg-warning small">Admin</span>
+                                                    </div>
+                                                }
+                                            </div>
                                         </div>
                                     }
                                 }
@@ -373,6 +405,7 @@
     
     private Organization? organization;
     private List<OnboardedUser> organizationUsers = new();
+    private List<AgentTypeEntity> agentTypes = new();
     private int secretCount = 0;
     private int activeUsersCount = 0;
     private int pendingUsersCount = 0;
@@ -445,6 +478,9 @@
             {
                 // Load users for this organization
                 organizationUsers = await OnboardedUserService.GetByOrganizationAsync(OrganizationId);
+                
+                // ENHANCED: Load agent types for display
+                agentTypes = await AgentTypeService.GetAllAgentTypesAsync();
                 
                 // Calculate statistics
                 activeUsersCount = organizationUsers.Count(u => u.StateCode == StateCode.Active);
@@ -755,6 +791,15 @@
         if (string.IsNullOrEmpty(email)) return string.Empty;
         var atIndex = email.IndexOf('@');
         return atIndex > 0 ? email.Substring(atIndex + 1) : string.Empty;
+    }
+
+    /// <summary>
+    /// ENHANCED: Gets the display name for an agent type ID to show assigned agents
+    /// </summary>
+    private string GetAgentTypeName(Guid agentTypeId)
+    {
+        var agentType = agentTypes.FirstOrDefault(at => at.Id == agentTypeId);
+        return agentType?.DisplayName ?? agentType?.Name ?? "Unknown Agent";
     }
 }
 

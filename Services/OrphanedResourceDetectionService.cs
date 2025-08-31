@@ -317,7 +317,9 @@ public class OrphanedResourceDetectionService : IOrphanedResourceDetectionServic
                 try
                 {
                     // Verify security group exists in Azure AD
-                    var groupExists = await graphService.GroupExistsAsync(agentType.GlobalSecurityGroupId);
+                    var groupExists = !string.IsNullOrEmpty(agentType.GlobalSecurityGroupId)
+                        ? await graphService.GroupExistsAsync(agentType.GlobalSecurityGroupId)
+                        : false;
                     if (!groupExists)
                     {
                         var orphanedAgentGroup = new OrphanedResource
@@ -331,7 +333,7 @@ public class OrphanedResourceDetectionService : IOrphanedResourceDetectionServic
                             Metadata = new Dictionary<string, object>
                             {
                                 { "agentTypeName", agentType.Name },
-                                { "globalSecurityGroupId", agentType.GlobalSecurityGroupId },
+                                { "globalSecurityGroupId", agentType.GlobalSecurityGroupId ?? "None" },
                                 { "agentShareUrl", agentType.AgentShareUrl ?? "None" },
                                 { "description", agentType.Description ?? "None" }
                             }

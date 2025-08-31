@@ -48,6 +48,31 @@
                 </div>
             }
 
+            @if (!userInvitationsAllowed)
+            {
+                <div class="alert alert-warning border-0 mb-4" role="alert">
+                    <div class="d-flex align-items-start">
+                        <div class="me-3">
+                            <i class="fas fa-ban fa-2x text-warning"></i>
+                        </div>
+                        <div class="flex-grow-1">
+                            <h5 class="alert-heading mb-2">
+                                <i class="fas fa-exclamation-triangle me-1"></i>
+                                User Invitations Restricted
+                            </h5>
+                            <p class="mb-2">
+                                Your organization has been configured with restricted user invitation permissions. 
+                                You cannot invite new users to your organization at this time.
+                            </p>
+                            <hr class="my-2">
+                            <p class="mb-0">
+                                <strong>Need to invite users?</strong> Contact your Super Administrator to enable user invitation permissions for your organization.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            }
+
             <div class="row">
                 <div class="col-md-8 col-lg-6">
                     @* ADDITIVE: Optional user search before invitation - completely optional *@
@@ -144,14 +169,15 @@
                         }
                     </div>
                     
-                    <div class="card">
-                        <div class="card-header admin-card-header">
-                            <h5 class="card-title mb-0">
-                                <i class="fas fa-user-plus me-2"></i>
-                                User Invitation Details
+                    <div class="card @(!userInvitationsAllowed ? "bg-light border-secondary" : "")">
+                        <div class="card-header admin-card-header @(!userInvitationsAllowed ? "bg-secondary text-muted" : "")">
+                            <h5 class="card-title mb-0 @(!userInvitationsAllowed ? "text-muted" : "")">
+                                <i class="fas @(userInvitationsAllowed ? "fa-user-plus" : "fa-ban") me-2"></i>
+                                User Invitation Details @(!userInvitationsAllowed ? "(Disabled)" : "")
                             </h5>
                         </div>
-                        <div class="card-body">
+                        <div class="card-body @(!userInvitationsAllowed ? "bg-light text-muted" : "")"
+                             style="@(!userInvitationsAllowed ? "opacity: 0.6; pointer-events: none;" : "")">
                             <EditForm Model="invitationModel" OnValidSubmit="SendInvitationAsync">
                                 <DataAnnotationsValidator />
                                 
@@ -444,6 +470,8 @@
     private string allowedDomain = string.Empty;
     private bool isLoading = false;
     private UserRole currentUserRole = UserRole.User;
+    private Organization? currentOrganization = null;
+    private bool userInvitationsAllowed = true;
     
     // Enhanced unsaved changes tracking
     private UnsavedChangesTracker? unsavedChangesTracker;
@@ -500,7 +528,15 @@
                 var organization = await OrganizationService.GetByIdAsync(currentUserOrgId);
                 if (organization != null)
                 {
+                    currentOrganization = organization;
                     allowedDomain = organization.Domain;
+                    userInvitationsAllowed = organization.AllowUserInvitations;
+                    
+                    if (!userInvitationsAllowed)
+                    {
+                        Logger.LogInformation("🚫 User invitations disabled for organization {OrganizationName} - showing restricted access message", 
+                            organization.Name);
+                    }
                 }
                 
                 // Load organization-assigned agent types
@@ -807,11 +843,14 @@
                                $"Agent types: {agentTypeList}. Database access: {databaseList}.{additionalInfo}";
                 
                 // Clear form after successful invitation
-                await Task.Delay(2000); // Show success message for 2 seconds
+                await Task.Delay(1500); // Show success message for 1.5 seconds
                 ClearForm();
                 
-                // Navigate to user management page
-                Navigation.NavigateTo("/admin/users", forceLoad: false);
+                // Navigate to user management page - user should now appear immediately due to cache clearing in InvitationService
+                successMessage = $"✅ Invitation sent! Redirecting to user list...";
+                StateHasChanged();
+                await Task.Delay(500); // Brief pause to show redirect message
+                Navigation.NavigateTo("/admin/users", forceLoad: true); // Force reload to ensure fresh data
             }
             else
             {

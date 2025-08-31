@@ -38,6 +38,14 @@ public class Organization
     // ORGANIZATION-LEVEL AGENT TYPE ALLOCATION (SuperAdmin responsibility)
     public string OrganizationAgentTypeIds { get; set; } = string.Empty; // JSON array of agent type GUIDs allocated to organization
     
+    // USER INVITATION PERMISSIONS (SuperAdmin control for granular access management)
+    /// <summary>
+    /// Controls whether the organization admin can invite users to their organization.
+    /// When false, creates a "restricted org admin" who cannot manage users.
+    /// Defaults to true for backward compatibility.
+    /// </summary>
+    public bool AllowUserInvitations { get; set; } = true;
+    
     // System fields (standard Dataverse fields)
     public DateTime CreatedOn { get; set; } = DateTime.UtcNow;
     public DateTime ModifiedOn { get; set; } = DateTime.UtcNow;

@@ -54,16 +54,17 @@ public class PowerShellExecutionService : IPowerShellExecutionService
             _logger.LogInformation("Installing Teams Apps directly to specific team {GroupId} using Graph API for {AppCount} apps", 
                 groupId, teamsAppIds.Count);
 
-            // Use Graph API approach for direct team app installation (works with service principal)
+            // Use enhanced Graph API script with tenant-level approval management
+            // This approach is more reliable than Teams PowerShell authentication
             var graphScriptPath = Path.Combine(Directory.GetCurrentDirectory(), "Scripts", "Set-TeamsAppPermissionPolicies-Graph.ps1");
-            var legacyScriptPath = Path.Combine(Directory.GetCurrentDirectory(), "Scripts", "Set-TeamsAppPermissionPolicies.ps1");
+            var teamsScriptPath = Path.Combine(Directory.GetCurrentDirectory(), "Scripts", "Set-TeamsAppPermissionPolicies.ps1");
             
-            // Prefer Graph API script (team-specific app installation), fallback to legacy
-            var scriptPath = File.Exists(graphScriptPath) ? graphScriptPath : legacyScriptPath;
+            // Prefer enhanced Graph script (reliable with service principal), fallback to Teams PowerShell if needed
+            var scriptPath = File.Exists(graphScriptPath) ? graphScriptPath : teamsScriptPath;
             
-            var scriptType = scriptPath.Contains("-Graph.ps1") ? "Microsoft Graph API" : "Legacy Teams PowerShell";
+            var scriptType = scriptPath.Contains("-Graph.ps1") ? "Enhanced Microsoft Graph API (with tenant approval management)" : "Teams PowerShell (full permission policy support)";
             
-            _logger.LogInformation("Using {ApproachType} for team-specific app installation: {ScriptPath}", 
+            _logger.LogInformation("Using {ApproachType} for Teams App approval management: {ScriptPath}", 
                 scriptType, Path.GetFileName(scriptPath));
             
             if (!File.Exists(scriptPath))

@@ -147,26 +147,14 @@ public static class OnboardedUserExtensions
         // NEW ARCHITECTURE: Use the dedicated AssignedRole field as the primary source of truth
         // This separates user permissions from agent type assignments
         
-        // If user has an explicitly assigned role (anything other than the default User), use it
-        if (user.AssignedRole == UserRole.OrgAdmin || user.AssignedRole == UserRole.SuperAdmin || user.AssignedRole == UserRole.Developer)
-        {
-            return user.AssignedRole;
-        }
+        // CRITICAL FIX: Always respect explicit AssignedRole field as primary source of truth
+        // This includes ALL roles, including User role, to prevent agent type fallback override
+        // The AssignedRole field should be the definitive source for user permissions
+        return user.AssignedRole;
         
-        // FALLBACK: For existing users without explicit role assignment, maintain backward compatibility
-        // This handles migration period - existing admins should be migrated to use AssignedRole field
-        
-        // Check legacy agent types for backward compatibility during migration
-        if (user.AgentTypes.Contains(LegacyAgentType.Admin)) return UserRole.OrgAdmin;
-        
-        // Treat SBOAgentAppv1 as admin for backward compatibility (to be migrated)
-        if (user.AgentTypes.Contains(LegacyAgentType.SBOAgentAppv1))
-        {
-            return UserRole.OrgAdmin;
-        }
-        
-        // Default to regular user (either explicitly set as User or fallback)
-        return UserRole.User;
+        // NOTE: Legacy fallback logic removed - AssignedRole field is now the single source of truth
+        // All users should have their proper role set in the AssignedRole field
+        // Migration: Any users still relying on agent types for role determination should be updated
     }
     
     /// <summary>

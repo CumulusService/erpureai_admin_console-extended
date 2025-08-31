@@ -190,6 +190,14 @@ public interface IOnboardedUserService
     Task<bool> ValidateAgentTypeAssignmentAsync(List<Guid> agentTypeIds);
     
     /// <summary>
+    /// Validates agent type assignment with supervisor email requirement enforcement
+    /// </summary>
+    /// <param name="agentTypeIds">List of agent type IDs to validate</param>
+    /// <param name="supervisorEmail">Supervisor email address to validate</param>
+    /// <returns>ValidationResult with success status and error message if any</returns>
+    Task<AgentTypeValidationResult> ValidateAgentTypeAssignmentWithSupervisorAsync(List<Guid> agentTypeIds, string? supervisorEmail);
+    
+    /// <summary>
     /// PERFORMANCE OPTIMIZATION: Gets users with all related data (agent types, databases) in a single optimized query
     /// Replaces multiple N+1 queries with efficient JOINs for ManageUsers page performance
     /// </summary>

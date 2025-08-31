@@ -220,7 +220,9 @@ public class StateValidationService : IStateValidationService
                 _logger.LogWarning("Group membership missing for user {UserId} in group {GroupId}. Performing reverse lookup...", userId, missingId);
                 
                 // Double-check by querying the group's members directly
-                var isActuallyMember = await _graphService.IsUserMemberOfGroupAsync(userId, missingId);
+                var isActuallyMember = !string.IsNullOrEmpty(missingId) 
+                    ? await _graphService.IsUserMemberOfGroupAsync(userId, missingId)
+                    : false;
                 
                 if (isActuallyMember)
                 {

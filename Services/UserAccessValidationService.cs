@@ -150,11 +150,12 @@ public class UserAccessValidationService : IUserAccessValidationService
             user.StatusCode = StatusCode.Inactive;
             user.ModifiedOn = DateTime.UtcNow;
             
-            // SECURITY CRITICAL: Clear ALL agent type assignments when user is disabled/revoked
-            // This ensures the database reflects that the user has no agent access
-            _logger.LogInformation("Clearing all agent type assignments for revoked user {UserId} ({Email})", userId, user.Email);
+            // SECURITY CRITICAL: Clear ALL assignments when user is disabled/revoked
+            // This ensures the database reflects that the user has no access to any resources
+            _logger.LogInformation("Clearing all agent type and database assignments for revoked user {UserId} ({Email})", userId, user.Email);
             user.AgentTypeIds = new List<Guid>(); // Clear new agent type IDs
             user.AgentTypes = new List<LegacyAgentType>(); // Clear legacy agent types
+            user.AssignedDatabaseIds = new List<Guid>(); // Clear database access assignments
             
             // Note: We don't set IsDeleted=true as that's for actual deletion
 

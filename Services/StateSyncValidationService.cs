@@ -131,7 +131,9 @@ public class StateSyncValidationService : IStateSyncValidationService
                 try
                 {
                     // Verify security group exists in Azure AD
-                    var groupExists = await graphService.GroupExistsAsync(agentType.GlobalSecurityGroupId);
+                    var groupExists = !string.IsNullOrEmpty(agentType.GlobalSecurityGroupId)
+                        ? await graphService.GroupExistsAsync(agentType.GlobalSecurityGroupId)
+                        : false;
                     if (!groupExists)
                     {
                         result.Issues.Add($"Agent type {agentType.DisplayName} references non-existent security group {agentType.GlobalSecurityGroupId}");

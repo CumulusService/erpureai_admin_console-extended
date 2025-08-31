@@ -184,11 +184,11 @@
                                     <h6 class="text-success">🔓 Reactivation Actions:</h6>
                                     <ul class="list-unstyled">
                                         <li><i class="fas fa-check text-success me-2"></i>Azure AD accounts enabled</li>
-                                        <li><i class="fas fa-check text-success me-2"></i>Security group memberships restored</li>
-                                        <li><i class="fas fa-check text-success me-2"></i>Teams group access restored</li>
+                                        <li><i class="fas fa-check text-success me-2"></i>M365 Teams group access restored</li>
                                         <li><i class="fas fa-check text-success me-2"></i>App roles reassigned</li>
                                         <li><i class="fas fa-check text-success me-2"></i>Database access restored</li>
                                         <li><i class="fas fa-check text-success me-2"></i>Organization status updated</li>
+                                        <li><i class="fas fa-times text-warning me-2"></i>Agent types NOT restored - cleared during deactivation (manual reassignment required via Edit Organization)</li>
                                     </ul>
                                 </div>
                             }
@@ -202,6 +202,7 @@
                                         <li><i class="fas fa-times text-danger me-2"></i>Teams group access revoked</li>
                                         <li><i class="fas fa-times text-danger me-2"></i>App roles revoked</li>
                                         <li><i class="fas fa-times text-danger me-2"></i>Database access blocked</li>
+                                        <li><i class="fas fa-times text-danger me-2"></i>Organization agent type assignments cleared</li>
                                         <li><i class="fas fa-times text-danger me-2"></i>Organization status updated</li>
                                     </ul>
                                 </div>
@@ -236,6 +237,40 @@
                         <i class="fas fa-check-circle me-2"></i>
                         <strong>Complete Success:</strong> All users were processed successfully! 
                         The organization @(IsActivation ? "reactivation" : "deactivation") is complete.
+                    </div>
+                }
+
+                @* CRITICAL: Agent reassignment notification for organization reactivations *@
+                @if (IsActivation && (OverallSuccess || FailureCount == 0))
+                {
+                    <div class="alert alert-warning mt-3 border-warning">
+                        <div class="row align-items-center">
+                            <div class="col-md-1 text-center">
+                                <i class="fas fa-robot fa-2x text-warning"></i>
+                            </div>
+                            <div class="col-md-11">
+                                <h6 class="alert-heading mb-2">
+                                    <i class="fas fa-exclamation-triangle me-2"></i>
+                                    <strong>IMPORTANT: Organization Administrator Action Required</strong>
+                                </h6>
+                                <p class="mb-2">
+                                    <strong>Agent types were NOT automatically restored</strong> during organization reactivation as a security policy.
+                                </p>
+                                <div class="mb-2">
+                                    <strong>Next Steps for Organization Administrators:</strong>
+                                    <ol class="mb-0 mt-1">
+                                        <li>Review which users need agent type assignments</li>
+                                        <li>Go to <strong>Admin → Users</strong> to manage individual user agent types</li>
+                                        <li>Use <strong>"Manage Agent Types"</strong> for each user requiring access</li>
+                                        <li>Consider using <strong>"Assign to ALL Users"</strong> for organization-wide agent types</li>
+                                    </ol>
+                                </div>
+                                <div class="text-muted small">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    This ensures proper security review before granting agent access permissions.
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 }
             </div>

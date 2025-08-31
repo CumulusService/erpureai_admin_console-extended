@@ -4,7 +4,7 @@ namespace AdminConsole.Services;
 
 public interface IOrganizationSetupService
 {
-    Task<OrganizationSetupResult> SetupNewOrganizationAsync(string organizationName, string organizationDomain, string adminEmail, string adminName);
+    Task<OrganizationSetupResult> SetupNewOrganizationAsync(string organizationName, string organizationDomain, string adminEmail, string adminName, bool allowUserInvitations = true);
     Task<bool> CreateDefaultSecretsAsync(string organizationId, string organizationName, string organizationDomain);
     Task<bool> CreateDefaultSecretsForOrgAdminAsync(string organizationId, string organizationName, string organizationDomain);
 }

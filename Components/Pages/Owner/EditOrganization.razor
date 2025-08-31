@@ -1,6 +1,7 @@
 @page "/owner/organizations/{OrganizationId:guid}/edit"
 @using AdminConsole.Models
 @using AdminConsole.Services
+@using AdminConsole.Components.Shared
 @using System.ComponentModel.DataAnnotations
 @inject IOrganizationService OrganizationService
 @inject IDataIsolationService DataIsolationService
@@ -12,6 +13,7 @@
 @inject IGraphService GraphService
 @inject NavigationManager Navigation
 @inject ILogger<EditOrganization> Logger
+@inject IJSRuntime JSRuntime
 @attribute [Authorize(Policy = "SuperAdminOnly")]
 @rendermode InteractiveServer
 
@@ -227,6 +229,59 @@
                             <div class="card mb-4">
                                 <div class="card-header">
                                     <h5 class="card-title mb-0">
+                                        <i class="fas fa-user-check me-2"></i>
+                                        User Management Permissions
+                                        <small class="text-muted ms-2">(Super Admin Only)</small>
+                                    </h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="alert alert-info border-0 mb-3">
+                                        <i class="fas fa-info-circle me-2"></i>
+                                        <small>
+                                            Control whether the organization admin can invite new users to their organization.
+                                        </small>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">User Invitation Permissions</label>
+                                        <div class="d-flex align-items-center gap-3">
+                                            <span class="badge @(editModel.AllowUserInvitations ? "bg-success" : "bg-warning") fs-6 px-3 py-2">
+                                                <i class="fas @(editModel.AllowUserInvitations ? "fa-check-circle" : "fa-ban") me-1"></i>
+                                                @(editModel.AllowUserInvitations ? "Invitations Allowed" : "Invitations Restricted")
+                                            </span>
+                                            @if (editModel.AllowUserInvitations)
+                                            {
+                                                <button type="button" class="btn btn-outline-warning btn-sm" @onclick="() => ConfirmUserInvitationChange(false)">
+                                                    <i class="fas fa-ban me-1"></i>
+                                                    Restrict
+                                                </button>
+                                            }
+                                            else
+                                            {
+                                                <button type="button" class="btn btn-outline-success btn-sm" @onclick="() => ConfirmUserInvitationChange(true)">
+                                                    <i class="fas fa-check me-1"></i>
+                                                    Allow
+                                                </button>
+                                            }
+                                        </div>
+                                        <div class="form-text @(editModel.AllowUserInvitations ? "text-muted" : "text-warning")">
+                                            <i class="fas @(editModel.AllowUserInvitations ? "fa-info-circle" : "fa-exclamation-triangle") me-1"></i>
+                                            @if (editModel.AllowUserInvitations)
+                                            {
+                                                <span>Organization admin can invite users from their domain</span>
+                                            }
+                                            else
+                                            {
+                                                <span>Organization admin cannot invite users - creates a restricted admin role</span>
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <h5 class="card-title mb-0">
                                         <i class="fas fa-users-cog me-2"></i>
                                         Agent Type Configuration
                                         <small class="text-muted ms-2">(Organization Level)</small>
@@ -326,7 +381,7 @@
                                                         <input class="form-check-input" type="checkbox" id="autoAssignUsers" @bind="autoAssignExistingUsers">
                                                         <label class="form-check-label" for="autoAssignUsers">
                                                             <strong>Auto-assign all existing organization users to new agent types</strong>
-                                                            <br><small class="text-muted">If unchecked, users must be manually assigned via their individual profiles.</small>
+                                                            <br><small class="text-muted"><strong>Security Note:</strong> If unchecked (recommended), organization admin must explicitly assign users to agent types. If checked, all users immediately gain access to new agent types.</small>
                                                         </label>
                                                     </div>
                                                 }
@@ -513,6 +568,11 @@
     </div>
 </div>
 
+<!-- Agent Share URL Popup -->
+<AgentShareUrlPopup IsVisible="@showAgentShareUrlPopup" 
+                   AgentType="@currentAgentTypeForPopup" 
+                   OnClose="@CloseAgentShareUrlPopup" />
+
 @code {
     [Parameter] public Guid OrganizationId { get; set; }
     
@@ -533,7 +593,11 @@
     private string agentTypeErrorMessage = string.Empty;
     private string agentTypeValidationMessage = string.Empty;
     private bool hasAgentTypeChanges => !selectedAgentTypeIds.SetEquals(originalAgentTypeIds);
-    private bool autoAssignExistingUsers = true; // Default to true for better UX
+    private bool autoAssignExistingUsers = false; // SECURITY: Default to false - org admins should explicitly assign users to agent types
+
+    // Agent Share URL Popup state
+    private bool showAgentShareUrlPopup = false;
+    private AgentTypeEntity? currentAgentTypeForPopup = null;
 
     // Database Type Detection
     private List<DatabaseCredential> activeDatabaseConnections = new();
@@ -587,7 +651,8 @@
                     Name = organization.Name,
                     AdminEmail = organization.AdminEmail,
                     DatabaseType = organization.DatabaseType,
-                    StateCode = organization.StateCode
+                    StateCode = organization.StateCode,
+                    AllowUserInvitations = organization.AllowUserInvitations
                     // Key Vault fields removed from UI
                     // SAP Configuration fields removed - displayed as read-only
                 };
@@ -650,9 +715,112 @@
         }
     }
 
+    private async Task ConfirmUserInvitationChange(bool allowInvitations)
+    {
+        Logger.LogInformation("🔧 DEBUG: ConfirmUserInvitationChange called with allowInvitations={AllowInvitations}", allowInvitations);
+        Logger.LogInformation("🔧 DEBUG: Current editModel.AllowUserInvitations={CurrentValue}", editModel.AllowUserInvitations);
+        
+        var action = allowInvitations ? "allow" : "restrict";
+        var actionCaps = allowInvitations ? "Allow" : "Restrict";
+        
+        string impactWarning;
+        if (allowInvitations)
+        {
+            impactWarning = $"This will <strong>enable user invitations</strong> for organization '{organization?.Name}'.<br><br>" +
+                          $"<strong>Impact:</strong><br>" +
+                          $"• Organization admin can invite users from their domain<br>" +
+                          $"• Standard admin functionality will be restored<br>" +
+                          $"• Admin gains full user management capabilities<br><br>" +
+                          $"Are you sure you want to proceed?";
+        }
+        else
+        {
+            impactWarning = $"<strong>⚠️ RESTRICTION WARNING:</strong><br><br>" +
+                          $"This will <strong>disable user invitations</strong> for organization '{organization?.Name}'!<br><br>" +
+                          $"<strong>Impact:</strong><br>" +
+                          $"• Organization admin will NOT be able to invite new users<br>" +
+                          $"• Creates a 'restricted admin' with limited user management<br>" +
+                          $"• Only Super Admins can invite users to this organization<br>" +
+                          $"• Existing users remain unaffected<br><br>" +
+                          $"<strong>Are you sure you want to create a restricted admin?</strong>";
+        }
+        
+        Logger.LogInformation("🔧 DEBUG: About to show modal dialog for {Action}", actionCaps);
+        
+        bool confirmed = false;
+        try
+        {
+            // OPTION 1: Try the modal service first
+            Logger.LogInformation("🔧 DEBUG: Attempting to show ModalService dialog...");
+            var modalTask = allowInvitations 
+                ? ModalService.ShowWarningAsync(
+                    $"{actionCaps} User Invitations",
+                    impactWarning,
+                    $"{actionCaps} Invitations",
+                    "Cancel")
+                : ModalService.ShowDangerAsync(
+                    $"⚠️ {actionCaps} User Invitations",
+                    impactWarning,
+                    $"Yes, {actionCaps} Invitations",
+                    "Cancel - Keep Allowed");
+                    
+            // Add a short timeout to see if modal responds
+            var timeoutTask = Task.Delay(TimeSpan.FromSeconds(3));
+            var completedTask = await Task.WhenAny(modalTask, timeoutTask);
+            
+            if (completedTask == modalTask)
+            {
+                confirmed = await modalTask;
+                Logger.LogInformation("🔧 DEBUG: ModalService worked! Result: {Confirmed}", confirmed);
+            }
+            else
+            {
+                Logger.LogWarning("🔧 DEBUG: ModalService timeout - falling back to JavaScript confirm");
+                // FALLBACK: Use JavaScript confirm as backup
+                var confirmMessage = allowInvitations 
+                    ? $"Allow user invitations for organization '{organization?.Name}'?"
+                    : $"Restrict user invitations for organization '{organization?.Name}'? This will prevent the org admin from inviting users.";
+                    
+                // Use a simple JavaScript confirm for now
+                confirmed = await JSRuntime.InvokeAsync<bool>("confirm", confirmMessage);
+                Logger.LogInformation("🔧 DEBUG: JavaScript confirm result: {Confirmed}", confirmed);
+            }
+        }
+        catch (Exception modalEx)
+        {
+            Logger.LogError(modalEx, "🔧 DEBUG: ERROR in modal dialog: {ErrorMessage}", modalEx.Message);
+            
+            // FALLBACK: Use JavaScript confirm
+            var confirmMessage = allowInvitations 
+                ? $"Allow user invitations for organization '{organization?.Name}'?"
+                : $"Restrict user invitations for organization '{organization?.Name}'?";
+                
+            confirmed = await JSRuntime.InvokeAsync<bool>("confirm", confirmMessage);
+            Logger.LogInformation("🔧 DEBUG: Fallback JavaScript confirm result: {Confirmed}", confirmed);
+        }
+        
+        if (confirmed)
+        {
+            Logger.LogInformation("🔧 DEBUG: User confirmed the change, updating editModel.AllowUserInvitations to {NewValue}", allowInvitations);
+            editModel.AllowUserInvitations = allowInvitations;
+            Logger.LogInformation("🔧 DEBUG: Calling SaveChanges()");
+            await SaveChanges();
+        }
+        else
+        {
+            Logger.LogInformation("🔧 DEBUG: User canceled the change");
+        }
+    }
+
     private async Task SaveChanges()
     {
-        if (organization == null) return;
+        Logger.LogInformation("🔧 DEBUG: SaveChanges() called");
+        if (organization == null) 
+        {
+            Logger.LogWarning("🔧 DEBUG: organization is null, returning early");
+            return;
+        }
+        Logger.LogInformation("🔧 DEBUG: editModel.AllowUserInvitations={AllowUserInvitations}", editModel.AllowUserInvitations);
 
         // Validate the form before proceeding
         var validationContext = new System.ComponentModel.DataAnnotations.ValidationContext(editModel);
@@ -689,6 +857,7 @@
             // DatabaseType is read-only - determined from actual database configuration
             organization.StateCode = editModel.StateCode;
             organization.StatusCode = editModel.StateCode == StateCode.Active ? StatusCode.Active : StatusCode.Inactive;
+            organization.AllowUserInvitations = editModel.AllowUserInvitations;
             // Key Vault fields removed from UI - backend handles these automatically
             // SAP Configuration is read-only - managed by Organization Admin through their settings
             organization.ModifiedOn = DateTime.UtcNow;
@@ -1030,6 +1199,9 @@
                 
                 successMessage = string.Join("<br>", operationMessages);
                 Logger.LogInformation("Agent type allocation completed for organization {OrganizationId}", OrganizationId);
+
+                // 🎉 PHASE 5: Show Agent Share URL popup for newly assigned agent types
+                await ShowPopupsForNewlyAssignedAgents(agentTypesToAdd);
             }
             else
             {
@@ -1286,6 +1458,51 @@
 
     #endregion
 
+    #region Agent Share URL Popup Methods
+
+    /// <summary>
+    /// Shows the Agent Share URL popup for a specific agent type
+    /// </summary>
+    private async Task ShowAgentShareUrlPopup(AgentTypeEntity agentType)
+    {
+        currentAgentTypeForPopup = agentType;
+        showAgentShareUrlPopup = true;
+        StateHasChanged();
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Closes the Agent Share URL popup
+    /// </summary>
+    private async Task CloseAgentShareUrlPopup()
+    {
+        showAgentShareUrlPopup = false;
+        currentAgentTypeForPopup = null;
+        StateHasChanged();
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Shows popups for newly assigned agent types
+    /// </summary>
+    private async Task ShowPopupsForNewlyAssignedAgents(List<Guid> agentTypesToAdd)
+    {
+        if (!agentTypesToAdd.Any()) return;
+
+        // Show popup for each newly assigned agent type that has a share URL
+        foreach (var agentTypeId in agentTypesToAdd)
+        {
+            var agentType = availableAgentTypes.FirstOrDefault(at => at.Id == agentTypeId);
+            if (agentType != null && !string.IsNullOrEmpty(agentType.AgentShareUrl))
+            {
+                await ShowAgentShareUrlPopup(agentType);
+                break; // Show only the first one for now, to avoid multiple popups
+            }
+        }
+    }
+
+    #endregion
+
     /// <summary>
     /// Edit model for organization form binding
     /// </summary>
@@ -1303,6 +1520,7 @@
         
         public OrganizationDatabaseType DatabaseType { get; set; } = OrganizationDatabaseType.SQL;
         public StateCode StateCode { get; set; } = StateCode.Active;
+        public bool AllowUserInvitations { get; set; } = true;
         
         // Key Vault properties removed from UI
         // SAP Configuration properties removed - displayed as read-only from Organization Admin's settings

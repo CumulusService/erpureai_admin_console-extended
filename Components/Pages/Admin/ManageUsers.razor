@@ -87,6 +87,7 @@
                         <option value="">All Statuses</option>
                         <option value="Accepted">Active</option>
                         <option value="PendingAcceptance">Pending</option>
+                        <option value="Disabled">Disabled</option>
                     </select>
                 </div>
                 <div class="col-md-4">
@@ -122,16 +123,24 @@
                         <tbody>
                             @foreach (var user in filteredUsers.OrderBy(u => u.DisplayName))
                             {
-                                <tr @key="user.Id">
+                                var actualStatus = GetUserActualStatus(user);
+                                var isInactive = actualStatus == "Disabled" || actualStatus == "Inactive";
+                                <tr @key="user.Id" class="@(isInactive ? "opacity-75" : "")">
                                     <td>
                                         <div class="d-flex align-items-center">
                                             <div class="avatar-sm me-3">
-                                                <div class="avatar-title bg-info rounded-circle">
+                                                <div class="avatar-title @(isInactive ? "bg-secondary" : "bg-info") rounded-circle">
                                                     @user.DisplayName.FirstOrDefault()
                                                 </div>
                                             </div>
                                             <div>
-                                                <h6 class="mb-0">@user.DisplayName</h6>
+                                                <h6 class="mb-0">
+                                                    @user.DisplayName
+                                                    @if (isInactive)
+                                                    {
+                                                        <span class="badge bg-secondary ms-2">INACTIVE</span>
+                                                    }
+                                                </h6>
                                                 <small class="text-muted">@user.UserPrincipalName</small>
                                             </div>
                                         </div>
@@ -600,18 +609,31 @@
                 <div class="modal-body">
                     <div class="alert alert-info">
                         <i class="fas fa-info-circle me-2"></i>
-                        <strong>Reactivating User Access</strong>
+                        <strong>Super Admin: User Reactivation</strong>
                     </div>
-                    <p>Are you sure you want to reactivate access for <strong>@userToReactivate.DisplayName</strong>?</p>
-                    <p><strong>This will:</strong></p>
-                    <ul>
-                        <li>Enable the user account in Azure Entra ID (if disabled)</li>
-                        <li>Restore user access to your organization</li>
-                        <li>Allow the user to access the application again</li>
-                        <li>Restore all previous permissions and group memberships</li>
-                    </ul>
+                    <p>Are you sure you want to reactivate access for <strong>@userToReactivate.DisplayName</strong> (@userToReactivate.Email)?</p>
+                    
+                    <div class="alert alert-success mb-3">
+                        <strong>✅ Automatic Reactivation Steps:</strong>
+                        <ul class="mb-0 mt-2">
+                            <li>Enable user account in Azure Entra ID</li>
+                            <li>Add user back to M365 organization group</li>
+                            <li>Restore appropriate app role (OrgAdmin or OrgUser)</li>
+                            <li>Update database status to Active</li>
+                        </ul>
+                    </div>
+
                     <div class="alert alert-warning">
-                        <small><i class="fas fa-exclamation-triangle me-1"></i> Make sure you trust this user before reactivating their access.</small>
+                        <strong>⚠️ Manual Steps Required After Reactivation:</strong>
+                        <ul class="mb-0 mt-2">
+                            <li><strong>Agent Types:</strong> You must manually reassign agent types using the "Manage Agent Types" button</li>
+                            <li><strong>Security Groups:</strong> User will only have basic M365 access until agent types are reassigned</li>
+                            <li><strong>Verification:</strong> Test user access before notifying them of reactivation</li>
+                        </ul>
+                    </div>
+
+                    <div class="alert alert-danger">
+                        <strong>🔐 Security Reminder:</strong> Only reactivate users you trust. Verify their identity before proceeding.
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -1118,8 +1140,22 @@
             (string.IsNullOrEmpty(searchTerm) || 
              user.DisplayName.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) ||
              user.Email.Contains(searchTerm, StringComparison.OrdinalIgnoreCase)) &&
-            (string.IsNullOrEmpty(statusFilter) || user.InvitationStatus == statusFilter)
+            (string.IsNullOrEmpty(statusFilter) || GetFilterStatusMatch(user))
         ).ToList();
+    }
+
+    private bool GetFilterStatusMatch(GuestUser user)
+    {
+        var actualStatus = GetUserActualStatus(user);
+        
+        // Map filter values to actual status values for proper filtering
+        return statusFilter switch
+        {
+            "Accepted" => actualStatus == "Active",
+            "PendingAcceptance" => actualStatus == "PendingAcceptance" || actualStatus == "NotInvited" || user.InvitationStatus == "PendingAcceptance",
+            "Disabled" => actualStatus == "Disabled",
+            _ => true // "All Statuses" case
+        };
     }
     
     private async Task InitializeDefaultSecretsAsync(string organizationId)
@@ -1586,16 +1622,46 @@
 
     private async Task ShowRevokeConfirmation(GuestUser user)
     {
-        confirmationTitle = "Remove User Access";
-        confirmationMessage = $"You are about to remove access for {user.DisplayName} ({user.Email}).";
+        // CRITICAL SECURITY CHECK: Prevent self-deactivation
+        if (IsCurrentUser(user))
+        {
+            errorMessage = "❌ Security Policy: You cannot deactivate your own account. Please contact another administrator.";
+            Logger.LogWarning("User {UserEmail} attempted to deactivate themselves - blocked for security", user.Email);
+            StateHasChanged();
+            return;
+        }
+
+        // Enhanced confirmation with comprehensive warnings
+        var userRole = GetUserRole(user);
+        var userStatus = GetUserActualStatus(user);
+        
+        confirmationTitle = "⚠️ Deactivate User Access";
+        confirmationMessage = $"You are about to DEACTIVATE access for {user.DisplayName} ({user.Email}).";
+        
         confirmationDetails = $"<strong>User:</strong> {user.DisplayName}<br>" +
                             $"<strong>Email:</strong> {user.Email}<br>" +
-                            $"<strong>Current Status:</strong> {user.InvitationStatus}<br>" +
-                            $"<strong>Action:</strong> Remove all organization access and disable account";
-        confirmationConsequence = "This user will immediately lose access to all organization resources, databases, and security groups. The user account will be deactivated and they cannot sign in.";
-        confirmationConfirmText = "Remove Access";
+                            $"<strong>Current Status:</strong> {userStatus}<br>" +
+                            $"<strong>Role:</strong> {userRole.GetDisplayName()}<br>" +
+                            $"<strong>Organization:</strong> {user.OnboardedUser?.Organization?.Name ?? "Unknown"}";
+
+        // Comprehensive warning about consequences
+        confirmationConsequence = "<div class='alert alert-warning mb-3'>" +
+                                "<strong>⚠️ WARNING: This action will have immediate consequences:</strong><br>" +
+                                "• User will be <strong>DISABLED</strong> in Azure Entra ID<br>" +
+                                "• User will be <strong>REMOVED</strong> from all organization security groups<br>" +
+                                "• User will be <strong>REMOVED</strong> from M365 organization group<br>" +
+                                "• User will <strong>LOSE ACCESS</strong> to all organization resources immediately<br>" +
+                                "• User will <strong>REMAIN VISIBLE</strong> in this admin panel as 'Disabled'<br>" +
+                                "• User can be reactivated later by a Super Admin<br>" +
+                                "</div>" +
+                                "<div class='alert alert-info'>" +
+                                "<strong>ℹ️ Reactivation Process:</strong><br>" +
+                                "Only Super Admins can reactivate disabled users. Upon reactivation, agent types must be manually reassigned." +
+                                "</div>";
+
+        confirmationConfirmText = "Deactivate User";
         confirmationType = ConfirmationType.Danger;
-        requireConfirmationText = false;
+        requireConfirmationText = true; // Require typing confirmation for this serious action
         pendingAction = () => RevokeUserAccess(user);
         showConfirmationModal = true;
         StateHasChanged();
@@ -1680,27 +1746,62 @@
                     return user.InvitationStatus;
                 }
                 
-                // Return database status
+                // ENHANCED STATUS LOGIC: Check for recently invited users
                 if (cachedUser.IsDeleted)
-                    return "Deleted";
+                    return "Disabled";
+                    
                 if (!cachedUser.IsActive || cachedUser.StatusCode != StatusCode.Active)
                     return "Disabled";
+                    
+                // CRITICAL FIX: Check if user was recently invited but may not have accepted yet
+                // Users created in database with LastInvitationDate but no actual Azure AD acceptance should show as Pending
+                if (cachedUser.LastInvitationDate.HasValue)
+                {
+                    var daysSinceInvitation = (DateTime.UtcNow - cachedUser.LastInvitationDate.Value).TotalDays;
+                    
+                    // If invited recently (within 30 days) and we have the GuestUser InvitationStatus, use that
+                    if (daysSinceInvitation <= 30 && !string.IsNullOrEmpty(user.InvitationStatus))
+                    {
+                        // Trust the GuestUser's InvitationStatus which may come from Azure AD real-time check
+                        if (user.InvitationStatus == "PendingAcceptance")
+                            return "PendingAcceptance";
+                        else if (user.InvitationStatus == "Accepted")
+                            return "Active";
+                    }
+                }
+                
+                // Default to Active if database shows active and no pending status detected
                 return "Active";
             }
             
-            // If not cached, fall back to invitation status for now
-            // The cache will be populated during LoadUsers
-            return user.InvitationStatus == "Accepted" ? "Active" : user.InvitationStatus;
+            // If not cached, use the GuestUser's InvitationStatus which may include real-time Azure AD status
+            if (!string.IsNullOrEmpty(user.InvitationStatus))
+            {
+                return user.InvitationStatus == "Accepted" ? "Active" : user.InvitationStatus;
+            }
+            
+            // Final fallback
+            return "Active";
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error getting user status for {Email}", user.Email);
-            return user.InvitationStatus;
+            return user.InvitationStatus ?? "Unknown";
         }
     }
 
     private void ShowReactivateConfirmation(GuestUser user)
     {
+        // SECURITY CHECK: Only Super Admins can reactivate users
+        if (currentUserRole != UserRole.SuperAdmin)
+        {
+            errorMessage = "❌ Access Denied: Only Super Admins can reactivate disabled users.";
+            Logger.LogWarning("User {UserEmail} with role {Role} attempted to reactivate user - blocked", 
+                HttpContextAccessor.HttpContext?.User.FindFirst("email")?.Value, currentUserRole);
+            StateHasChanged();
+            return;
+        }
+
         userToReactivate = user;
         showReactivateModal = true;
         StateHasChanged();
@@ -2027,17 +2128,23 @@
         if (userAgentTypesCache.TryGetValue(user.Email, out var agentTypes))
         {
             // CRITICAL FIX: Only show agent types that are currently allocated to the organization by SuperAdmin
-            // This ensures OrgAdmin only sees agent types that SuperAdmin has made available
+            // AND are active - this ensures inactive agent types never appear as tags
             var organizationAgentTypeIds = organizationAgentTypes.Select(oat => oat.Id).ToHashSet();
-            var filteredAgentTypes = agentTypes.Where(at => organizationAgentTypeIds.Contains(at.Id)).ToList();
+            var filteredAgentTypes = agentTypes
+                .Where(at => organizationAgentTypeIds.Contains(at.Id) && at.IsActive)
+                .ToList();
             
             // Debug logging for troubleshooting
             if (agentTypes.Count != filteredAgentTypes.Count)
             {
-                Logger.LogInformation("🔍 FILTERED: User {Email} had {OriginalCount} agent types, showing {FilteredCount} (org-allocated only)", 
-                    user.Email, agentTypes.Count, filteredAgentTypes.Count);
+                var inactiveCount = agentTypes.Count(at => !at.IsActive);
+                var unallocatedCount = agentTypes.Count(at => !organizationAgentTypeIds.Contains(at.Id));
+                Logger.LogInformation("🔍 FILTERED: User {Email} had {OriginalCount} agent types, showing {FilteredCount} (filtered out {InactiveCount} inactive, {UnallocatedCount} unallocated)", 
+                    user.Email, agentTypes.Count, filteredAgentTypes.Count, inactiveCount, unallocatedCount);
             }
             
+            Logger.LogInformation("🎯 FINAL RESULT: User {Email} will display {Count} agent types: {AgentTypeNames}",
+                user.Email, filteredAgentTypes.Count, string.Join(", ", filteredAgentTypes.Select(at => $"{at.Name}(Active:{at.IsActive})")));
             return filteredAgentTypes;
         }
         return new List<AgentTypeEntity>();

@@ -123,7 +123,7 @@ public class DataIsolationService : IDataIsolationService
             }
 
             // Check if user is Super Admin (can access all organizations)
-            if (IsCurrentUserSuperAdmin())
+            if (await IsCurrentUserSuperAdminAsync())
             {
                 _logger.LogDebug("Super admin access granted to organization {OrganizationId}", organizationId);
                 return true;
@@ -265,7 +265,7 @@ public class DataIsolationService : IDataIsolationService
         try
         {
             // Super admins can see all data
-            if (IsCurrentUserSuperAdmin())
+            if (await IsCurrentUserSuperAdminAsync())
             {
                 return items;
             }
@@ -380,12 +380,12 @@ public class DataIsolationService : IDataIsolationService
                 return UserRole.User; // Map OrgUser to UserRole.User for compatibility
             }
             
-            // Database check: Check for SuperAdmin role in database (replaces domain check)
-            var isDatabaseSuperAdmin = await CheckIfSuperAdminAsync(email);
-            if (isDatabaseSuperAdmin)
+            // CRITICAL FIX: Database check for both SuperAdmin AND OrgAdmin roles
+            var databaseRole = await CheckDatabaseUserRoleAsync(email);
+            if (databaseRole != null)
             {
-                _logger.LogInformation("User has SuperAdmin role in database - returning SuperAdmin");
-                return UserRole.SuperAdmin;
+                _logger.LogInformation("User has {Role} role in database - returning {Role}", databaseRole, databaseRole);
+                return databaseRole.Value;
             }
             
             // Legacy claim checks (for backward compatibility)
@@ -539,6 +539,42 @@ public class DataIsolationService : IDataIsolationService
         {
             _logger.LogError(ex, "Error checking SuperAdmin status for user {Email}", email);
             return false;
+        }
+    }
+    
+    /// <summary>
+    /// CRITICAL FIX: Checks database for user's actual role (SuperAdmin, OrgAdmin, User, Developer)
+    /// This ensures role detection includes database-stored roles, not just Azure AD claims
+    /// </summary>
+    private async Task<UserRole?> CheckDatabaseUserRoleAsync(string? email)
+    {
+        if (string.IsNullOrEmpty(email))
+        {
+            return null;
+        }
+
+        try
+        {
+            var user = await _context.OnboardedUsers
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower());
+
+            if (user == null)
+            {
+                _logger.LogInformation("CheckDatabaseUserRole: No user found in database for email {Email}", email);
+                return null;
+            }
+
+            // Use the extension method to get the role from database AssignedRole field
+            var userRole = user.GetUserRole();
+            _logger.LogInformation("CheckDatabaseUserRole: Found user {Email} with database role {Role} (AssignedRole: {AssignedRole})", 
+                email, userRole, user.AssignedRole);
+            return userRole;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error checking database role for user {Email}", email);
+            return null;
         }
     }
 }

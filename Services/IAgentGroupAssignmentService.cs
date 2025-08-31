@@ -62,5 +62,12 @@ public interface IAgentGroupAssignmentService
     /// Used when SuperAdmin unassigns an agent type from organization level
     /// </summary>
     Task<bool> RemoveAllUsersFromAgentTypeAsync(Guid organizationId, Guid agentTypeId, string modifiedBy);
+    
+    /// <summary>
+    /// CRITICAL: Removes ALL users across ALL organizations from a specific agent type's security group
+    /// Used when Developer deactivates an agent type globally
+    /// </summary>
+    Task<bool> RemoveAllUsersFromAgentTypeGloballyAsync(Guid agentTypeId, string modifiedBy);
+    
     Task<bool> AssignAllUsersToAgentTypeAsync(Guid organizationId, Guid agentTypeId, string modifiedBy);
 }

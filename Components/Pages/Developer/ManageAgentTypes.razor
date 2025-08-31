@@ -75,6 +75,7 @@
                                             <th>Global Security Group ID</th>
                                             <th>Teams App ID</th>
                                             <th>Status</th>
+                                            <th>Supervisor Required</th>
                                             <th>Order</th>
                                             <th>Actions</th>
                                         </tr>
@@ -125,6 +126,18 @@
                                                     <span class="badge @(agentType.IsActive ? "bg-success" : "bg-secondary")">
                                                         @(agentType.IsActive ? "Active" : "Inactive")
                                                     </span>
+                                                </td>
+                                                <td>
+                                                    @if (agentType.RequireSupervisorEmail)
+                                                    {
+                                                        <span class="badge bg-warning text-dark">
+                                                            <i class="fas fa-user-shield me-1"></i>Required
+                                                        </span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="text-muted">Optional</span>
+                                                    }
                                                 </td>
                                                 <td>@agentType.DisplayOrder</td>
                                                 <td>
@@ -278,12 +291,26 @@
                             </div>
                         </div>
 
-                        <div class="mb-3">
-                            <div class="form-check">
-                                <InputCheckbox @bind-Value="editingAgentType.IsActive" class="form-check-input" id="isActive" />
-                                <label class="form-check-label" for="isActive">
-                                    Active (available for assignment)
-                                </label>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <InputCheckbox @bind-Value="editingAgentType.IsActive" class="form-check-input" id="isActive" />
+                                    <label class="form-check-label" for="isActive">
+                                        Active (available for assignment)
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <InputCheckbox @bind-Value="editingAgentType.RequireSupervisorEmail" class="form-check-input" id="requireSupervisor" />
+                                    <label class="form-check-label" for="requireSupervisor">
+                                        <i class="fas fa-user-shield me-1 text-warning"></i>
+                                        Require Supervisor Email
+                                    </label>
+                                    <div class="form-text">
+                                        When enabled, users cannot be assigned this agent type without a valid supervisor email address.
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
@@ -376,7 +403,7 @@
 
     private void ShowCreateModal()
     {
-        editingAgentType = new AgentTypeEntity { IsActive = true };
+        editingAgentType = new AgentTypeEntity { Id = Guid.Empty, IsActive = true };
         showModal = true;
         ClearMessages();
     }
@@ -393,6 +420,7 @@
             GlobalSecurityGroupId = agentType.GlobalSecurityGroupId,
             TeamsAppId = agentType.TeamsAppId,
             IsActive = agentType.IsActive,
+            RequireSupervisorEmail = agentType.RequireSupervisorEmail,
             DisplayOrder = agentType.DisplayOrder
         };
         showModal = true;

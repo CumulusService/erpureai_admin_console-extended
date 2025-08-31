@@ -16,17 +16,23 @@ namespace AdminConsole.Controllers
         private readonly ILogger<DebugController> _logger;
         private readonly AdminConsoleDbContext _context;
         private readonly IDatabaseCredentialService _databaseCredentialService;
+        private readonly IEmailService _emailService;
+        private readonly IAgentTypeService _agentTypeService;
 
         public DebugController(
             GraphServiceClient graphClient,
             ILogger<DebugController> logger,
             AdminConsoleDbContext context,
-            IDatabaseCredentialService databaseCredentialService)
+            IDatabaseCredentialService databaseCredentialService,
+            IEmailService emailService,
+            IAgentTypeService agentTypeService)
         {
             _graphClient = graphClient;
             _logger = logger;
             _context = context;
             _databaseCredentialService = databaseCredentialService;
+            _emailService = emailService;
+            _agentTypeService = agentTypeService;
         }
 
         [HttpGet("/debug/credential/{credentialId}")]
@@ -277,6 +283,146 @@ namespace AdminConsole.Controllers
             catch (Exception ex)
             {
                 return Json(new { Error = ex.Message, StackTrace = ex.StackTrace });
+            }
+        }
+
+        [HttpGet("/debug/test-email")]
+        [AllowAnonymous]
+        public async Task<IActionResult> TestEmail([FromQuery] string? toEmail = null)
+        {
+            try
+            {
+                var testEmail = toEmail ?? "test@erpure.ai";
+                
+                _logger.LogInformation("📧 Testing email functionality - sending to {ToEmail}", testEmail);
+
+                // Test email service configuration
+                var isConfigured = await _emailService.IsConfiguredAsync();
+                if (!isConfigured)
+                {
+                    return Json(new { 
+                        Success = false, 
+                        Error = "Email service is not properly configured",
+                        ConfigurationStatus = "Not Configured"
+                    });
+                }
+
+                // Get a test agent type for the email template
+                var agentTypes = await _agentTypeService.GetActiveAgentTypesAsync();
+                var testAgentType = agentTypes.FirstOrDefault() ?? new AdminConsole.Models.AgentTypeEntity
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "TestAgent",
+                    DisplayName = "Test Agent",
+                    Description = "This is a test agent for email verification.",
+                    AgentShareUrl = "https://teams.microsoft.com/l/app/test-agent-id"
+                };
+
+                // Send test email
+                var emailSent = await _emailService.SendAgentAssignmentNotificationAsync(
+                    testEmail,
+                    "Test User",
+                    testAgentType,
+                    "Test Organization");
+
+                var result = new
+                {
+                    Success = emailSent,
+                    ToEmail = testEmail,
+                    AgentType = testAgentType.DisplayName,
+                    ConfigurationStatus = "Configured",
+                    Message = emailSent ? "Test email sent successfully!" : "Failed to send test email",
+                    Timestamp = DateTime.UtcNow
+                };
+
+                _logger.LogInformation("📧 Test email result: {Success}", emailSent);
+                
+                return Json(result, new JsonSerializerOptions { WriteIndented = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "📧 Error testing email functionality");
+                return Json(new { 
+                    Success = false,
+                    Error = ex.Message, 
+                    StackTrace = ex.StackTrace,
+                    Timestamp = DateTime.UtcNow
+                });
+            }
+        }
+
+        [HttpGet("/debug/email-config")]
+        public async Task<IActionResult> CheckEmailConfig()
+        {
+            try
+            {
+                var isConfigured = await _emailService.IsConfiguredAsync();
+                
+                var result = new
+                {
+                    IsConfigured = isConfigured,
+                    ConfigurationCheck = "Email service configuration validated",
+                    Timestamp = DateTime.UtcNow,
+                    Message = isConfigured ? "Email service is properly configured" : "Email service configuration missing"
+                };
+                
+                return Json(result, new JsonSerializerOptions { WriteIndented = true });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { 
+                    Error = ex.Message,
+                    IsConfigured = false,
+                    Timestamp = DateTime.UtcNow
+                });
+            }
+        }
+
+        [HttpGet("/debug/logo-test")]
+        [AllowAnonymous]
+        public async Task<IActionResult> TestLogo()
+        {
+            try
+            {
+                var logoPath = @"C:\Users\mn\AdminConsole-Production\wwwroot\company-logo.png";
+                var botIconPath = @"C:\Users\mn\AdminConsole-Production\wwwroot\4712086.png";
+                
+                var result = new Dictionary<string, object>
+                {
+                    ["LogoPath"] = logoPath,
+                    ["LogoExists"] = System.IO.File.Exists(logoPath),
+                    ["LogoSize"] = System.IO.File.Exists(logoPath) ? new FileInfo(logoPath).Length : 0,
+                    ["BotIconPath"] = botIconPath,
+                    ["BotIconExists"] = System.IO.File.Exists(botIconPath),
+                    ["BotIconSize"] = System.IO.File.Exists(botIconPath) ? new FileInfo(botIconPath).Length : 0,
+                    ["Timestamp"] = DateTime.UtcNow
+                };
+
+                // Test base64 encoding
+                if (System.IO.File.Exists(logoPath))
+                {
+                    try
+                    {
+                        var logoBytes = await System.IO.File.ReadAllBytesAsync(logoPath);
+                        var logoBase64 = Convert.ToBase64String(logoBytes);
+                        result["LogoBase64Preview"] = logoBase64.Substring(0, Math.Min(100, logoBase64.Length)) + "...";
+                        result["LogoBase64Length"] = logoBase64.Length;
+                    }
+                    catch (Exception logoEx)
+                    {
+                        result["LogoError"] = logoEx.Message;
+                    }
+                }
+                
+                return Json(result, new JsonSerializerOptions { WriteIndented = true });
+            }
+            catch (Exception ex)
+            {
+                return Json(new { 
+                    Error = ex.Message,
+                    StackTrace = ex.StackTrace,
+                    Timestamp = DateTime.UtcNow
+                });
             }
         }
     }

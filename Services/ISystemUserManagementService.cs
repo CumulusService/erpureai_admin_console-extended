@@ -208,6 +208,7 @@ public class UserCreationResult
     public UserRole AssignedRole { get; set; }
     public bool InvitationSent { get; set; }
     public bool DatabaseRecordCreated { get; set; }
+    public bool AppRoleAssigned { get; set; }
     public List<string> Warnings { get; set; } = new();
     public List<string> Errors { get; set; } = new();
     public DateTime CreatedOn { get; set; } = DateTime.UtcNow;

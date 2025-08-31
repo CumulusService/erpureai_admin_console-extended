@@ -138,3 +138,4 @@ Several `/debug/*` endpoints are available in development for testing:
 
 ## Conversation Notes
 - I can't see the new tables or the columns but you may proceed
+- Developer Role should access everythngn!!

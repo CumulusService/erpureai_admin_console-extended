@@ -14,17 +14,20 @@ public class SystemUserManagementService : ISystemUserManagementService
     private readonly IOnboardedUserService _userService;
     private readonly AdminConsoleDbContext _dbContext;
     private readonly ILogger<SystemUserManagementService> _logger;
+    private readonly IConfiguration _configuration;
 
     public SystemUserManagementService(
         IGraphService graphService, 
         IOnboardedUserService userService,
         AdminConsoleDbContext dbContext,
-        ILogger<SystemUserManagementService> logger)
+        ILogger<SystemUserManagementService> logger,
+        IConfiguration configuration)
     {
         _graphService = graphService;
         _userService = userService;
         _dbContext = dbContext;
         _logger = logger;
+        _configuration = configuration;
     }
 
     public async Task<List<SystemUser>> GetAllTenantUsersAsync()
@@ -281,8 +284,9 @@ public class SystemUserManagementService : ISystemUserManagementService
 
         try
         {
-            // Send B2B invitation
-            var inviteResult = await _graphService.InviteGuestUserAsync(email, displayName, "System Administrator", "https://localhost:5243", new List<string>(), true);
+            // Send B2B invitation with proper environment-aware redirect URL
+            var redirectUrl = GetEnvironmentAwareRedirectUrl();
+            var inviteResult = await _graphService.InviteGuestUserAsync(email, displayName, "System Administrator", redirectUrl, new List<string>(), true);
             if (!inviteResult.Success)
             {
                 result.Errors.AddRange(inviteResult.Errors);
@@ -293,11 +297,26 @@ public class SystemUserManagementService : ISystemUserManagementService
             result.InvitationUrl = inviteResult.InvitationUrl;
             result.InvitationSent = true;
 
+            // Validate UserId before attempting database creation
+            if (string.IsNullOrEmpty(inviteResult.UserId))
+            {
+                result.Errors.Add("Azure AD invitation succeeded but no User ID was returned");
+                _logger.LogError("Azure invitation for {Email} succeeded but UserId is null or empty", email);
+                return result;
+            }
+
+            if (!Guid.TryParse(inviteResult.UserId, out var userGuid))
+            {
+                result.Errors.Add($"Invalid User ID format returned from Azure AD: {inviteResult.UserId}");
+                _logger.LogError("Azure invitation for {Email} returned invalid GUID format: {UserId}", email, inviteResult.UserId);
+                return result;
+            }
+
             // Create database record
             var ownerId = organizationId ?? Guid.NewGuid();
             var newUser = new OnboardedUser
             {
-                OnboardedUserId = Guid.Parse(inviteResult.UserId),
+                OnboardedUserId = userGuid,
                 Name = displayName,
                 Email = email,
                 AssignedRole = role,
@@ -313,10 +332,25 @@ public class SystemUserManagementService : ISystemUserManagementService
             await _dbContext.SaveChangesAsync();
             result.DatabaseRecordCreated = true;
 
-            // Note: App role assignment will happen when user accepts invitation
-            result.Success = true;
+            // Assign Azure AD app role to the invited user
+            var roleName = GetAppRoleName(role); // Convert UserRole enum to Azure AD app role name
+            _logger.LogInformation("Assigning Azure AD app role {Role} to user {UserId}", roleName, inviteResult.UserId);
+            var appRoleAssigned = await _graphService.AssignAppRoleToUserAsync(inviteResult.UserId, roleName);
             
-            _logger.LogInformation("Successfully created system user {Email} with role {Role}", email, role);
+            if (appRoleAssigned)
+            {
+                result.AppRoleAssigned = true;
+                _logger.LogInformation("✅ App role {Role} successfully assigned to user {Email}", role, email);
+            }
+            else
+            {
+                result.Warnings.Add($"App role assignment failed for role {role}. User will rely on database role for authorization.");
+                _logger.LogWarning("⚠️ App role assignment failed for user {Email} with role {Role}, but database record created successfully", email, role);
+            }
+
+            result.Success = true;
+            _logger.LogInformation("Successfully created system user {Email} with role {Role} (DB: ✅, AppRole: {AppRole})", 
+                email, role, appRoleAssigned ? "✅" : "❌");
         }
         catch (Exception ex)
         {
@@ -965,4 +999,21 @@ public class SystemUserManagementService : ISystemUserManagementService
             return false;
         }
     }
+
+    /// <summary>
+    /// Gets the environment-appropriate redirect URL for invitations
+    /// </summary>
+    private string GetEnvironmentAwareRedirectUrl()
+    {
+        if (_configuration["ASPNETCORE_ENVIRONMENT"] == "Production")
+        {
+            var baseUrl = _configuration["Production:BaseUrl"] ?? "https://adminconsole.erpure.ai";
+            return $"{baseUrl}/admin";
+        }
+        else
+        {
+            return "http://localhost:5243/admin";
+        }
+    }
+
 }

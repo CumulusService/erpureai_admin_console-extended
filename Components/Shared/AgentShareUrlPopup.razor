@@ -1,0 +1,186 @@
+@using AdminConsole.Models
+@inject IJSRuntime JSRuntime
+
+@if (IsVisible && AgentType != null)
+{
+    <div class="modal fade show d-block" style="background-color: rgba(0,0,0,0.5);" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-dialog-centered" role="document">
+            <div class="modal-content">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title">
+                        <i class="fas fa-share-alt me-2"></i>
+                        Agent Successfully Assigned!
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="Close" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-success border-0 mb-4">
+                        <div class="d-flex align-items-center">
+                            <i class="fas fa-check-circle fa-2x me-3"></i>
+                            <div>
+                                <h6 class="mb-1">Agent Type: <strong>@AgentType.DisplayName</strong></h6>
+                                <small class="text-muted">Assignment completed successfully</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(AgentType.AgentShareUrl))
+                    {
+                        <div class="mb-4">
+                            <label class="form-label fw-bold">
+                                <i class="fas fa-link me-2"></i>
+                                Agent Share URL:
+                            </label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" 
+                                       value="@AgentType.AgentShareUrl" 
+                                       readonly 
+                                       id="agentShareUrl_@AgentType.Id" />
+                                <button class="btn btn-outline-primary" 
+                                        type="button" 
+                                        @onclick="CopyToClipboard"
+                                        disabled="@isCopying">
+                                    @if (isCopying)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                    }
+                                    else if (showCopiedFeedback)
+                                    {
+                                        <i class="fas fa-check me-1 text-success"></i>
+                                    }
+                                    else
+                                    {
+                                        <i class="fas fa-copy me-1"></i>
+                                    }
+                                    @(showCopiedFeedback ? "Copied!" : "Copy")
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="alert alert-info border-0">
+                            <h6 class="alert-heading">
+                                <i class="fas fa-info-circle me-2"></i>
+                                Next Steps for User:
+                            </h6>
+                            <p class="mb-2">
+                                <strong>Send this Agent Share URL to the user</strong> so they can add the agent to their Microsoft Teams account.
+                            </p>
+                            <ul class="mb-0">
+                                <li>User should click the link to open the agent in Teams</li>
+                                <li>User will be prompted to add the agent to their Teams</li>
+                                <li>Once added, they can start using the agent immediately</li>
+                            </ul>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="alert alert-warning border-0">
+                            <h6 class="alert-heading">
+                                <i class="fas fa-exclamation-triangle me-2"></i>
+                                No Share URL Configured
+                            </h6>
+                            <p class="mb-0">
+                                This agent type doesn't have a share URL configured. The agent has been assigned successfully,
+                                but users will need to access it through other means.
+                            </p>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" @onclick="Close">
+                        <i class="fas fa-times me-1"></i>
+                        Close
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public AgentTypeEntity? AgentType { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private bool isCopying = false;
+    private bool showCopiedFeedback = false;
+
+    private async Task Close()
+    {
+        IsVisible = false;
+        showCopiedFeedback = false;
+        await OnClose.InvokeAsync();
+        StateHasChanged();
+    }
+
+    private async Task CopyToClipboard()
+    {
+        if (AgentType?.AgentShareUrl == null || isCopying)
+            return;
+
+        try
+        {
+            isCopying = true;
+            StateHasChanged();
+
+            // Try modern clipboard API first
+            var copySuccessful = await JSRuntime.InvokeAsync<bool>("copyToClipboard", AgentType.AgentShareUrl);
+            
+            if (copySuccessful)
+            {
+                showCopiedFeedback = true;
+                StateHasChanged();
+
+                // Hide the feedback after 3 seconds
+                _ = Task.Delay(3000).ContinueWith(_ =>
+                {
+                    showCopiedFeedback = false;
+                    InvokeAsync(StateHasChanged);
+                });
+            }
+        }
+        catch (Exception)
+        {
+            // Fallback to manual selection
+            await JSRuntime.InvokeVoidAsync("selectText", $"agentShareUrl_{AgentType.Id}");
+        }
+        finally
+        {
+            isCopying = false;
+            StateHasChanged();
+        }
+    }
+}
+
+<script>
+    window.copyToClipboard = async function (text) {
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+                return true;
+            } else {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                textArea.style.position = 'fixed';
+                textArea.style.opacity = '0';
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                const successful = document.execCommand('copy');
+                document.body.removeChild(textArea);
+                return successful;
+            }
+        } catch (err) {
+            return false;
+        }
+    };
+
+    window.selectText = function (elementId) {
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.select();
+            element.setSelectionRange(0, 99999); // For mobile devices
+        }
+    };
+</script>

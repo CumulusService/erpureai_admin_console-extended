@@ -66,7 +66,7 @@ builder.Services.AddAuthorization(options =>
 {
     // NEW: Database-driven role policies (replaces hardcoded domain checks)
     options.AddPolicy("SuperAdminOnly", policy => 
-        policy.RequireDatabaseRole(UserRole.SuperAdmin, allowHigherRoles: true)); // Allow Developer access too
+        policy.RequireDatabaseRole(UserRole.SuperAdmin, allowHigherRoles: true)); // Allow Developer access
     
     options.AddPolicy("OrgAdminOrHigher", policy => 
         policy.RequireDatabaseRole(UserRole.OrgAdmin, allowHigherRoles: true));
@@ -78,7 +78,7 @@ builder.Services.AddAuthorization(options =>
         policy.RequireDatabaseRole(UserRole.User, allowHigherRoles: true));
 
     options.AddPolicy("DevOnly", policy => 
-        policy.RequireDatabaseRole(UserRole.Developer, allowHigherRoles: true));
+        policy.RequireDatabaseRole(UserRole.Developer, allowHigherRoles: false)); // Developer only - block SuperAdmin
         
     options.AddPolicy("AuthenticatedUser", policy => 
         policy.RequireAuthenticatedUser());
@@ -163,6 +163,11 @@ builder.Services.AddSingleton<IOrphanedResourceDetectionService, OrphanedResourc
 
 // Orphaned resource cleanup service for maintenance
 // Orphaned resource cleanup service removed (compilation errors)
+
+// Email notification services for user communications
+builder.Services.Configure<EmailOptions>(builder.Configuration.GetSection(EmailOptions.SectionName));
+builder.Services.AddScoped<IEmailTemplateService, EmailTemplateService>();
+builder.Services.AddScoped<IEmailService, EmailService>();
 
 // Add HTTP services for external API calls with proper resource management
 builder.Services.AddHttpClient("DefaultHttpClient", client =>

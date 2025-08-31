@@ -108,6 +108,12 @@
                                                         <i class="fas fa-shield-alt"></i>
                                                     </small>
                                                 }
+                                                @if (agentType.RequireSupervisorEmail)
+                                                {
+                                                    <small class="badge bg-warning text-dark ms-2" title="Requires supervisor email">
+                                                        <i class="fas fa-user-shield"></i> Supervisor Required
+                                                    </small>
+                                                }
                                             </div>
                                         </label>
                                     </div>
@@ -123,9 +129,18 @@
                         </div>
                     }
 
-                    @if (!string.IsNullOrEmpty(ValidationMessage))
+                    @* Dynamic warning for supervisor requirements *@
+                    @if (HasSupervisorRequiredSelection && string.IsNullOrWhiteSpace(User.AssignedSupervisorEmail))
                     {
                         <div class="alert alert-warning mt-3">
+                            <i class="fas fa-user-shield me-2"></i>
+                            <strong>Supervisor Email Required:</strong> The selected agent types require a supervisor email address. Please ensure this user has a supervisor email assigned before saving.
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(ValidationMessage))
+                    {
+                        <div class="alert alert-danger mt-3">
                             <i class="fas fa-exclamation-triangle me-2"></i>
                             @ValidationMessage
                         </div>
@@ -169,6 +184,9 @@
 
     private bool HasChanges => !SelectedAgentTypeIds.SetEquals(OriginalAgentTypeIds);
     private bool IsValidSelection => SelectedAgentTypeIds.Count > 0;
+    private bool HasSupervisorRequiredSelection => AvailableAgentTypes
+        .Where(at => SelectedAgentTypeIds.Contains(at.Id))
+        .Any(at => at.RequireSupervisorEmail);
 
     protected override async Task OnInitializedAsync()
     {
@@ -240,11 +258,14 @@
         {
             Console.WriteLine($"Starting agent type update for user {User.Email}");
             
-            // Validate the assignment
-            var isValidAssignment = await OnboardedUserService.ValidateAgentTypeAssignmentAsync(SelectedAgentTypeIds.ToList());
-            if (!isValidAssignment)
+            // Validate the assignment with supervisor email requirements
+            var validationResult = await OnboardedUserService.ValidateAgentTypeAssignmentWithSupervisorAsync(
+                SelectedAgentTypeIds.ToList(), 
+                User.AssignedSupervisorEmail);
+                
+            if (!validationResult.IsValid)
             {
-                ValidationMessage = "Invalid agent type selection. At least one agent type must be selected.";
+                ValidationMessage = validationResult.ErrorMessage ?? "Invalid agent type selection.";
                 return;
             }
 

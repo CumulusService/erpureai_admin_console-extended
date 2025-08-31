@@ -341,35 +341,7 @@ public class DatabaseCredentialService : IDatabaseCredentialService
             existingCredential.ModifiedOn = DateTime.UtcNow;
             existingCredential.ModifiedBy = modifiedBy;
 
-            // Update SAP password in Key Vault if provided
-            _logger.LogInformation("Checking SAP password update - SAPPassword: '{PasswordProvided}', Length: {PasswordLength}", 
-                string.IsNullOrEmpty(model.SAPPassword) ? "NULL/EMPTY" : "PROVIDED", model.SAPPassword?.Length ?? 0);
-                
-            if (!string.IsNullOrEmpty(model.SAPPassword))
-            {
-                _logger.LogInformation("Updating SAP password in Key Vault for credential {FriendlyName}", model.FriendlyName);
-                
-                // Use URI-based update to create new version of existing secret
-                var (success, newVersionUri) = await _keyVaultService.UpdateSecretByUriAsync(existingCredential.PasswordSecretName, model.SAPPassword, organizationId.ToString());
-                if (!success)
-                {
-                    _logger.LogError("Failed to update SAP password in Key Vault for credential {FriendlyName}", model.FriendlyName);
-                    throw new InvalidOperationException("Failed to update SAP password in Key Vault. Please check that the Key Vault is accessible and your service principal has the required permissions (Secret Officer role).");
-                }
-
-                // Update to the new version URI in SQL database
-                if (!string.IsNullOrEmpty(newVersionUri))
-                {
-                    existingCredential.PasswordSecretName = newVersionUri;
-                    _logger.LogInformation("Updated SAP password secret to new version URI: {NewVersionUri}", newVersionUri);
-                }
-
-                _logger.LogInformation("SAP password updated successfully in Key Vault (new version created for existing secret)");
-            }
-            else
-            {
-                _logger.LogInformation("No SAP password provided - skipping Key Vault update");
-            }
+            // SAP password and database password updates are handled in the consolidated secret update logic below
 
             // Update connection string in Key Vault if database password is provided
             _logger.LogInformation("Checking database password update - DatabasePassword: '{PasswordProvided}', Length: {PasswordLength}", 
@@ -387,142 +359,184 @@ public class DatabaseCredentialService : IDatabaseCredentialService
                 _logger.LogInformation("No database password provided - keeping existing connection string");
             }
 
-            // Update consolidated secret if passwords are provided and consolidated secret exists
-            if ((!string.IsNullOrEmpty(model.SAPPassword) || !string.IsNullOrEmpty(model.DatabasePassword)) 
-                && !string.IsNullOrEmpty(existingCredential.ConsolidatedSecretName))
+            // Update Key Vault secrets based on credential type and provided updates
+            bool hasPasswordUpdates = !string.IsNullOrEmpty(model.SAPPassword) || !string.IsNullOrEmpty(model.DatabasePassword);
+            bool hasConfigurationUpdates = model.SAPServiceLayerHostname != existingCredential.SAPServiceLayerHostname ||
+                                          model.SAPAPIGatewayHostname != existingCredential.SAPAPIGatewayHostname ||
+                                          model.SAPBusinessOneWebClientHost != existingCredential.SAPBusinessOneWebClientHost ||
+                                          model.DocumentCode != existingCredential.DocumentCode;
+            
+            bool useConsolidatedSecret = !string.IsNullOrEmpty(existingCredential.ConsolidatedSecretName);
+            bool useLegacySecrets = !string.IsNullOrEmpty(existingCredential.PasswordSecretName) || !string.IsNullOrEmpty(existingCredential.ConnectionStringSecretName);
+            
+            _logger.LogInformation("Update analysis for credential {FriendlyName}: PasswordUpdates={HasPasswordUpdates}, ConfigUpdates={HasConfigUpdates}, UseConsolidated={UseConsolidated}, UseLegacy={UseLegacy}",
+                model.FriendlyName, hasPasswordUpdates, hasConfigurationUpdates, useConsolidatedSecret, useLegacySecrets);
+            
+            if (hasPasswordUpdates || hasConfigurationUpdates)
             {
-                _logger.LogInformation("Updating consolidated secret in Key Vault for credential {FriendlyName}", model.FriendlyName);
-                
-                try
+                if (useConsolidatedSecret)
                 {
-                    // Get current SAP password if not provided in update
-                    string currentSAPPassword = model.SAPPassword;
-                    if (string.IsNullOrEmpty(currentSAPPassword))
+                    _logger.LogInformation("Updating consolidated secret in Key Vault for credential {FriendlyName}", model.FriendlyName);
+                    
+                    try
                     {
-                        try
+                        // Get current SAP password if not provided in update
+                        string currentSAPPassword = model.SAPPassword ?? string.Empty;
+                        if (string.IsNullOrEmpty(currentSAPPassword))
                         {
-                            currentSAPPassword = await GetSAPPasswordAsync(existingCredential.Id, organizationId);
-                            if (string.IsNullOrEmpty(currentSAPPassword))
+                            try
                             {
-                                // Check if this is a new credential with no secrets created yet
-                                if (string.IsNullOrEmpty(existingCredential.ConsolidatedSecretName) && string.IsNullOrEmpty(existingCredential.PasswordSecretName))
+                                currentSAPPassword = await GetSAPPasswordAsync(existingCredential.Id, organizationId) ?? string.Empty;
+                                if (string.IsNullOrEmpty(currentSAPPassword))
                                 {
-                                    _logger.LogInformation("New credential with no existing secrets detected. Creating consolidated secret for the first time during update.");
-                                    // Use the provided SAP password from the update (this is likely the first real SAP password)
-                                    if (!string.IsNullOrEmpty(model.SAPPassword))
-                                    {
-                                        currentSAPPassword = model.SAPPassword;
-                                        _logger.LogInformation("Using SAP password from update request for new consolidated secret creation");
-                                    }
-                                    else
-                                    {
-                                        _logger.LogError("Cannot create consolidated secret for new credential - no SAP password provided in update");
-                                        throw new InvalidOperationException("Unable to retrieve current SAP password and no new SAP password provided. Please provide a SAP password to create the consolidated secret.");
-                                    }
-                                }
-                                else
-                                {
-                                    _logger.LogError("GetSAPPasswordAsync returned null or empty for credential {CredentialId}", existingCredential.Id);
+                                    _logger.LogError("Unable to retrieve current SAP password for credential {CredentialId}", existingCredential.Id);
                                     throw new InvalidOperationException("Unable to retrieve current SAP password. Please provide a new SAP password to update the consolidated secret.");
                                 }
-                            }
-                            else
-                            {
                                 _logger.LogInformation("Retrieved current SAP password from existing secret");
                             }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Failed to retrieve current SAP password for credential {CredentialId}", existingCredential.Id);
+                                throw new InvalidOperationException("Unable to retrieve current SAP password. Please provide a new SAP password to update the consolidated secret.");
+                            }
                         }
-                        catch (Exception ex)
+                        
+                        // Build connection string with current or new database password
+                        string connectionString;
+                        if (!string.IsNullOrEmpty(model.DatabasePassword))
                         {
-                            _logger.LogError(ex, "Failed to retrieve current SAP password for credential {CredentialId}", existingCredential.Id);
-                            _logger.LogWarning("Skipping consolidated secret update due to SAP password retrieval failure. Separate secrets will still be updated.");
-                            // Skip consolidated secret update but continue with separate secret updates
-                            goto SkipConsolidatedUpdate;
+                            connectionString = existingCredential.BuildConnectionStringTemplate().Replace("{password}", model.DatabasePassword);
+                            _logger.LogInformation("Built connection string with new database password");
                         }
-                    }
-                    
-                    // Build connection string with current or new database password
-                    string connectionString;
-                    if (!string.IsNullOrEmpty(model.DatabasePassword))
-                    {
-                        connectionString = existingCredential.BuildConnectionStringTemplate().Replace("{password}", model.DatabasePassword);
-                        _logger.LogInformation("Built connection string with new database password");
-                    }
-                    else
-                    {
-                        try
+                        else
                         {
-                            connectionString = await BuildConnectionStringAsync(existingCredential.Id, organizationId);
+                            connectionString = await BuildConnectionStringAsync(existingCredential.Id, organizationId) ?? string.Empty;
                             if (string.IsNullOrEmpty(connectionString))
                             {
-                                // Check if this is a new credential with no secrets created yet
-                                if (string.IsNullOrEmpty(existingCredential.ConsolidatedSecretName) && string.IsNullOrEmpty(existingCredential.ConnectionStringSecretName))
-                                {
-                                    _logger.LogInformation("New credential with no existing connection string secret detected. Building connection string from template during update.");
-                                    // Use the provided database password from the update to build connection string
-                                    if (!string.IsNullOrEmpty(model.DatabasePassword))
-                                    {
-                                        connectionString = existingCredential.BuildConnectionStringTemplate().Replace("{password}", model.DatabasePassword);
-                                        _logger.LogInformation("Built connection string using database password from update request for new consolidated secret creation");
-                                    }
-                                    else
-                                    {
-                                        _logger.LogError("Cannot build connection string for new credential - no database password provided in update");
-                                        throw new InvalidOperationException("Unable to retrieve current connection string and no new database password provided. Please provide a database password to create the consolidated secret.");
-                                    }
-                                }
-                                else
-                                {
-                                    _logger.LogError("BuildConnectionStringAsync returned null or empty for credential {CredentialId}", existingCredential.Id);
-                                    throw new InvalidOperationException("Unable to retrieve current connection string. Please provide a new database password to update the consolidated secret.");
-                                }
+                                _logger.LogError("Unable to retrieve current connection string for credential {CredentialId}", existingCredential.Id);
+                                throw new InvalidOperationException("Unable to retrieve current connection string. Please provide a new database password to update the consolidated secret.");
                             }
-                            else
-                            {
-                                _logger.LogInformation("Retrieved current connection string from existing secret");
-                            }
+                            _logger.LogInformation("Retrieved current connection string from existing secret");
                         }
-                        catch (Exception ex)
+                        
+                        // Build comprehensive tag dictionary with all SAP configuration
+                        var allTags = new Dictionary<string, string>
                         {
-                            _logger.LogError(ex, "Failed to build current connection string for credential {CredentialId}", existingCredential.Id);
-                            _logger.LogWarning("Skipping consolidated secret update due to connection string build failure. Separate secrets will still be updated.");
-                            // Skip consolidated secret update but continue with separate secret updates
-                            goto SkipConsolidatedUpdate;
+                            { "connectionString", connectionString },
+                            { "secretType", "consolidated" }
+                        };
+
+                        // Add all SAP configuration as tags (use updated values from model)
+                        if (!string.IsNullOrWhiteSpace(model.SAPServiceLayerHostname))
+                        {
+                            allTags["sapServiceLayer"] = model.SAPServiceLayerHostname;
+                            _logger.LogDebug("Adding updated SAP Service Layer hostname tag: {Hostname}", model.SAPServiceLayerHostname);
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(model.SAPAPIGatewayHostname))
+                        {
+                            allTags["sapAPIGateway"] = model.SAPAPIGatewayHostname;
+                            _logger.LogDebug("Adding updated SAP API Gateway hostname tag: {Hostname}", model.SAPAPIGatewayHostname);
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(model.SAPBusinessOneWebClientHost))
+                        {
+                            allTags["sapWebClient"] = model.SAPBusinessOneWebClientHost;
+                            _logger.LogDebug("Adding updated SAP Web Client hostname tag: {Hostname}", model.SAPBusinessOneWebClientHost);
+                        }
+
+                        if (!string.IsNullOrWhiteSpace(model.DocumentCode))
+                        {
+                            allTags["documentCode"] = model.DocumentCode;
+                            _logger.LogDebug("Adding updated Document Code tag: {DocumentCode}", model.DocumentCode);
+                        }
+
+                        _logger.LogInformation("Updating consolidated secret with {TagCount} tags (preserving all configuration)", allTags.Count);
+                        
+                        // Update consolidated secret with new version including all preserved and updated tags
+                        var (success, newVersionUri) = await _keyVaultService.UpdateSecretMetadataByUriAsync(
+                            existingCredential.ConsolidatedSecretName ?? string.Empty, 
+                            currentSAPPassword, 
+                            organizationId.ToString(),
+                            true, // enabled
+                            allTags);
+                            
+                        if (success && !string.IsNullOrEmpty(newVersionUri))
+                        {
+                            existingCredential.ConsolidatedSecretName = newVersionUri;
+                            _logger.LogInformation("Updated consolidated secret to new version URI: {NewVersionUri}", newVersionUri);
+                        }
+                        else if (!success)
+                        {
+                            _logger.LogError("Failed to update consolidated secret in Key Vault for credential {FriendlyName}", model.FriendlyName);
+                            throw new InvalidOperationException("Failed to update consolidated secret in Key Vault. Please check that the Key Vault is accessible and your service principal has the required permissions (Secret Officer role).");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error updating consolidated secret for credential {FriendlyName}", model.FriendlyName);
+                        throw new InvalidOperationException($"Failed to update consolidated secret: {ex.Message}");
+                    }
+                }
+                else if (useLegacySecrets)
+                {
+                    _logger.LogInformation("Updating legacy separate secrets in Key Vault for credential {FriendlyName}", model.FriendlyName);
+                    
+                    // Update SAP password secret if SAP password provided
+                    if (!string.IsNullOrEmpty(model.SAPPassword) && !string.IsNullOrEmpty(existingCredential.PasswordSecretName))
+                    {
+                        var (success, newVersionUri) = await _keyVaultService.UpdateSecretByUriAsync(
+                            existingCredential.PasswordSecretName, 
+                            model.SAPPassword, 
+                            organizationId.ToString());
+                            
+                        if (!success)
+                        {
+                            _logger.LogError("Failed to update SAP password in legacy Key Vault secret for credential {FriendlyName}", model.FriendlyName);
+                            throw new InvalidOperationException("Failed to update SAP password in Key Vault.");
+                        }
+
+                        if (!string.IsNullOrEmpty(newVersionUri))
+                        {
+                            existingCredential.PasswordSecretName = newVersionUri;
+                            _logger.LogInformation("Updated legacy password secret to new version URI: {NewVersionUri}", newVersionUri);
                         }
                     }
                     
-                    // Update consolidated secret with new version (using metadata update to include tags)
-                    var (success, newVersionUri) = await _keyVaultService.UpdateSecretMetadataByUriAsync(
-                        existingCredential.ConsolidatedSecretName, 
-                        currentSAPPassword, 
-                        organizationId.ToString(),
-                        true, // enabled
-                        new Dictionary<string, string> { { "connectionString", connectionString } });
+                    // Update connection string secret if database password provided
+                    if (!string.IsNullOrEmpty(model.DatabasePassword) && !string.IsNullOrEmpty(existingCredential.ConnectionStringSecretName))
+                    {
+                        string connectionString = existingCredential.BuildConnectionStringTemplate().Replace("{password}", model.DatabasePassword);
                         
-                    if (success && !string.IsNullOrEmpty(newVersionUri))
-                    {
-                        existingCredential.ConsolidatedSecretName = newVersionUri;
-                        _logger.LogInformation("Updated consolidated secret to new version URI: {NewVersionUri}", newVersionUri);
+                        var (success, newVersionUri) = await _keyVaultService.UpdateSecretByUriAsync(
+                            existingCredential.ConnectionStringSecretName, 
+                            connectionString, 
+                            organizationId.ToString());
+                            
+                        if (!success)
+                        {
+                            _logger.LogError("Failed to update connection string in legacy Key Vault secret for credential {FriendlyName}", model.FriendlyName);
+                            throw new InvalidOperationException("Failed to update connection string in Key Vault.");
+                        }
+
+                        if (!string.IsNullOrEmpty(newVersionUri))
+                        {
+                            existingCredential.ConnectionStringSecretName = newVersionUri;
+                            _logger.LogInformation("Updated legacy connection string secret to new version URI: {NewVersionUri}", newVersionUri);
+                        }
                     }
-                    else if (!success)
-                    {
-                        _logger.LogError("Failed to update consolidated secret in Key Vault for credential {FriendlyName}", model.FriendlyName);
-                        throw new InvalidOperationException("Failed to update consolidated secret in Key Vault. Please check that the Key Vault is accessible and your service principal has the required permissions (Secret Officer role).");
-                    }
+                    
+                    _logger.LogInformation("Legacy secrets updated successfully for credential {FriendlyName}", model.FriendlyName);
                 }
-                catch (Exception ex)
+                else
                 {
-                    _logger.LogError(ex, "Error updating consolidated secret for credential {FriendlyName}", model.FriendlyName);
-                    _logger.LogWarning("Consolidated secret update failed, but separate secret updates succeeded. System will continue to function using separate secrets.");
-                    // Don't throw - let separate secret updates work
+                    _logger.LogWarning("No existing secrets found for credential {FriendlyName} - updates to SAP configuration will only be stored in database", model.FriendlyName);
                 }
             }
-            else if (!string.IsNullOrEmpty(existingCredential.ConsolidatedSecretName))
+            else
             {
-                _logger.LogInformation("No password updates provided - consolidated secret remains unchanged");
+                _logger.LogInformation("No password or configuration updates provided for credential {FriendlyName} - Key Vault secrets remain unchanged", model.FriendlyName);
             }
-            
-            SkipConsolidatedUpdate:
-            // Continue with database save even if consolidated secret update failed
 
             await _context.SaveChangesAsync();
 
@@ -1218,7 +1232,7 @@ public class DatabaseCredentialService : IDatabaseCredentialService
                 // NEW FORMAT: Use consolidated secret URI (same as legacy format)
                 _logger.LogInformation("Updating consolidated Key Vault secret by URI {SecretUri}", credential.ConsolidatedSecretName);
                 
-                var (success, newVersionUri) = await _keyVaultService.UpdateSecretByUriAsync(credential.ConsolidatedSecretName, newPassword, organizationId.ToString());
+                var (success, newVersionUri) = await _keyVaultService.UpdateSecretByUriAsync(credential.ConsolidatedSecretName ?? string.Empty, newPassword, organizationId.ToString());
                 if (!success)
                 {
                     _logger.LogError("Failed to update password in Key Vault consolidated secret {SecretUri} for credential {CredentialId}", 
@@ -1527,7 +1541,7 @@ public class DatabaseCredentialService : IDatabaseCredentialService
                     
                     try
                     {
-                        currentSAPPassword = await GetSAPPasswordAsync(credential.Id, Guid.Parse(organizationId));
+                        currentSAPPassword = await GetSAPPasswordAsync(credential.Id, Guid.Parse(organizationId)) ?? string.Empty;
                         if (string.IsNullOrEmpty(currentSAPPassword))
                         {
                             _logger.LogError("GetSAPPasswordAsync returned null or empty for credential {CredentialId} during sync", credential.Id);
@@ -1543,7 +1557,7 @@ public class DatabaseCredentialService : IDatabaseCredentialService
                     
                     try
                     {
-                        currentConnectionString = await BuildConnectionStringAsync(credential.Id, Guid.Parse(organizationId));
+                        currentConnectionString = await BuildConnectionStringAsync(credential.Id, Guid.Parse(organizationId)) ?? string.Empty;
                         if (string.IsNullOrEmpty(currentConnectionString))
                         {
                             _logger.LogError("BuildConnectionStringAsync returned null or empty for credential {CredentialId} during sync", credential.Id);
