@@ -948,24 +948,35 @@
         {
             // Get current user role for access control
             currentUserRole = await DataIsolationService.GetCurrentUserRoleAsync();
-            
+
+            // For SuperAdmin and Developer, they can view all users across all organizations
+            // For OrgAdmin, they can only view users in their organization
+            var isSuperAdminOrDeveloper = currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer;
+
             // Get current user's organization
             var currentUserOrgIdStr = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
-            if (!string.IsNullOrEmpty(currentUserOrgIdStr))
+            if (!string.IsNullOrEmpty(currentUserOrgIdStr) || isSuperAdminOrDeveloper)
             {
-                // Try to parse as GUID, otherwise generate one from the string
-                if (!Guid.TryParse(currentUserOrgIdStr, out currentUserOrgId))
+                // For SuperAdmin/Developer, use their org if available, otherwise use a placeholder
+                if (!string.IsNullOrEmpty(currentUserOrgIdStr))
                 {
-                    // Generate deterministic GUID from organization ID string
-                    using (var md5 = System.Security.Cryptography.MD5.Create())
+                    // Try to parse as GUID, otherwise generate one from the string
+                    if (!Guid.TryParse(currentUserOrgIdStr, out currentUserOrgId))
                     {
-                        var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(currentUserOrgIdStr));
-                        currentUserOrgId = new Guid(hash);
+                        // Generate deterministic GUID from organization ID string
+                        using (var md5 = System.Security.Cryptography.MD5.Create())
+                        {
+                            var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(currentUserOrgIdStr));
+                            currentUserOrgId = new Guid(hash);
+                        }
+                        Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgIdStr);
                     }
-                    Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgIdStr);
                 }
-                
-                await LoadOrganizationAgentTypes();
+
+                if (currentUserOrgId != Guid.Empty)
+                {
+                    await LoadOrganizationAgentTypes();
+                }
                 
                 // Initialize secrets asynchronously in the background - don't block page loading
                 // This prevents the heavy Key Vault operation from blocking page load
