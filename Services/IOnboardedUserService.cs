@@ -45,7 +45,16 @@ public interface IOnboardedUserService
     /// <param name="organizationId">Organization ID</param>
     /// <returns>Azure Object ID if found</returns>
     Task<string?> GetAzureObjectIdByEmailAsync(string email, Guid organizationId);
-    
+
+    /// <summary>
+    /// NEW: Updates a user's role (e.g., promoting User to OrgAdmin or demoting OrgAdmin to User)
+    /// </summary>
+    /// <param name="email">User email</param>
+    /// <param name="organizationId">Organization ID for security validation</param>
+    /// <param name="newRole">New role to assign</param>
+    /// <returns>True if role updated successfully</returns>
+    Task<bool> UpdateUserRoleAsync(string email, Guid organizationId, UserRole newRole);
+
     /// <summary>
     /// Creates a new onboarded user
     /// </summary>

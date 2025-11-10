@@ -132,14 +132,16 @@ public class UserDatabaseAccessService : IUserDatabaseAccessService
                 return cachedDatabases ?? new List<DatabaseCredential>();
             }
 
-            var assignments = await _context.UserDatabaseAssignments
-                .Where(a => a.UserId == userId && 
-                           a.OrganizationId == organizationId && 
-                           a.IsActive)
-                .Include(a => a.DatabaseCredential)
-                .Where(a => a.DatabaseCredential != null && a.DatabaseCredential.IsActive)
-                .Select(a => a.DatabaseCredential!)
-                .ToListAsync();
+            // Use JOIN instead of Include to avoid navigation property issues
+            var assignments = await (from assignment in _context.UserDatabaseAssignments
+                                   join credential in _context.DatabaseCredentials
+                                   on assignment.DatabaseCredentialId equals credential.Id
+                                   where assignment.UserId == userId &&
+                                         assignment.OrganizationId == organizationId &&
+                                         assignment.IsActive &&
+                                         credential.IsActive
+                                   select credential)
+                                 .ToListAsync();
 
             // Cache for 5 minutes
             _cache.Set(cacheKey, assignments, TimeSpan.FromMinutes(5));

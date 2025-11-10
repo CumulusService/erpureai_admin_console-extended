@@ -299,9 +299,9 @@ public class KeyVaultService : IKeyVaultService
             }
             
             _logger.LogInformation("  Successfully created new version of secret {TenantSecretName}", tenantSecretName);
-            
-            // Get the new version URI from the response
-            var newVersionUri = newVersionResponse?.Value?.Properties?.Id?.ToString();
+
+            // Get the new version URI from the response (use top-level Id property for versioned URI)
+            var newVersionUri = newVersionResponse?.Value?.Id?.ToString();
             _logger.LogInformation("  New version URI: {NewVersionUri}", newVersionUri);
             
             // Invalidate cache
@@ -879,9 +879,9 @@ public class KeyVaultService : IKeyVaultService
             _logger.LogInformation("  Calling Azure Key Vault SetSecretAsync to create new version with metadata...");
             var newVersionResponse = await _secretClient.SetSecretAsync(secretOptions);
             _logger.LogInformation("  Successfully created new version of secret {TenantSecretName} with metadata", tenantSecretName);
-            
-            // Get the new version URI from the response
-            var newVersionUri = newVersionResponse?.Value?.Properties?.Id?.ToString();
+
+            // Get the new version URI from the response (use top-level Id property for versioned URI)
+            var newVersionUri = newVersionResponse?.Value?.Id?.ToString();
             _logger.LogInformation("  New version URI: {NewVersionUri}", newVersionUri);
             
             // Invalidate cache
@@ -1159,9 +1159,9 @@ public class KeyVaultService : IKeyVaultService
             _logger.LogInformation("  Creating new enabled version with original secret value...");
             var newVersionResponse = await _secretClient.SetSecretAsync(secretOptions);
             _logger.LogInformation("  Successfully enabled secret {TenantSecretName} with original value", tenantSecretName);
-            
-            // Get the new version URI from the response
-            var newVersionUri = newVersionResponse?.Value?.Properties?.Id?.ToString();
+
+            // Get the new version URI from the response (use top-level Id property for versioned URI)
+            var newVersionUri = newVersionResponse?.Value?.Id?.ToString();
             _logger.LogInformation("  New version URI: {NewVersionUri}", newVersionUri);
             
             _logger.LogInformation("✅ Successfully enabled secret {TenantSecretName}, original value preserved", tenantSecretName);

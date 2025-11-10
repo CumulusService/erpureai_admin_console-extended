@@ -45,4 +45,17 @@ public static class UserRoleExtensions
             _ => "fas fa-question"
         };
     }
+
+    // NEW: Maps UserRole to Azure AD app role name for Microsoft Graph API operations
+    public static string GetAzureAdAppRole(this UserRole role)
+    {
+        return role switch
+        {
+            UserRole.SuperAdmin => "SuperAdmin",
+            UserRole.OrgAdmin => "OrgAdmin",
+            UserRole.User => "OrgUser",
+            UserRole.Developer => "DevRole",
+            _ => ""
+        };
+    }
 }

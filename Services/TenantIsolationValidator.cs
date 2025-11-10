@@ -172,11 +172,11 @@ public class TenantIsolationValidator : ITenantIsolationValidator
 
     public async Task ValidateSecretAccessAsync(string secretName, string organizationId, string operation = "read")
     {
-        // Additional security check for secret access
-        var currentUserRole = _dataIsolationService.GetCurrentUserRole();
+        // Additional security check for secret access - use async version for proper database role detection
+        var currentUserRole = await _dataIsolationService.GetCurrentUserRoleAsync();
         
-        // Super admins are allowed access for database credential management operations
-        if (currentUserRole == UserRole.SuperAdmin)
+        // Super admins and Developers are allowed access for database credential management operations
+        if (currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer)
         {
             // Allow database credential-related secret operations for Super Admins
             if (secretName.StartsWith("sap-password", StringComparison.OrdinalIgnoreCase) || 
@@ -184,8 +184,8 @@ public class TenantIsolationValidator : ITenantIsolationValidator
                 operation.Equals("write", StringComparison.OrdinalIgnoreCase))
             {
                 var currentUser = GetCurrentUserInfo();
-                _logger.LogInformation("Super admin {Email} accessing database credential secret {SecretName} in organization {OrganizationId} for operation {Operation}", 
-                    currentUser.Email, secretName, organizationId, operation);
+                _logger.LogInformation("Super admin/Developer {Email} (role: {UserRole}) accessing database credential secret {SecretName} in organization {OrganizationId} for operation {Operation}", 
+                    currentUser.Email, currentUserRole, secretName, organizationId, operation);
             }
             else
             {

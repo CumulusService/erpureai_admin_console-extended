@@ -35,6 +35,9 @@ public class Organization
     public string? SAPBusinessOneWebClientHost { get; set; } // cr032_sapbusinessonewebclienthost
     public string? DocumentCode { get; set; } // cr032_documentcode
     
+    // Document storage container (for document processing service) 
+    public string DocumentStorageContainer { get; set; } = "default";
+    
     // ORGANIZATION-LEVEL AGENT TYPE ALLOCATION (SuperAdmin responsibility)
     public string OrganizationAgentTypeIds { get; set; } = string.Empty; // JSON array of agent type GUIDs allocated to organization
     

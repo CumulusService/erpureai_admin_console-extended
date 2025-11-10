@@ -64,6 +64,44 @@ public class DatabaseCredentialService : IDatabaseCredentialService
             return new List<DatabaseCredential>();
         }
     }
+    
+    public async Task<List<DatabaseCredential>> GetAllDatabaseCredentialsAsync()
+    {
+        try
+        {
+            // Only allow SuperAdmins and Developers to access all credentials
+            if (!await _dataIsolationService.IsCurrentUserSuperAdminAsync())
+            {
+                _logger.LogWarning("Unauthorized attempt to access all database credentials by non-SuperAdmin user");
+                return new List<DatabaseCredential>();
+            }
+            
+            var cacheKey = "all_db_credentials";
+            
+            if (_cache.TryGetValue(cacheKey, out List<DatabaseCredential>? cachedCredentials))
+            {
+                return cachedCredentials ?? new List<DatabaseCredential>();
+            }
+
+            var credentials = await _context.DatabaseCredentials
+                .OrderBy(c => c.OrganizationId)
+                .ThenByDescending(c => c.CreatedOn)
+                .ToListAsync();
+
+            // Cache for 2 minutes (shorter than org-specific cache for security)
+            _cache.Set(cacheKey, credentials, TimeSpan.FromMinutes(2));
+
+            _logger.LogInformation("Retrieved {CredentialCount} database credentials across all organizations for SuperAdmin", 
+                credentials.Count);
+
+            return credentials;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting all database credentials for SuperAdmin");
+            return new List<DatabaseCredential>();
+        }
+    }
 
     public async Task<List<DatabaseCredential>> GetActiveByOrganizationAsync(Guid organizationId)
     {
@@ -303,6 +341,18 @@ public class DatabaseCredentialService : IDatabaseCredentialService
             var existingCredential = await _context.DatabaseCredentials
                 .Where(c => c.Id == credentialId && c.OrganizationId == organizationId)
                 .FirstOrDefaultAsync();
+
+            // For SuperAdmins/Developers: Allow cross-organization updates
+            if (existingCredential == null && await _dataIsolationService.IsCurrentUserSuperAdminAsync())
+            {
+                _logger.LogInformation("SuperAdmin cross-organization update: Looking for credential {CredentialId} across organizations", credentialId);
+                existingCredential = anyCredential; // Use the credential from any organization
+                if (existingCredential != null)
+                {
+                    _logger.LogInformation("SuperAdmin updating credential {CredentialId} from organization {ActualOrgId} (requested org: {RequestedOrgId})", 
+                        credentialId, existingCredential.OrganizationId, organizationId);
+                }
+            }
 
             if (existingCredential == null)
             {
@@ -558,9 +608,26 @@ public class DatabaseCredentialService : IDatabaseCredentialService
     {
         try
         {
+            // First, check if the credential exists at all
+            var anyCredential = await _context.DatabaseCredentials
+                .Where(c => c.Id == credentialId)
+                .FirstOrDefaultAsync();
+                
             var credential = await _context.DatabaseCredentials
                 .Where(c => c.Id == credentialId && c.OrganizationId == organizationId)
                 .FirstOrDefaultAsync();
+
+            // For SuperAdmins/Developers: Allow cross-organization deletions
+            if (credential == null && await _dataIsolationService.IsCurrentUserSuperAdminAsync())
+            {
+                _logger.LogInformation("SuperAdmin cross-organization delete: Looking for credential {CredentialId} across organizations", credentialId);
+                credential = anyCredential; // Use the credential from any organization
+                if (credential != null)
+                {
+                    _logger.LogInformation("SuperAdmin soft-deleting credential {CredentialId} from organization {ActualOrgId} (requested org: {RequestedOrgId})", 
+                        credentialId, credential.OrganizationId, organizationId);
+                }
+            }
 
             if (credential == null)
             {
@@ -575,11 +642,12 @@ public class DatabaseCredentialService : IDatabaseCredentialService
 
             await _context.SaveChangesAsync();
 
-            InvalidateCache(organizationId);
-            InvalidateActiveCache(organizationId);
+            // Use the credential's actual organization ID for proper cache invalidation
+            InvalidateCache(credential.OrganizationId);
+            InvalidateActiveCache(credential.OrganizationId);
 
             _logger.LogInformation("Soft deleted database credential {CredentialId} for organization {OrganizationId}", 
-                credentialId, organizationId);
+                credentialId, credential.OrganizationId);
 
             return true;
         }
@@ -596,9 +664,26 @@ public class DatabaseCredentialService : IDatabaseCredentialService
         using var transaction = await _context.Database.BeginTransactionAsync();
         try
         {
+            // First, check if the credential exists at all
+            var anyCredential = await _context.DatabaseCredentials
+                .Where(c => c.Id == credentialId)
+                .FirstOrDefaultAsync();
+                
             var credential = await _context.DatabaseCredentials
                 .Where(c => c.Id == credentialId && c.OrganizationId == organizationId)
                 .FirstOrDefaultAsync();
+
+            // For SuperAdmins/Developers: Allow cross-organization hard deletions
+            if (credential == null && await _dataIsolationService.IsCurrentUserSuperAdminAsync())
+            {
+                _logger.LogInformation("SuperAdmin cross-organization hard delete: Looking for credential {CredentialId} across organizations", credentialId);
+                credential = anyCredential; // Use the credential from any organization
+                if (credential != null)
+                {
+                    _logger.LogInformation("SuperAdmin hard-deleting credential {CredentialId} from organization {ActualOrgId} (requested org: {RequestedOrgId})", 
+                        credentialId, credential.OrganizationId, organizationId);
+                }
+            }
 
             if (credential == null)
             {
@@ -815,8 +900,9 @@ public class DatabaseCredentialService : IDatabaseCredentialService
             _context.DatabaseCredentials.Remove(credential);
             await _context.SaveChangesAsync();
 
-            InvalidateCache(organizationId);
-            InvalidateActiveCache(organizationId);
+            // Use the credential's actual organization ID for proper cache invalidation
+            InvalidateCache(credential.OrganizationId);
+            InvalidateActiveCache(credential.OrganizationId);
 
             // Commit the transaction
             await transaction.CommitAsync();
@@ -1724,6 +1810,20 @@ public class DatabaseCredentialService : IDatabaseCredentialService
         var activeCacheKey = $"org_active_credentials_{organizationId}";
         _cache.Remove(cacheKey);
         _cache.Remove(activeCacheKey);
+        
+        // Also invalidate the global "all credentials" cache used by SuperAdmins
+        _cache.Remove("all_db_credentials");
+        _logger.LogDebug("Invalidated organization-specific and global credential caches for organization {OrganizationId}", organizationId);
+    }
+    
+    private void InvalidateActiveCache(Guid organizationId)
+    {
+        var activeCacheKey = $"org_active_credentials_{organizationId}";
+        _cache.Remove(activeCacheKey);
+        
+        // Also invalidate the global cache for consistency
+        _cache.Remove("all_db_credentials");
+        _logger.LogDebug("Invalidated active credential cache for organization {OrganizationId}", organizationId);
     }
 
     /// <summary>
@@ -1752,12 +1852,6 @@ public class DatabaseCredentialService : IDatabaseCredentialService
         }
         
         return null;
-    }
-
-    private void InvalidateActiveCache(Guid organizationId)
-    {
-        var cacheKey = $"org_active_credentials_{organizationId}";
-        _cache.Remove(cacheKey);
     }
 
     /// <summary>
@@ -2045,5 +2139,257 @@ public class DatabaseCredentialService : IDatabaseCredentialService
         }
 
         return null;
+    }
+    
+    /// <summary>
+    /// Tests both database connection AND SAP Service Layer authentication comprehensively
+    /// </summary>
+    public async Task<ComprehensiveConnectionTestResult> TestFullConnectionAsync(DatabaseCredentialModel model, Guid organizationId)
+    {
+        var result = new ComprehensiveConnectionTestResult
+        {
+            CompanyDB = model.DatabaseType == DatabaseType.MSSQL ? model.DatabaseName : model.CurrentSchema,
+            ServiceLayerUrl = model.SAPServiceLayerHostname.StartsWith("http", StringComparison.OrdinalIgnoreCase) ?
+                $"{model.SAPServiceLayerHostname}/b1s/v1/" : 
+                $"https://{model.SAPServiceLayerHostname}/b1s/v1/"
+        };
+
+        _logger.LogInformation("Starting comprehensive connection test for organization {OrganizationId} - Database: {DatabaseType}, ServiceLayer: {ServiceLayerHost}", 
+            organizationId, model.DatabaseType, model.SAPServiceLayerHostname);
+
+        try
+        {
+            // Test 1: Database Connection
+            _logger.LogInformation("Testing database connection...");
+            var dbTestResult = await TestConnectionBeforeCreateAsync(model);
+            
+            result.DatabaseSuccess = dbTestResult.Success;
+            result.DatabaseErrorMessage = dbTestResult.ErrorMessage;
+            result.DatabaseVersion = dbTestResult.DatabaseVersion;
+            result.DatabaseServerInfo = dbTestResult.ServerInfo;
+            result.DatabaseResponseTime = dbTestResult.ResponseTime;
+            
+            _logger.LogInformation("Database test result: {Success} (Time: {ResponseTime}ms)", 
+                result.DatabaseSuccess, result.DatabaseResponseTime.TotalMilliseconds);
+
+            // Test 2: SAP Service Layer Authentication (only if database test passes)
+            if (result.DatabaseSuccess)
+            {
+                _logger.LogInformation("Database test passed, proceeding with SAP Service Layer test...");
+                
+                var serviceLayerResult = await TestServiceLayerConnectionAsync(
+                    model.SAPServiceLayerHostname, 
+                    model.SAPUsername, 
+                    model.SAPPassword, // Use password from model during creation/testing
+                    result.CompanyDB ?? string.Empty);
+                
+                result.ServiceLayerSuccess = serviceLayerResult.Success;
+                result.ServiceLayerErrorMessage = serviceLayerResult.ErrorMessage;
+                result.ServiceLayerVersion = serviceLayerResult.Version;
+                result.ServiceLayerResponseTime = serviceLayerResult.ResponseTime;
+                
+                _logger.LogInformation("Service Layer test result: {Success} (Time: {ResponseTime}ms)", 
+                    result.ServiceLayerSuccess, result.ServiceLayerResponseTime.TotalMilliseconds);
+            }
+            else
+            {
+                _logger.LogWarning("Skipping SAP Service Layer test due to database connection failure");
+                result.ServiceLayerSuccess = false;
+                result.ServiceLayerErrorMessage = "Skipped due to database connection failure";
+            }
+
+            _logger.LogInformation("Comprehensive test completed - Overall Success: {OverallSuccess} (DB: {DatabaseSuccess}, SL: {ServiceLayerSuccess})", 
+                result.OverallSuccess, result.DatabaseSuccess, result.ServiceLayerSuccess);
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during comprehensive connection test");
+            result.DatabaseSuccess = false;
+            result.ServiceLayerSuccess = false;
+            result.DatabaseErrorMessage = $"Test failed with exception: {ex.Message}";
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Tests SAP Service Layer authentication
+    /// </summary>
+    private async Task<(bool Success, string? ErrorMessage, string? Version, TimeSpan ResponseTime)> 
+        TestServiceLayerConnectionAsync(string hostname, string username, string password, string companyDB)
+    {
+        if (string.IsNullOrWhiteSpace(hostname) || string.IsNullOrWhiteSpace(username) || 
+            string.IsNullOrWhiteSpace(password) || string.IsNullOrWhiteSpace(companyDB))
+        {
+            return (false, "SAP Service Layer credentials are incomplete (hostname, username, password, or companyDB missing)", null, TimeSpan.Zero);
+        }
+
+        try
+        {
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            
+            using var httpClient = new HttpClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(30);
+            
+            // Disable SSL certificate validation for development/testing environments
+            // TODO: Make this configurable via settings
+            var handler = new HttpClientHandler();
+            handler.ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true;
+            
+            using var secureHttpClient = new HttpClient(handler);
+            secureHttpClient.Timeout = TimeSpan.FromSeconds(30);
+            
+            // Set proper headers for SAP Service Layer
+            secureHttpClient.DefaultRequestHeaders.Add("Accept", "application/json");
+            
+            // GENERIC: Use exact hostname as provided by user + /b1s/v1/Login
+            // Users should provide the base path (e.g., server.com:50000, proxy.com/ServiceLayer)
+            var loginUrl = hostname.StartsWith("http", StringComparison.OrdinalIgnoreCase) 
+                ? $"{hostname}/b1s/v1/Login"  // Already has protocol
+                : $"https://{hostname}/b1s/v1/Login";  // Add HTTPS + SAP path
+
+            _logger.LogInformation("Using generic Service Layer URL construction: {Hostname} → {LoginUrl}", hostname, loginUrl);
+            
+            // Try authentication with original username format first
+            var authResult = await TryServiceLayerLogin(secureHttpClient, loginUrl, companyDB, username, password, "original format");
+            
+            // If failed and username contains domain prefix, try without domain
+            if (!authResult.Success && username.Contains('\\'))
+            {
+                var cleanUsername = username.Split('\\').LastOrDefault() ?? username;
+                _logger.LogInformation("First attempt failed, retrying with cleaned username: '{OriginalUsername}' -> '{CleanUsername}'", username, cleanUsername);
+                authResult = await TryServiceLayerLogin(secureHttpClient, loginUrl, companyDB, cleanUsername, password, "cleaned format");
+            }
+            
+            // If still failed and username doesn't contain domain, try with common SAP domain prefixes
+            if (!authResult.Success && !username.Contains('\\'))
+            {
+                var domainUsername = $"smberpcloud\\{username}";
+                _logger.LogInformation("Attempting with domain prefix: '{OriginalUsername}' -> '{DomainUsername}'", username, domainUsername);
+                authResult = await TryServiceLayerLogin(secureHttpClient, loginUrl, companyDB, domainUsername, password, "domain format");
+            }
+            
+            var response = authResult.Response;
+            stopwatch.Stop();
+            
+            if (response.IsSuccessStatusCode)
+            {
+                // Extract session info from response 
+                var responseContent = await response.Content.ReadAsStringAsync();
+                var version = "SAP Business One Service Layer";
+                
+                // Try to extract version from response headers
+                if (response.Headers.TryGetValues("Server", out var serverValues))
+                {
+                    version = serverValues.FirstOrDefault() ?? version;
+                }
+                
+                _logger.LogInformation("✅ SAP Service Layer authentication successful - Version: {Version}, Response Time: {ResponseTime}ms", 
+                    version, stopwatch.Elapsed.TotalMilliseconds);
+                
+                return (true, null, version, stopwatch.Elapsed);
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                var errorMessage = $"Service Layer authentication failed: {response.StatusCode}";
+                
+                // Try to extract more specific error from SAP response
+                if (!string.IsNullOrWhiteSpace(errorContent))
+                {
+                    try
+                    {
+                        var errorJson = System.Text.Json.JsonDocument.Parse(errorContent);
+                        if (errorJson.RootElement.TryGetProperty("error", out var errorElement))
+                        {
+                            if (errorElement.TryGetProperty("message", out var messageElement))
+                            {
+                                var sapErrorMessage = messageElement.GetProperty("value").GetString();
+                                errorMessage = $"SAP Service Layer error: {sapErrorMessage}";
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // If JSON parsing fails, use the raw content
+                        errorMessage += $" - {errorContent}";
+                    }
+                }
+                
+                _logger.LogWarning("❌ SAP Service Layer authentication failed: {ErrorMessage} (Response Time: {ResponseTime}ms)", 
+                    errorMessage, stopwatch.Elapsed.TotalMilliseconds);
+                
+                return (false, errorMessage, null, stopwatch.Elapsed);
+            }
+        }
+        catch (HttpRequestException ex)
+        {
+            var errorMessage = $"Service Layer connection error: {ex.Message}";
+            _logger.LogError(ex, "❌ SAP Service Layer connection failed: {ErrorMessage}", errorMessage);
+            return (false, errorMessage, null, TimeSpan.Zero);
+        }
+        catch (TaskCanceledException ex)
+        {
+            var errorMessage = "Service Layer connection timeout - please check hostname and network connectivity";
+            _logger.LogError(ex, "❌ SAP Service Layer connection timeout: {ErrorMessage}", errorMessage);
+            return (false, errorMessage, null, TimeSpan.Zero);
+        }
+        catch (Exception ex)
+        {
+            var errorMessage = $"Unexpected Service Layer test error: {ex.Message}";
+            _logger.LogError(ex, "❌ Unexpected error during SAP Service Layer test: {ErrorMessage}", errorMessage);
+            return (false, errorMessage, null, TimeSpan.Zero);
+        }
+    }
+    
+    /// <summary>
+    /// Helper method to attempt SAP Service Layer login with specific username format
+    /// </summary>
+    private async Task<(bool Success, HttpResponseMessage Response)> TryServiceLayerLogin(
+        HttpClient httpClient, string loginUrl, string companyDB, string userName, string password, string attemptType)
+    {
+        try
+        {
+            var loginData = new
+            {
+                CompanyDB = companyDB,
+                UserName = userName,
+                Password = password
+            };
+            
+            // Create JSON content manually with proper serialization options
+            var jsonOptions = new System.Text.Json.JsonSerializerOptions
+            {
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            };
+            var jsonContent = System.Text.Json.JsonSerializer.Serialize(loginData, jsonOptions);
+            var stringContent = new StringContent(jsonContent, System.Text.Encoding.UTF8, "application/json");
+            
+            _logger.LogInformation("SAP Login attempt ({AttemptType}) - URL: {LoginUrl}, Body: {RequestBody}", 
+                attemptType, loginUrl, jsonContent);
+            
+            var response = await httpClient.PostAsync(loginUrl, stringContent);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation("✅ SAP Login successful with {AttemptType}: UserName='{UserName}'", attemptType, userName);
+                return (true, response);
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning("❌ SAP Login failed with {AttemptType}: UserName='{UserName}', Status={StatusCode}, Error={ErrorContent}", 
+                    attemptType, userName, response.StatusCode, errorContent);
+                return (false, response);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Exception during SAP login attempt ({AttemptType}) with UserName='{UserName}'", attemptType, userName);
+            // Return a dummy failed response
+            var dummyResponse = new HttpResponseMessage(System.Net.HttpStatusCode.BadRequest);
+            return (false, dummyResponse);
+        }
     }
 }

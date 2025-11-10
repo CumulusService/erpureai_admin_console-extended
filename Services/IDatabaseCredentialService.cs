@@ -16,6 +16,12 @@ public interface IDatabaseCredentialService
     Task<List<DatabaseCredential>> GetByOrganizationAsync(Guid organizationId);
     
     /// <summary>
+    /// Gets all database credentials across all organizations (SuperAdmin only)
+    /// </summary>
+    /// <returns>List of all database credentials with organization info</returns>
+    Task<List<DatabaseCredential>> GetAllDatabaseCredentialsAsync();
+    
+    /// <summary>
     /// Gets only active database credentials for an organization
     /// </summary>
     /// <param name="organizationId">Organization ID</param>
@@ -87,6 +93,14 @@ public interface IDatabaseCredentialService
     /// <param name="model">Database credential model with connection details</param>
     /// <returns>Connection test result with detailed information</returns>
     Task<DatabaseConnectionTestResult> TestConnectionBeforeCreateAsync(DatabaseCredentialModel model);
+    
+    /// <summary>
+    /// Tests both database connection AND SAP Service Layer authentication comprehensively
+    /// </summary>
+    /// <param name="model">Database credential model with all connection details</param>
+    /// <param name="organizationId">Organization ID for Key Vault access to retrieve SAP password</param>
+    /// <returns>Comprehensive test result with database AND service layer status</returns>
+    Task<ComprehensiveConnectionTestResult> TestFullConnectionAsync(DatabaseCredentialModel model, Guid organizationId);
     
     /// <summary>
     /// Gets the SAP password for a credential from Key Vault
@@ -168,4 +182,27 @@ public class DatabaseConnectionTestResult
     public string? DatabaseVersion { get; set; }
     public string? ServerInfo { get; set; }
     public string? AdditionalInfo { get; set; }
+}
+
+/// <summary>
+/// Result of comprehensive testing (database connection + SAP Service Layer authentication)
+/// </summary>
+public class ComprehensiveConnectionTestResult
+{
+    public bool DatabaseSuccess { get; set; }
+    public bool ServiceLayerSuccess { get; set; }
+    public bool OverallSuccess => DatabaseSuccess && ServiceLayerSuccess;
+    
+    public string? DatabaseErrorMessage { get; set; }
+    public string? ServiceLayerErrorMessage { get; set; }
+    public string? DatabaseVersion { get; set; }
+    public string? ServiceLayerVersion { get; set; }
+    
+    public TimeSpan DatabaseResponseTime { get; set; }
+    public TimeSpan ServiceLayerResponseTime { get; set; }
+    public DateTime TestedAt { get; set; } = DateTime.UtcNow;
+    
+    public string? DatabaseServerInfo { get; set; }
+    public string? ServiceLayerUrl { get; set; }
+    public string? CompanyDB { get; set; }
 }

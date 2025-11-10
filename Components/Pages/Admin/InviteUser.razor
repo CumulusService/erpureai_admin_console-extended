@@ -265,14 +265,41 @@
                                         <span class="input-group-text">
                                             <i class="fas fa-user"></i>
                                         </span>
-                                        <InputText @bind-Value="invitationModel.DisplayName" 
-                                                 class="form-control" 
-                                                 id="displayName" 
+                                        <InputText @bind-Value="invitationModel.DisplayName"
+                                                 class="form-control"
+                                                 id="displayName"
                                                  placeholder="Enter user's full name"
                                                  @onchange="OnInputChanged" />
                                     </div>
                                     <ValidationMessage For="@(() => invitationModel.DisplayName)" />
                                 </div>
+
+                                @* NEW: Role Selection for SuperAdmin *@
+                                @if (currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer)
+                                {
+                                    <div class="mb-3 p-3 border rounded bg-light">
+                                        <label for="userRole" class="form-label">
+                                            <i class="fas fa-crown text-warning me-2"></i>
+                                            User Role <span class="text-danger">*</span>
+                                        </label>
+                                        <select @bind="selectedUserRole" class="form-select" id="userRole">
+                                            <option value="">-- Select Role --</option>
+                                            <option value="@UserRole.User">
+                                                👤 Standard User (Read-Only Access)
+                                            </option>
+                                            <option value="@UserRole.OrgAdmin">
+                                                👨‍💼 Organization Administrator (Can Manage Users & Database Access)
+                                            </option>
+                                        </select>
+                                        <div class="form-text">
+                                            <strong>Role Capabilities:</strong>
+                                            <ul class="mb-0 mt-2 small">
+                                                <li><strong>Standard User:</strong> Can view assigned resources and data</li>
+                                                <li><strong>Organization Admin:</strong> Can invite users, manage roles, and configure database access</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                }
 
                                 <div class="mb-3">
                                     <label for="agentTypes" class="form-label">
@@ -472,6 +499,9 @@
     private UserRole currentUserRole = UserRole.User;
     private Organization? currentOrganization = null;
     private bool userInvitationsAllowed = true;
+
+    // NEW: Role selection for SuperAdmin invitation
+    private string selectedUserRole = ""; // Empty string means User role by default
     
     // Enhanced unsaved changes tracking
     private UnsavedChangesTracker? unsavedChangesTracker;
@@ -727,6 +757,15 @@
 
     private bool IsFormValid()
     {
+        // NEW: If SuperAdmin/Developer, role selection is required
+        if (currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer)
+        {
+            if (string.IsNullOrEmpty(selectedUserRole))
+            {
+                return false; // Role must be selected
+            }
+        }
+
         return !string.IsNullOrEmpty(invitationModel.Email) &&
                !string.IsNullOrEmpty(invitationModel.DisplayName) &&
                selectedDatabaseIds.Any() &&
@@ -783,6 +822,16 @@
                 }
                 Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgId);
             }
+            // NEW: Determine the role based on SuperAdmin selection or default to User
+            UserRole invitedUserRole = UserRole.User;
+            if ((currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer) &&
+                !string.IsNullOrEmpty(selectedUserRole) &&
+                Enum.TryParse<UserRole>(selectedUserRole, out var parsedRole))
+            {
+                invitedUserRole = parsedRole;
+                Logger.LogInformation("SuperAdmin inviting user {Email} as {Role}", invitationModel.Email, invitedUserRole);
+            }
+
             var result = await InvitationService.InviteUserAsync(
                 orgGuid,
                 invitationModel.Email,
@@ -791,7 +840,7 @@
                 new List<LegacyAgentType>(), // Empty legacy types for backward compatibility
                 agentTypeIdsList, // Use selected agent type IDs
                 selectedDatabaseIds.ToList(), // Pass selected database IDs
-                UserRole.User, // 🔑 NEW: Explicitly set user role based on invitation flow
+                invitedUserRole, // 🔑 NEW: Use selected role from SuperAdmin dropdown or default to User
                 currentUserEmail // Current user email for self-invitation prevention
             );
 
@@ -838,8 +887,13 @@
                     operationType = "✅ New user invited";
                     additionalInfo = " The user will receive an email with agent share links and instructions to join your organization.";
                 }
-                
-                successMessage = $"{operationType} successfully for {invitationModel.Email}. " +
+
+                // NEW: Include role information in success message
+                var roleInfo = (currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer) && invitedUserRole != UserRole.User
+                    ? $" Role: {invitedUserRole}."
+                    : "";
+
+                successMessage = $"{operationType} successfully for {invitationModel.Email}.{roleInfo} " +
                                $"Agent types: {agentTypeList}. Database access: {databaseList}.{additionalInfo}";
                 
                 // Clear form after successful invitation
@@ -878,6 +932,7 @@
         invitationModel = new InvitationModel();
         selectedAgentTypeIds.Clear();
         selectedDatabaseIds.Clear();
+        selectedUserRole = ""; // NEW: Reset role selection
         ClearMessages();
         domainValidationMessage = string.Empty;
         StateHasChanged();

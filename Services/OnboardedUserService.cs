@@ -695,6 +695,41 @@ public class OnboardedUserService : IOnboardedUserService
         }
     }
 
+    public async Task<bool> UpdateUserRoleAsync(string email, Guid organizationId, UserRole newRole)
+    {
+        try
+        {
+            // Enhanced tenant isolation validation
+            await _tenantValidator.ValidateOrganizationAccessAsync(organizationId.ToString(), "update-user-role");
+
+            var user = await GetByEmailAsync(email, organizationId);
+            if (user == null)
+            {
+                _logger.LogWarning("❌ User {Email} not found in organization {OrganizationId} for role update", email, organizationId);
+                return false;
+            }
+
+            var oldRole = user.AssignedRole;
+
+            // Update the role in the database
+            user.AssignedRole = newRole;
+            user.ModifiedOn = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+            InvalidateCache(organizationId);
+
+            _logger.LogInformation("✅ Successfully updated user {Email} role from {OldRole} to {NewRole} in organization {OrganizationId}",
+                email, oldRole, newRole, organizationId);
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating user role for {Email} in organization {OrganizationId}", email, organizationId);
+            return false;
+        }
+    }
+
     public async Task<bool> UpdateAgentTypesAsync(Guid userId, List<LegacyAgentType> agentTypes, Guid organizationId, Guid modifiedBy)
     {
         try

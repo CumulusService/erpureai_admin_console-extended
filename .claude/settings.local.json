@@ -2,41 +2,15 @@
   "permissions": {
     "allow": [
       "Bash(dotnet build)",
-      "Bash(rm:*)",
-      "Bash(taskkill:*)",
-      "Bash(dotnet run:*)",
       "Bash(dotnet build:*)",
-      "Bash(powershell:*)",
-      "Bash(mkdir:*)",
-      "Bash(dotnet add package:*)",
-      "Bash(dotnet ef migrations:*)",
-      "Bash(dotnet tool install:*)",
-      "Bash(sqlcmd:*)",
-      "mcp__playwright__browser_navigate",
-      "mcp__playwright__browser_click",
-      "mcp__playwright__browser_snapshot",
-      "mcp__playwright__browser_take_screenshot",
-      "mcp__context7__get-library-docs",
-      "mcp__playwright__browser_evaluate",
-      "mcp__context7__resolve-library-id",
-      "Bash(curl:*)",
-      "Bash(timeout:*)",
-      "Bash(grep:*)",
-      "Bash(dotnet ef database:*)",
-      "Bash(find:*)",
       "Bash(git checkout:*)",
+      "Bash(sqlcmd:*)",
+      "Bash(powershell -File:*)",
+      "Bash(dir:*)",
       "Bash(git add:*)",
-      "Bash(git push:*)",
-      "Bash(copy \"C:\\Program Files\\sap\\hdbclient\\dotnetcore\\v2.1\\Sap.Data.Hana.Core.v2.1.dll\" \"NuGet\\SAPHANAClient\\lib\\net9.0\"\")",
-      "Bash(cp:*)",
-      "Bash(nuget pack:*)",
-      "Bash(dotnet pack:*)",
-      "Bash(dotnet clean:*)",
-      "Bash(dotnet nuget locals:*)",
-      "Bash(dotnet restore:*)",
-      "WebFetch(domain:www.c-sharpcorner.com)",
-      "WebSearch"
+      "Bash(git commit:*)"
     ],
-    "deny": []
+    "deny": [],
+    "ask": []
   }
 }

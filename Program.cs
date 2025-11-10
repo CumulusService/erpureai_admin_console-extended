@@ -213,10 +213,10 @@ builder.Services.AddRazorComponents()
 // Configure SignalR for Blazor Server performance and responsiveness
 builder.Services.AddSignalR(options =>
 {
-    // 🚀 Enhanced performance optimizations
-    options.ClientTimeoutInterval = TimeSpan.FromMinutes(2);  // Faster disconnect detection
-    options.KeepAliveInterval = TimeSpan.FromSeconds(15);     // Balanced keep-alive frequency
-    options.HandshakeTimeout = TimeSpan.FromSeconds(10);      // Faster handshake
+    // 🚀 Enhanced performance optimizations + extended timeouts for connection testing
+    options.ClientTimeoutInterval = TimeSpan.FromMinutes(5);  // Extended to prevent disconnections during comprehensive connection tests
+    options.KeepAliveInterval = TimeSpan.FromSeconds(10);     // More frequent keep-alive during long operations
+    options.HandshakeTimeout = TimeSpan.FromSeconds(15);      // Slightly longer handshake for stability
     options.MaximumReceiveMessageSize = 64 * 1024;            // Optimized message size
     options.StreamBufferCapacity = 10;                        // Better buffering for high throughput
     options.MaximumParallelInvocationsPerClient = 6;          // More parallel operations

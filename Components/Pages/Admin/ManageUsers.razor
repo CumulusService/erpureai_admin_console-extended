@@ -831,6 +831,10 @@
     private bool requireConfirmationText = false;
     private string requiredConfirmationText = "";
     private Func<Task>? pendingAction;
+
+    // NEW: Role promotion state
+    private GuestUser? userForRoleChange;
+    private UserRole targetRole = UserRole.User;
     
     // Cache for database user status to avoid repeated lookups
     private Dictionary<string, OnboardedUser?> userStatusCache = new();
@@ -1080,12 +1084,14 @@
                         try
                         {
                             var userDatabases = await UserDatabaseAccessService.GetUserAssignedDatabasesAsync(dbUser.OnboardedUserId, currentUserOrgId);
-                            userDatabasesCache[user.Email] = userDatabases;
+                            var email = user.Email ?? string.Empty;
+                            userDatabasesCache[email] = userDatabases;
+                            Logger.LogDebug("Cached {DatabaseCount} databases for user {Email}", userDatabases?.Count ?? 0, email);
                         }
                         catch (Exception dbEx)
                         {
                             Logger.LogWarning(dbEx, "Could not load databases for {Email}", user.Email);
-                            userDatabasesCache[user.Email] = new List<DatabaseCredential>();
+                            userDatabasesCache[user.Email ?? string.Empty] = new List<DatabaseCredential>();
                         }
                         
                         // CRITICAL FIX: Auto-fetch real-time Azure AD invitation status like ManageAdmins.razor
@@ -1274,6 +1280,39 @@
                 Type = ActionType.Secondary,
                 IsDisabled = true
             });
+        }
+
+        // NEW: Role promotion action for SuperAdmin only
+        if ((currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer) &&
+            user.OnboardedUser != null &&
+            !IsCurrentUser(user))
+        {
+            var userRole = GetUserRole(user);
+
+            if (userRole == UserRole.User && currentStatus == "Active")
+            {
+                actions.Add(new DropdownAction
+                {
+                    Title = "👨‍💼 Promote to OrgAdmin",
+                    Description = "Upgrade user to Organization Administrator role",
+                    IconClass = "fas fa-crown",
+                    Type = ActionType.Warning,
+                    OnClick = EventCallback.Factory.Create(this, () => ShowPromoteToOrgAdminConfirmation(user)),
+                    IsDisabled = isLoading
+                });
+            }
+            else if (userRole == UserRole.OrgAdmin)
+            {
+                actions.Add(new DropdownAction
+                {
+                    Title = "👤 Demote to User",
+                    Description = "Downgrade user to standard User role",
+                    IconClass = "fas fa-user",
+                    Type = ActionType.Info,
+                    OnClick = EventCallback.Factory.Create(this, () => ShowDemoteToUserConfirmation(user)),
+                    IsDisabled = isLoading
+                });
+            }
         }
 
         // User management actions based on permissions
@@ -1732,7 +1771,194 @@
         
         StateHasChanged();
     }
-    
+
+    // NEW: Role promotion and demotion methods for SuperAdmin
+
+    /// <summary>
+    /// NEW: Shows confirmation dialog for promoting user to OrgAdmin
+    /// </summary>
+    private async Task ShowPromoteToOrgAdminConfirmation(GuestUser user)
+    {
+        if (IsCurrentUser(user))
+        {
+            errorMessage = "❌ Security Policy: You cannot change your own role. Please contact another administrator.";
+            Logger.LogWarning("User {UserEmail} attempted to promote themselves - blocked for security", user.Email);
+            StateHasChanged();
+            return;
+        }
+
+        userForRoleChange = user;
+        targetRole = UserRole.OrgAdmin;
+
+        confirmationTitle = "👨‍💼 Promote User to Organization Administrator";
+        confirmationMessage = $"You are about to PROMOTE {user.DisplayName} ({user.Email}) to Organization Administrator role.";
+
+        confirmationDetails = $"<strong>User:</strong> {user.DisplayName}<br>" +
+                            $"<strong>Email:</strong> {user.Email}<br>" +
+                            $"<strong>Current Role:</strong> Standard User<br>" +
+                            $"<strong>New Role:</strong> Organization Administrator<br>" +
+                            $"<strong>Organization:</strong> {user.OnboardedUser?.Organization?.Name ?? "Unknown"}";
+
+        confirmationConsequence = "<div class='alert alert-info mb-3'>" +
+                                "<strong>ℹ️ This action will:</strong><br>" +
+                                "• Grant user permission to <strong>INVITE NEW USERS</strong> to the organization<br>" +
+                                "• Allow user to <strong>MANAGE AGENT TYPES</strong> for other users<br>" +
+                                "• Allow user to <strong>MANAGE DATABASE ACCESS</strong> for other users<br>" +
+                                "• Update user's role in <strong>AZURE ENTRA ID</strong><br>" +
+                                "</div>" +
+                                "<div class='alert alert-warning'>" +
+                                "<strong>⚠️ This is an administrative action:</strong><br>" +
+                                "The promoted user will have significant organization-level permissions. Ensure this is intentional." +
+                                "</div>";
+
+        confirmationConfirmText = "Promote to OrgAdmin";
+        confirmationType = ConfirmationType.Warning;
+        requireConfirmationText = false;
+        pendingAction = () => ChangeUserRole(user, UserRole.OrgAdmin);
+        showConfirmationModal = true;
+        StateHasChanged();
+
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// NEW: Shows confirmation dialog for demoting OrgAdmin to User
+    /// </summary>
+    private async Task ShowDemoteToUserConfirmation(GuestUser user)
+    {
+        if (IsCurrentUser(user))
+        {
+            errorMessage = "❌ Security Policy: You cannot change your own role. Please contact another administrator.";
+            Logger.LogWarning("User {UserEmail} attempted to demote themselves - blocked for security", user.Email);
+            StateHasChanged();
+            return;
+        }
+
+        userForRoleChange = user;
+        targetRole = UserRole.User;
+
+        confirmationTitle = "👤 Demote User to Standard User";
+        confirmationMessage = $"You are about to DEMOTE {user.DisplayName} ({user.Email}) to Standard User role.";
+
+        confirmationDetails = $"<strong>User:</strong> {user.DisplayName}<br>" +
+                            $"<strong>Email:</strong> {user.Email}<br>" +
+                            $"<strong>Current Role:</strong> Organization Administrator<br>" +
+                            $"<strong>New Role:</strong> Standard User<br>" +
+                            $"<strong>Organization:</strong> {user.OnboardedUser?.Organization?.Name ?? "Unknown"}";
+
+        confirmationConsequence = "<div class='alert alert-info mb-3'>" +
+                                "<strong>ℹ️ This action will:</strong><br>" +
+                                "• Remove permission to <strong>INVITE NEW USERS</strong><br>" +
+                                "• Remove permission to <strong>MANAGE AGENT TYPES</strong> for other users<br>" +
+                                "• Remove permission to <strong>MANAGE DATABASE ACCESS</strong> for other users<br>" +
+                                "• Update user's role in <strong>AZURE ENTRA ID</strong><br>" +
+                                "• User will maintain their existing <strong>AGENT TYPE ASSIGNMENTS</strong> and <strong>DATABASE ACCESS</strong><br>" +
+                                "</div>";
+
+        confirmationConfirmText = "Demote to User";
+        confirmationType = ConfirmationType.Info;
+        requireConfirmationText = false;
+        pendingAction = () => ChangeUserRole(user, UserRole.User);
+        showConfirmationModal = true;
+        StateHasChanged();
+
+        await Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// NEW: Performs the actual role change for a user
+    /// Updates both database and Azure Entra ID app roles
+    /// </summary>
+    private async Task ChangeUserRole(GuestUser user, UserRole newRole)
+    {
+        try
+        {
+            ClearMessages();
+            isProcessingConfirmation = true;
+            Logger.LogInformation("Changing role for user {UserId} ({Email}) from {OldRole} to {NewRole}",
+                user.Id, user.Email, GetUserRole(user), newRole);
+
+            // 1. Get Azure Object ID for Graph operations
+            var azureObjectId = await OnboardedUserService.GetAzureObjectIdByEmailAsync(user.Email, currentUserOrgId);
+            if (string.IsNullOrEmpty(azureObjectId))
+            {
+                errorMessage = $"Could not find user in Azure Entra ID. Role change cancelled.";
+                Logger.LogWarning("Azure Object ID not found for user {Email}", user.Email);
+                return;
+            }
+
+            // 2. Get the old role for logging
+            var oldRole = GetUserRole(user);
+            var oldAppRoleName = oldRole.GetAzureAdAppRole();
+            var newAppRoleName = newRole.GetAzureAdAppRole();
+
+            // 3. Update role in database using OnboardedUserService
+            Logger.LogInformation("Updating database role for {Email} from {OldRole} to {NewRole}", user.Email, oldRole, newRole);
+            var dbSuccess = await OnboardedUserService.UpdateUserRoleAsync(user.Email, currentUserOrgId, newRole);
+
+            if (!dbSuccess)
+            {
+                errorMessage = "Failed to update user role in database. Please try again.";
+                Logger.LogError("Failed to update database role for user {Email}", user.Email);
+                return;
+            }
+
+            // 4. Update Azure Entra ID app role assignments
+            bool graphSuccess = false;
+            try
+            {
+                // Remove old app role
+                if (!string.IsNullOrEmpty(oldAppRoleName))
+                {
+                    Logger.LogInformation("Removing old app role '{OldAppRole}' from user {Email} in Azure Entra ID", oldAppRoleName, user.Email);
+                    await GraphService.RevokeAppRoleFromUserAsync(azureObjectId, oldAppRoleName);
+                }
+
+                // Assign new app role
+                if (!string.IsNullOrEmpty(newAppRoleName))
+                {
+                    Logger.LogInformation("Assigning new app role '{NewAppRole}' to user {Email} in Azure Entra ID", newAppRoleName, user.Email);
+                    graphSuccess = await GraphService.AssignAppRoleToUserAsync(azureObjectId, newAppRoleName);
+                }
+                else
+                {
+                    graphSuccess = true; // No app role needed (shouldn't happen but handle gracefully)
+                }
+
+                if (!graphSuccess)
+                {
+                    Logger.LogWarning("Failed to update app role in Azure Entra ID for {Email}, but database was updated", user.Email);
+                    // Don't fail entirely - database is the source of truth
+                }
+            }
+            catch (Exception exGraph)
+            {
+                Logger.LogWarning(exGraph, "Error updating Azure Entra ID app roles for {Email}", user.Email);
+                // Don't fail entirely - database is the source of truth
+            }
+
+            // 5. Show success message
+            successMessage = $"✅ Role updated successfully for {user.DisplayName}. " +
+                           $"Changed from {oldRole.GetDisplayName()} to {newRole.GetDisplayName()}.";
+
+            Logger.LogInformation("Successfully changed role for user {Email} to {NewRole}", user.Email, newRole);
+
+            // 6. Refresh the user list to reflect the change
+            await LoadUsers();
+            FilterUsers();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error changing role for user {UserId}", user.Id);
+            errorMessage = "An unexpected error occurred while updating the user role. Please try again.";
+        }
+        finally
+        {
+            isProcessingConfirmation = false;
+            StateHasChanged();
+        }
+    }
+
     private string GetUserActualStatus(GuestUser user)
     {
         try
@@ -2154,8 +2380,24 @@
     {
         if (userDatabasesCache.TryGetValue(user.Email, out var databases))
         {
+            Logger.LogDebug("Found {DatabaseCount} databases for user {Email}", databases?.Count ?? 0, user.Email);
             return databases;
         }
+        
+        // Try case-insensitive lookup as fallback
+        var emailLowerCase = user.Email?.ToLowerInvariant();
+        var cacheEntry = userDatabasesCache.FirstOrDefault(kvp => 
+            string.Equals(kvp.Key, user.Email, StringComparison.OrdinalIgnoreCase));
+            
+        if (!cacheEntry.Equals(default))
+        {
+            Logger.LogDebug("Found {DatabaseCount} databases for user {Email} via case-insensitive lookup", 
+                cacheEntry.Value?.Count ?? 0, user.Email);
+            return cacheEntry.Value;
+        }
+        
+        Logger.LogDebug("No databases found in cache for user {Email}. Cache has {CacheCount} entries.", 
+            user.Email, userDatabasesCache.Count);
         return new List<DatabaseCredential>();
     }
     

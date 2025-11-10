@@ -17,19 +17,22 @@ public class DataIsolationService : IDataIsolationService
     private readonly AdminConsoleDbContext _context;
     private readonly ILogger<DataIsolationService> _logger;
     private readonly IMemoryCache _cache;
+    private readonly IServiceProvider _serviceProvider;
 
     public DataIsolationService(
         IHttpContextAccessor httpContextAccessor,
         IGraphService graphService,
         AdminConsoleDbContext context,
         ILogger<DataIsolationService> logger,
-        IMemoryCache cache)
+        IMemoryCache cache,
+        IServiceProvider serviceProvider)
     {
         _httpContextAccessor = httpContextAccessor;
         _graphService = graphService;
         _context = context;
         _logger = logger;
         _cache = cache;
+        _serviceProvider = serviceProvider;
     }
 
     /// <summary>
@@ -122,10 +125,16 @@ public class DataIsolationService : IDataIsolationService
                 return false;
             }
 
-            // Check if user is Super Admin (can access all organizations)
+            // Get user role for better logging
+            var userRole = await GetCurrentUserRoleAsync();
+            _logger.LogInformation("Organization access check: User role {UserRole} requesting access to organization {OrganizationId}", 
+                userRole, organizationId);
+
+            // Check if user is Super Admin or Developer (can access all organizations)
             if (await IsCurrentUserSuperAdminAsync())
             {
-                _logger.LogDebug("Super admin access granted to organization {OrganizationId}", organizationId);
+                _logger.LogInformation("Super admin/Developer access granted to organization {OrganizationId} for role {UserRole}", 
+                    organizationId, userRole);
                 return true;
             }
 
@@ -133,8 +142,8 @@ public class DataIsolationService : IDataIsolationService
             var userOrgId = await GetCurrentUserOrganizationIdAsync();
             if (string.IsNullOrEmpty(userOrgId))
             {
-                _logger.LogWarning("User organization ID not found, denying access to organization {OrganizationId}", 
-                    organizationId);
+                _logger.LogWarning("User organization ID not found for role {UserRole}, denying access to organization {OrganizationId}", 
+                    userRole, organizationId);
                 return false;
             }
 
@@ -143,12 +152,20 @@ public class DataIsolationService : IDataIsolationService
             var normalizedUserOrgId = NormalizeOrganizationId(userOrgId);
             var normalizedRequestedOrgId = NormalizeOrganizationId(organizationId);
             
+            _logger.LogInformation("Organization match check: User org '{UserOrgId}' (normalized: '{NormUserOrg}') vs requested '{RequestedOrgId}' (normalized: '{NormRequestedOrg}')",
+                userOrgId, normalizedUserOrgId, organizationId, normalizedRequestedOrgId);
+            
             var hasAccess = string.Equals(normalizedUserOrgId, normalizedRequestedOrgId, StringComparison.OrdinalIgnoreCase);
             
             if (!hasAccess)
             {
-                _logger.LogWarning("User from organization {UserOrgId} attempted to access organization {RequestedOrgId}", 
-                    userOrgId, organizationId);
+                _logger.LogWarning("Organization access DENIED: User role {UserRole} from organization {UserOrgId} attempted to access organization {RequestedOrgId}", 
+                    userRole, userOrgId, organizationId);
+            }
+            else
+            {
+                _logger.LogInformation("Organization access GRANTED: User role {UserRole} accessing their organization {OrganizationId}", 
+                    userRole, organizationId);
             }
 
             return hasAccess;
@@ -224,12 +241,17 @@ public class DataIsolationService : IDataIsolationService
             var isDatabaseSuperAdmin = await CheckIfSuperAdminAsync(email);
             _logger.LogInformation("Is database SuperAdmin: {IsDatabaseSuperAdmin}", isDatabaseSuperAdmin);
             
-            // Check for Super Admin role claim - multiple fallbacks for robustness
+            // Check for Super Admin or Developer role claim - multiple fallbacks for robustness
             var hasAdminRole = user.HasClaim("extension_UserRole", "SuperAdmin") ||
                               user.HasClaim("roles", "SuperAdmin") ||
                               user.IsInRole("SuperAdmin") ||
                               user.HasClaim("role", "SuperAdmin") ||
-                              user.HasClaim("app_role", "SuperAdmin");
+                              user.HasClaim("app_role", "SuperAdmin") ||
+                              user.HasClaim("extension_UserRole", "DevRole") ||
+                              user.HasClaim("roles", "DevRole") ||
+                              user.IsInRole("DevRole") ||
+                              user.HasClaim("role", "DevRole") ||
+                              user.HasClaim("app_role", "DevRole");
             _logger.LogInformation("Has admin role: {HasAdminRole}", hasAdminRole);
 
             // Enhanced logic: database role check OR Azure AD role claim for super admin access
@@ -522,7 +544,11 @@ public class DataIsolationService : IDataIsolationService
 
         try
         {
-            var user = await _context.OnboardedUsers
+            // Use separate DbContext scope to avoid concurrency issues
+            using var scope = _serviceProvider.CreateScope();
+            using var dbContext = scope.ServiceProvider.GetRequiredService<AdminConsoleDbContext>();
+            
+            var user = await dbContext.OnboardedUsers
                 .AsNoTracking()
                 .FirstOrDefaultAsync(u => u.Email.ToLower() == email.ToLower());
 
@@ -533,7 +559,7 @@ public class DataIsolationService : IDataIsolationService
 
             // Use the extension method to get the role (handles both new and legacy systems)
             var userRole = user.GetUserRole();
-            return userRole == UserRole.SuperAdmin;
+            return userRole == UserRole.SuperAdmin || userRole == UserRole.Developer;
         }
         catch (Exception ex)
         {
