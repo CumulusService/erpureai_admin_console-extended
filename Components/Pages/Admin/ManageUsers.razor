@@ -2532,6 +2532,7 @@
             currentUserOrgId = Guid.Empty;
             allUsers = new List<GuestUser>();
             filteredUsers = new List<GuestUser>();
+            organizationAgentTypes = new List<AgentTypeEntity>();
             successMessage = "";
             return;
         }
@@ -2540,6 +2541,34 @@
 
         // Set the current org ID to the selected organization
         currentUserOrgId = selectedOrganizationId.Value;
+
+        // Load organization agent types for this org
+        await LoadOrganizationAgentTypes();
+
+        // Initialize secrets asynchronously in the background - don't block user management
+        // This prevents the heavy Key Vault operation from blocking UI interactions
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var orgIdStr = selectedOrganizationId.Value.ToString();
+                // Check if secrets already exist before creating them
+                var existingSecrets = await KeyVaultService.GetSecretNamesAsync(orgIdStr);
+                if (!existingSecrets.Any())
+                {
+                    Logger.LogInformation("No existing secrets found for organization {OrganizationId}, initializing defaults", orgIdStr);
+                    await InitializeDefaultSecretsAsync(orgIdStr);
+                }
+                else
+                {
+                    Logger.LogDebug("Secrets already exist for organization {OrganizationId}, skipping initialization", orgIdStr);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Could not check existing secrets for organization {OrganizationId}, skipping secret initialization", selectedOrganizationId);
+            }
+        });
 
         // Load data for this organization
         await LoadUsers();
