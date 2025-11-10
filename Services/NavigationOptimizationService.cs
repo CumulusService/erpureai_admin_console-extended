@@ -8,6 +8,7 @@ public interface INavigationOptimizationService
     Task PreloadCommonDataAsync();
     T? GetCachedData<T>(string cacheKey) where T : class;
     void SetCachedData<T>(string cacheKey, T data, TimeSpan? expiration = null) where T : class;
+    void RemoveCachedData(string cacheKey);
     Task PreloadPageDataAsync(string pagePath);
 }
 
@@ -72,6 +73,11 @@ public class NavigationOptimizationService : INavigationOptimizationService
     public void SetCachedData<T>(string cacheKey, T data, TimeSpan? expiration = null) where T : class
     {
         _cache.Set(cacheKey, data, expiration ?? TimeSpan.FromMinutes(5));
+    }
+
+    public void RemoveCachedData(string cacheKey)
+    {
+        _cache.Remove(cacheKey);
     }
 
     public async Task PreloadPageDataAsync(string pagePath)

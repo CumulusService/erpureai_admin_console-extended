@@ -757,7 +757,7 @@
             if (databaseSuccess)
             {
                 Logger.LogInformation("Successfully revoked database access for {AdminEmail}", adminRef.Email);
-                
+
                 // Update admin status instead of removing from list
                 // Update the status cache to reflect disabled state
                 if (userStatusCache.TryGetValue(adminRef.Email, out var cachedUser) && cachedUser != null)
@@ -766,7 +766,10 @@
                     cachedUser.StatusCode = StatusCode.Inactive;
                     userStatusCache[adminRef.Email] = cachedUser;
                 }
-                
+
+                // Clear the cached organization list to ensure fresh data is loaded
+                NavigationOptimizer.RemoveCachedData(NavigationOptimizationService.ADMIN_LIST_CACHE_KEY);
+
                 // Refresh the UI to show updated status
                 FilterAdmins();
                 CloseRevokeModal();
