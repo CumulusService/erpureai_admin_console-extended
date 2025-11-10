@@ -76,12 +76,12 @@ public class DatabaseRoleHandler : AuthorizationHandler<DatabaseRoleRequirement>
             // Check if user has required role or higher
             if (HasRequiredRole(userRole.Value, requirement))
             {
-                _logger.LogInformation("DatabaseRoleHandler: User {Email} authorized with role {Role}", email, userRole);
+                _logger.LogInformation("DatabaseRoleHandler: User {Email} authorized with database role {Role}", email, userRole);
                 context.Succeed(requirement);
                 return;
             }
 
-            _logger.LogInformation("DatabaseRoleHandler: User {Email} has role {Role} but requires {RequiredRole}", 
+            _logger.LogInformation("DatabaseRoleHandler: User {Email} has role {Role} but requires {RequiredRole}",
                 email, userRole, requirement.RequiredRole);
         }
         catch (Exception ex)
@@ -105,7 +105,7 @@ public class DatabaseRoleHandler : AuthorizationHandler<DatabaseRoleRequirement>
         {
             case UserRole.SuperAdmin:
                 return user.IsInRole("SuperAdmin");
-                
+
             case UserRole.OrgAdmin:
                 return requirement.AllowHigherRoles
                     ? (user.IsInRole("SuperAdmin") || user.IsInRole("DevRole") || user.IsInRole("OrgAdmin"))
@@ -115,10 +115,10 @@ public class DatabaseRoleHandler : AuthorizationHandler<DatabaseRoleRequirement>
                 return requirement.AllowHigherRoles
                     ? (user.IsInRole("SuperAdmin") || user.IsInRole("DevRole") || user.IsInRole("OrgAdmin") || user.IsInRole("OrgUser"))
                     : user.IsInRole("OrgUser");
-                    
+
             case UserRole.Developer:
                 return user.IsInRole("DevRole"); // Fixed: Match Azure portal app role name
-                
+
             default:
                 return false;
         }

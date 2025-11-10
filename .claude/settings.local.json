@@ -9,7 +9,12 @@
       "Bash(dir:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(powershell -Command:*)"
+      "Bash(powershell -Command:*)",
+      "Bash(dotnet run)",
+      "Bash(Start-Sleep -Seconds 8)",
+      "Bash(Write-Host \"Application should be starting...\")",
+      "Bash(taskkill:*)",
+      "Bash(findstr:*)"
     ],
     "deny": [],
     "ask": []
