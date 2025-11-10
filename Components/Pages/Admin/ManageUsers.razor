@@ -1305,13 +1305,17 @@
 
             if (canManageRoles)
             {
-                // Allow promotion from User to OrgAdmin only
-                if (userRole == UserRole.User && currentStatus == "Active")
+                // Allow promotion from User to OrgAdmin
+                // Allow for Active, Disabled, and Inactive statuses - user can be promoted regardless
+                // of current status (they may need reactivation, but role can be changed)
+                if (userRole == UserRole.User)
                 {
                     actions.Add(new DropdownAction
                     {
                         Title = "👨‍💼 Promote to OrgAdmin",
-                        Description = "Upgrade user to Organization Administrator role",
+                        Description = currentStatus != "Active"
+                            ? "Promote to OrgAdmin (user may need reactivation after)"
+                            : "Upgrade user to Organization Administrator role",
                         IconClass = "fas fa-crown",
                         Type = ActionType.Warning,
                         OnClick = EventCallback.Factory.Create(this, () => ShowPromoteToOrgAdminConfirmation(user)),
@@ -1321,15 +1325,30 @@
                 // Allow revocation from OrgAdmin to User only (full admin rights revocation)
                 else if (userRole == UserRole.OrgAdmin)
                 {
-                    actions.Add(new DropdownAction
+                    // If user is disabled, show a message that they need to be reactivated first
+                    if (currentStatus == "Disabled" || currentStatus == "Inactive")
                     {
-                        Title = "🚫 Revoke Admin Rights",
-                        Description = "Remove administrator privileges and revert user to standard User role",
-                        IconClass = "fas fa-ban",
-                        Type = ActionType.Danger,
-                        OnClick = EventCallback.Factory.Create(this, () => ShowRevokeAdminRightsConfirmation(user)),
-                        IsDisabled = isLoading
-                    });
+                        actions.Add(new DropdownAction
+                        {
+                            Title = "⚠️ User is Disabled",
+                            Description = "User must be reactivated in /owner/admins before role management",
+                            IconClass = "fas fa-exclamation-triangle",
+                            Type = ActionType.Secondary,
+                            IsDisabled = true
+                        });
+                    }
+                    else
+                    {
+                        actions.Add(new DropdownAction
+                        {
+                            Title = "🚫 Revoke Admin Rights",
+                            Description = "Remove administrator privileges and revert user to standard User role",
+                            IconClass = "fas fa-ban",
+                            Type = ActionType.Danger,
+                            OnClick = EventCallback.Factory.Create(this, () => ShowRevokeAdminRightsConfirmation(user)),
+                            IsDisabled = isLoading
+                        });
+                    }
                 }
             }
         }
