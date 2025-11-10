@@ -770,10 +770,10 @@
                 // Clear the cached organization list to ensure fresh data is loaded
                 NavigationOptimizer.RemoveCachedData(NavigationOptimizationService.ADMIN_LIST_CACHE_KEY);
 
-                // Refresh the UI to show updated status
-                FilterAdmins();
+                // Refresh the admin list to show updated status (user should no longer appear)
+                await RefreshAdmins();
                 CloseRevokeModal();
-                
+
                 // Show success message
                 Logger.LogInformation("Admin access revoked for {AdminEmail}. User is now disabled and can be reactivated if needed.", adminRef.Email);
             }
