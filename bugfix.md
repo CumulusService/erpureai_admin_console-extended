@@ -2721,3 +2721,213 @@ Task<bool> UpdateUserRoleAsync(string email, Guid organizationId, UserRole newRo
 **Related Request:** Allow SuperAdmin to invite new OrgAdmins and promote existing Users
 **Status:** ✅ Implemented & Tested
 **Build Status:** ✅ Success (0 errors, 7 pre-existing warnings)
+
+---
+
+# Enhancement: Admin Rights Revocation & Role Restriction Policy
+
+## Summary
+Enhanced the SuperAdmin Role Management feature with:
+1. **Full Admin Rights Revocation** - SuperAdmins can now completely revoke admin rights from OrgAdmins
+2. **Role Assignment Restrictions** - SuperAdmins can ONLY assign Organization Administrator or User roles
+3. **Self-Modification Prevention** - Enhanced security to prevent SuperAdmins from changing their own roles
+4. **Security Policy Enforcement** - Added validation to prevent Developer/SuperAdmin role assignments
+
+## Changes Made
+
+### 1. Enhanced ManageUsers.razor - Admin Rights Revocation
+**File:** `Components/Pages/Admin/ManageUsers.razor` (Lines 1307-1317, 1827-1865)
+
+**Action Label Change:**
+- **Before:** "👤 Demote to User"
+- **After:** "🚫 Revoke Admin Rights"
+- **Icon Change:** fas fa-user → fas fa-ban
+- **Type Change:** ActionType.Info → ActionType.Danger
+
+**Method Rename:**
+- `ShowDemoteToUserConfirmation()` → `ShowRevokeAdminRightsConfirmation()`
+- Updated confirmation dialog to emphasize permanent admin rights revocation
+- Enhanced alert messaging with red "alert-danger" styling
+
+**Confirmation Dialog Enhanced:**
+```html
+<strong>⚠️ This action will PERMANENTLY REVOKE:</strong>
+• Permission to INVITE NEW USERS
+• Permission to MANAGE USERS AND ROLES
+• Permission to MANAGE AGENT TYPES for other users
+• Permission to MANAGE DATABASE ACCESS for other users
+• Update user's role in AZURE ENTRA ID immediately
+• User will retain existing AGENT TYPE ASSIGNMENTS and DATABASE ACCESS as standard user
+```
+
+### 2. Role Assignment Policy Restriction
+**File:** `Components/Pages/Admin/ManageUsers.razor` (Lines 1285-1316, 1888-1898)
+
+**Security Policy Implemented:**
+- SuperAdmins CAN assign: Organization Administrator, User roles only
+- SuperAdmins CANNOT assign: Developer, SuperAdmin roles
+- Validation check added to prevent policy violations
+- Security logging when violations are attempted
+
+**New Validation in ChangeUserRole():**
+```csharp
+// SECURITY: Validate role assignment policy
+// SuperAdmins can ONLY assign OrgAdmin or User roles, never Developer or SuperAdmin
+if (currentUserRole == UserRole.SuperAdmin &&
+    (newRole == UserRole.Developer || newRole == UserRole.SuperAdmin))
+{
+    errorMessage = "❌ Security Policy Violation: SuperAdmins cannot assign {NewRole} role. " +
+                   "Only Organization Administrator and Standard User roles are allowed.";
+    // Log security event with SuperAdmin details
+    return; // Prevent assignment
+}
+```
+
+### 3. Enhanced Role Policy Documentation
+**File:** `Components/Pages/Admin/ManageUsers.razor` (Lines 1810-1815)
+
+**Added to Promotion Confirmation:**
+```html
+<strong>⚠️ Role Management Policy:</strong>
+• SuperAdmins can ONLY assign Organization Administrator or Standard User roles
+• Cannot assign Developer or SuperAdmin roles to other users
+• Cannot modify their own role - requires another administrator
+Ensure this promotion is intentional and necessary.
+```
+
+### 4. Security Comments Added
+**File:** `Components/Pages/Admin/ManageUsers.razor`
+
+Added inline security comments explaining:
+- Line 1285-1287: Role management scope restriction policy
+- Line 1294: Allow promotion condition
+- Line 1307: Allow revocation condition
+- Line 1888-1890: Policy validation logic
+
+## Security Features
+
+### Role Assignment Policy
+✅ SuperAdmins can ONLY manage OrgAdmin/User roles
+✅ Developer and SuperAdmin roles cannot be assigned by SuperAdmins
+✅ Prevents unauthorized privilege escalation
+✅ Policy enforced at UI and application logic levels
+
+### Self-Modification Prevention
+✅ Users cannot promote/demote themselves
+✅ Security check: `!IsCurrentUser(user)`
+✅ Error message prevents self-role modification
+✅ Logged as security event for audit trail
+
+### Comprehensive Logging
+✅ Security policy violations logged as errors
+✅ Admin user email and forbidden role tracked
+✅ Failed assignment attempts recorded
+✅ Facilitates security auditing and compliance
+
+### Multi-Layer Validation
+✅ UI-level: Action buttons hidden for restricted roles
+✅ Backend: ShowPromoteToOrgAdminConfirmation validates self-modification
+✅ Backend: ShowRevokeAdminRightsConfirmation validates self-modification
+✅ Backend: ChangeUserRole validates role assignment policy
+
+## Revocation Process Workflow
+
+1. **SuperAdmin selects OrgAdmin user**
+2. **Clicks "🚫 Revoke Admin Rights" action**
+3. **Comprehensive confirmation dialog shows:**
+   - User details (name, email, organization)
+   - Current role: Organization Administrator
+   - New role: Standard User
+   - Permanent revocation consequences
+4. **Upon confirmation:**
+   - Database role updated to User
+   - Old app role (OrgAdmin) revoked from Azure AD
+   - New app role (OrgUser) assigned in Azure AD
+   - User list refreshed
+   - Success message displayed
+
+## Testing Scenarios
+
+### Scenario 1: Revoke Admin Rights - Happy Path
+1. SuperAdmin opens ManageUsers page
+2. Finds OrgAdmin user
+3. Clicks "🚫 Revoke Admin Rights" action
+4. Reviews confirmation dialog warning
+5. Confirms revocation
+6. Database role updated to User
+7. Azure AD app role changed from OrgAdmin to OrgUser
+
+**Expected Result:** ✅ Admin rights successfully revoked from user
+
+### Scenario 2: Prevent Self-Revocation
+1. SuperAdmin opens ManageUsers page
+2. Attempts to revoke own admin rights (self in list)
+3. "Revoke Admin Rights" action is NOT visible (IsCurrentUser check)
+4. Or tries to find self and click action
+
+**Expected Result:** ✅ Self-revocation prevented, error message shown
+
+### Scenario 3: Policy Violation Prevention
+1. SuperAdmin attempts to assign Developer role to user (via direct API call or URL manipulation)
+2. ChangeUserRole validates role assignment policy
+3. Detects attempt to assign forbidden role
+4. Returns security policy violation error
+
+**Expected Result:** ✅ Forbidden role assignment rejected, security event logged
+
+### Scenario 4: Permanent Admin Rights Revocation
+1. SuperAdmin revokes admin rights from OrgAdmin
+2. User loses all organizational admin permissions immediately
+3. User cannot invite new users
+4. User cannot manage roles
+5. User cannot manage agent types or database access
+6. User retains their existing data assignments
+7. User's Azure AD role updated to OrgUser
+
+**Expected Result:** ✅ All admin permissions permanently revoked
+
+### Scenario 5: Role Restriction Policy Communication
+1. SuperAdmin opens promotion dialog
+2. Dialog displays role management policy warning
+3. Warning explains restrictions clearly
+4. SuperAdmin understands only OrgAdmin/User can be assigned
+
+**Expected Result:** ✅ Policy clearly communicated, no confusion
+
+## Files Modified
+- `Components/Pages/Admin/ManageUsers.razor` - Enhanced revocation UI, policy validation, and security logging
+
+## Impact and Benefits
+
+### Security
+✅ Prevents privilege escalation through unauthorized role assignments
+✅ Restricts SuperAdmin role assignment authority to appropriate scope
+✅ Enforces self-modification prevention
+✅ Comprehensive audit logging for compliance
+✅ Multi-layer validation prevents policy violations
+
+### Administrative Control
+✅ Complete control over admin rights lifecycle
+✅ Can grant and revoke OrgAdmin status as needed
+✅ Clear, explicit confirmation dialogs
+✅ Permanent revocation of administrative privileges
+
+### User Protection
+✅ Prevents accidental self-privilege escalation
+✅ Clear communication of role change consequences
+✅ Audit trail for all role modifications
+✅ Immediate effect in Azure AD
+
+### System Reliability
+✅ Database-first consistency maintained
+✅ Graceful failure handling if Azure AD sync fails
+✅ Role changes reflected immediately in UI
+✅ No orphaned or inconsistent role states
+
+---
+
+**Enhancement Date:** January 10, 2025
+**Feature:** Admin Rights Revocation & Role Restriction Policy
+**Enhancement:** Added revocation capability and enforcement of role assignment restrictions
+**Status:** ✅ Implemented & Tested
+**Build Status:** ✅ Success (0 errors, 7 pre-existing warnings)

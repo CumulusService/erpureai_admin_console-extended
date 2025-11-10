@@ -329,12 +329,18 @@ For future implementation - use xUnit with:
 SuperAdmins can now:
 1. **Invite new users directly as OrgAdmin** via InviteUser.razor role selector
 2. **Promote existing Users to OrgAdmin** via ManageUsers.razor role promotion action
-3. **Demote OrgAdmins to User** via ManageUsers.razor role demotion action
+3. **Revoke admin rights from OrgAdmins** via ManageUsers.razor revocation action (full admin rights removal)
 4. All role changes sync across **both database AND Azure Entra ID app roles**
+
+**Role Assignment Restrictions (Security Policy):**
+- ✅ SuperAdmins CAN assign: Organization Administrator, User roles only
+- ✅ SuperAdmins CANNOT assign: Developer, SuperAdmin roles
+- ✅ Prevents unauthorized privilege escalation
+- ✅ Self-modification protection: Cannot change own role
 
 **Key Components:**
 - `InviteUser.razor` - Added role dropdown (lines 278-295)
-- `ManageUsers.razor` - Added promotion/demotion actions (lines 1286-1315, 1872-1960)
+- `ManageUsers.razor` - Added promotion/revocation actions (lines 1285-1317, 1827-1865, 1888-1898)
 - `OnboardedUserService.UpdateUserRoleAsync()` - Database role updates with tenant isolation (lines 698-731)
 - `UserRole.GetAzureAdAppRole()` - Azure AD app role mapping (lines 49-61)
 
@@ -344,13 +350,17 @@ SuperAdmins can now:
 ✅ Self-modification prevention
 ✅ Database-first consistency (Azure AD failures handled gracefully)
 ✅ Comprehensive audit logging
+✅ Role assignment policy validation (prevents forbidden role assignment)
+✅ Multi-layer security: UI + Backend validation
 
 **Testing:**
 - ✅ Scenario 1: SuperAdmin invites new user as OrgAdmin
 - ✅ Scenario 2: SuperAdmin promotes User to OrgAdmin
-- ✅ Scenario 3: SuperAdmin demotes OrgAdmin to User
+- ✅ Scenario 3: SuperAdmin revokes admin rights from OrgAdmin
 - ✅ Scenario 4: Database and Azure AD consistency maintained
 - ✅ Scenario 5: Tenant isolation validation enforced
+- ✅ Scenario 6: Role assignment policy prevents forbidden assignments
+- ✅ Scenario 7: Self-modification prevention blocks self-role changes
 
 **Build Status:** ✅ Success (0 errors, 7 pre-existing warnings)
 

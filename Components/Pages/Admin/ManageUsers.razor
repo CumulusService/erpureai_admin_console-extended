@@ -1282,13 +1282,16 @@
             });
         }
 
-        // NEW: Role promotion action for SuperAdmin only
+        // NEW: Role management actions for SuperAdmin/Developer only
+        // SECURITY POLICY: SuperAdmins can ONLY assign Organization Administrator or User roles
+        // Developer role and SuperAdmin role assignment is restricted to prevent privilege escalation
         if ((currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer) &&
             user.OnboardedUser != null &&
             !IsCurrentUser(user))
         {
             var userRole = GetUserRole(user);
 
+            // Allow promotion from User to OrgAdmin only
             if (userRole == UserRole.User && currentStatus == "Active")
             {
                 actions.Add(new DropdownAction
@@ -1301,15 +1304,16 @@
                     IsDisabled = isLoading
                 });
             }
+            // Allow revocation from OrgAdmin to User only (full admin rights revocation)
             else if (userRole == UserRole.OrgAdmin)
             {
                 actions.Add(new DropdownAction
                 {
-                    Title = "👤 Demote to User",
-                    Description = "Downgrade user to standard User role",
-                    IconClass = "fas fa-user",
-                    Type = ActionType.Info,
-                    OnClick = EventCallback.Factory.Create(this, () => ShowDemoteToUserConfirmation(user)),
+                    Title = "🚫 Revoke Admin Rights",
+                    Description = "Remove administrator privileges and revert user to standard User role",
+                    IconClass = "fas fa-ban",
+                    Type = ActionType.Danger,
+                    OnClick = EventCallback.Factory.Create(this, () => ShowRevokeAdminRightsConfirmation(user)),
                     IsDisabled = isLoading
                 });
             }
@@ -1807,8 +1811,11 @@
                                 "• Update user's role in <strong>AZURE ENTRA ID</strong><br>" +
                                 "</div>" +
                                 "<div class='alert alert-warning'>" +
-                                "<strong>⚠️ This is an administrative action:</strong><br>" +
-                                "The promoted user will have significant organization-level permissions. Ensure this is intentional." +
+                                "<strong>⚠️ Role Management Policy:</strong><br>" +
+                                "• SuperAdmins can ONLY assign Organization Administrator or Standard User roles<br>" +
+                                "• Cannot assign Developer or SuperAdmin roles to other users<br>" +
+                                "• Cannot modify their own role - requires another administrator<br>" +
+                                "Ensure this promotion is intentional and necessary." +
                                 "</div>";
 
         confirmationConfirmText = "Promote to OrgAdmin";
@@ -1824,12 +1831,12 @@
     /// <summary>
     /// NEW: Shows confirmation dialog for demoting OrgAdmin to User
     /// </summary>
-    private async Task ShowDemoteToUserConfirmation(GuestUser user)
+    private async Task ShowRevokeAdminRightsConfirmation(GuestUser user)
     {
         if (IsCurrentUser(user))
         {
             errorMessage = "❌ Security Policy: You cannot change your own role. Please contact another administrator.";
-            Logger.LogWarning("User {UserEmail} attempted to demote themselves - blocked for security", user.Email);
+            Logger.LogWarning("User {UserEmail} attempted to revoke their own admin rights - blocked for security", user.Email);
             StateHasChanged();
             return;
         }
@@ -1837,8 +1844,8 @@
         userForRoleChange = user;
         targetRole = UserRole.User;
 
-        confirmationTitle = "👤 Demote User to Standard User";
-        confirmationMessage = $"You are about to DEMOTE {user.DisplayName} ({user.Email}) to Standard User role.";
+        confirmationTitle = "🚫 Revoke Administrator Rights";
+        confirmationMessage = $"You are about to REVOKE ADMINISTRATOR RIGHTS from {user.DisplayName} ({user.Email}).";
 
         confirmationDetails = $"<strong>User:</strong> {user.DisplayName}<br>" +
                             $"<strong>Email:</strong> {user.Email}<br>" +
@@ -1846,17 +1853,18 @@
                             $"<strong>New Role:</strong> Standard User<br>" +
                             $"<strong>Organization:</strong> {user.OnboardedUser?.Organization?.Name ?? "Unknown"}";
 
-        confirmationConsequence = "<div class='alert alert-info mb-3'>" +
-                                "<strong>ℹ️ This action will:</strong><br>" +
-                                "• Remove permission to <strong>INVITE NEW USERS</strong><br>" +
-                                "• Remove permission to <strong>MANAGE AGENT TYPES</strong> for other users<br>" +
-                                "• Remove permission to <strong>MANAGE DATABASE ACCESS</strong> for other users<br>" +
-                                "• Update user's role in <strong>AZURE ENTRA ID</strong><br>" +
-                                "• User will maintain their existing <strong>AGENT TYPE ASSIGNMENTS</strong> and <strong>DATABASE ACCESS</strong><br>" +
+        confirmationConsequence = "<div class='alert alert-danger mb-3'>" +
+                                "<strong>⚠️ This action will PERMANENTLY REVOKE:</strong><br>" +
+                                "• Permission to <strong>INVITE NEW USERS</strong><br>" +
+                                "• Permission to <strong>MANAGE USERS AND ROLES</strong><br>" +
+                                "• Permission to <strong>MANAGE AGENT TYPES</strong> for other users<br>" +
+                                "• Permission to <strong>MANAGE DATABASE ACCESS</strong> for other users<br>" +
+                                "• Update user's role in <strong>AZURE ENTRA ID</strong> immediately<br>" +
+                                "• User will retain existing <strong>AGENT TYPE ASSIGNMENTS</strong> and <strong>DATABASE ACCESS</strong> as a standard user<br>" +
                                 "</div>";
 
-        confirmationConfirmText = "Demote to User";
-        confirmationType = ConfirmationType.Info;
+        confirmationConfirmText = "Revoke Admin Rights";
+        confirmationType = ConfirmationType.Danger;
         requireConfirmationText = false;
         pendingAction = () => ChangeUserRole(user, UserRole.User);
         showConfirmationModal = true;
@@ -1868,6 +1876,7 @@
     /// <summary>
     /// NEW: Performs the actual role change for a user
     /// Updates both database and Azure Entra ID app roles
+    /// Enforces role assignment policy: SuperAdmins can only assign OrgAdmin or User roles
     /// </summary>
     private async Task ChangeUserRole(GuestUser user, UserRole newRole)
     {
@@ -1875,6 +1884,19 @@
         {
             ClearMessages();
             isProcessingConfirmation = true;
+
+            // SECURITY: Validate role assignment policy
+            // SuperAdmins can ONLY assign OrgAdmin or User roles, never Developer or SuperAdmin
+            if (currentUserRole == UserRole.SuperAdmin &&
+                (newRole == UserRole.Developer || newRole == UserRole.SuperAdmin))
+            {
+                errorMessage = $"❌ Security Policy Violation: SuperAdmins cannot assign {newRole.GetDisplayName()} role. Only Organization Administrator and Standard User roles are allowed.";
+                var currentUserEmail = HttpContextAccessor.HttpContext?.User.FindFirst("email")?.Value ?? "Unknown";
+                Logger.LogError("SECURITY: SuperAdmin {CurrentUser} attempted to assign forbidden role {ForbiddenRole} to user {TargetUser}",
+                    currentUserEmail, newRole, user.Email);
+                return;
+            }
+
             Logger.LogInformation("Changing role for user {UserId} ({Email}) from {OldRole} to {NewRole}",
                 user.Id, user.Email, GetUserRole(user), newRole);
 
