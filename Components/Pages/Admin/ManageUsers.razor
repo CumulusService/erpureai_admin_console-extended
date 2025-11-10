@@ -2089,8 +2089,11 @@
 
             Logger.LogInformation("Successfully changed role for user {Email} to {NewRole}", user.Email, newRole);
 
-            // 6. Clear the cached user list to ensure fresh data is loaded
+            // 6. Clear ALL caches to ensure fresh data is loaded immediately
             NavigationOptimizer.RemoveCachedData($"{NavigationOptimizationService.USER_LIST_CACHE_PREFIX}{currentUserOrgId}");
+            userStatusCache.Remove(user.Email);
+            userAgentTypesCache.Remove(user.Email);
+            userDatabasesCache.Remove(user.Email ?? string.Empty);
 
             // 7. Refresh the user list to reflect the change
             await LoadUsers();
