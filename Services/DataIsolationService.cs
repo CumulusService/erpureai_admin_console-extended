@@ -332,9 +332,14 @@ public class DataIsolationService : IDataIsolationService
             }
 
             // Check for Azure AD app roles first (preferred method)
+            // NOTE: Check SuperAdmin FIRST, then DevRole - if both present, SuperAdmin takes priority
             if (user.IsInRole("SuperAdmin"))
             {
                 return UserRole.SuperAdmin;
+            }
+            if (user.IsInRole("DevRole"))
+            {
+                return UserRole.Developer;
             }
             if (user.IsInRole("OrgAdmin"))
             {
@@ -344,11 +349,15 @@ public class DataIsolationService : IDataIsolationService
             {
                 return UserRole.User; // Map OrgUser to UserRole.User for compatibility
             }
-            
+
             // Legacy claim checks (for backward compatibility)
             if (user.HasClaim("extension_UserRole", "SuperAdmin"))
             {
                 return UserRole.SuperAdmin;
+            }
+            if (user.HasClaim("extension_UserRole", "Developer") || user.HasClaim("app_role", "DevRole"))
+            {
+                return UserRole.Developer;
             }
             if (user.HasClaim("extension_UserRole", "OrgAdmin") || user.HasClaim("extension_IsAdmin", "true"))
             {
