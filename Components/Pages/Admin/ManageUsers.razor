@@ -1282,40 +1282,55 @@
             });
         }
 
-        // NEW: Role management actions for SuperAdmin/Developer only
-        // SECURITY POLICY: SuperAdmins can ONLY assign Organization Administrator or User roles
-        // Developer role and SuperAdmin role assignment is restricted to prevent privilege escalation
-        if ((currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer) &&
-            user.OnboardedUser != null &&
-            !IsCurrentUser(user))
+        // NEW: Role management actions
+        // SuperAdmin: Can manage all users (tenant-wide control)
+        // OrgAdmin: Can manage users in their organization only
+        // SECURITY POLICY: Only SuperAdmin/OrgAdmin can assign roles, and only within allowed scope
+        if (user.OnboardedUser != null && !IsCurrentUser(user))
         {
             var userRole = GetUserRole(user);
+            var canManageRoles = false;
 
-            // Allow promotion from User to OrgAdmin only
-            if (userRole == UserRole.User && currentStatus == "Active")
+            // SuperAdmin can manage all users
+            if (currentUserRole == UserRole.SuperAdmin)
             {
-                actions.Add(new DropdownAction
-                {
-                    Title = "👨‍💼 Promote to OrgAdmin",
-                    Description = "Upgrade user to Organization Administrator role",
-                    IconClass = "fas fa-crown",
-                    Type = ActionType.Warning,
-                    OnClick = EventCallback.Factory.Create(this, () => ShowPromoteToOrgAdminConfirmation(user)),
-                    IsDisabled = isLoading
-                });
+                canManageRoles = true;
             }
-            // Allow revocation from OrgAdmin to User only (full admin rights revocation)
-            else if (userRole == UserRole.OrgAdmin)
+            // OrgAdmin can only manage users in their own organization
+            else if (currentUserRole == UserRole.OrgAdmin && user.OnboardedUser.OrganizationId.HasValue)
             {
-                actions.Add(new DropdownAction
+                // Verify user is in the same organization (organization ID already loaded in GuestUser)
+                canManageRoles = user.OnboardedUser.OrganizationId == currentUserOrgId;
+            }
+
+            if (canManageRoles)
+            {
+                // Allow promotion from User to OrgAdmin only
+                if (userRole == UserRole.User && currentStatus == "Active")
                 {
-                    Title = "🚫 Revoke Admin Rights",
-                    Description = "Remove administrator privileges and revert user to standard User role",
-                    IconClass = "fas fa-ban",
-                    Type = ActionType.Danger,
-                    OnClick = EventCallback.Factory.Create(this, () => ShowRevokeAdminRightsConfirmation(user)),
-                    IsDisabled = isLoading
-                });
+                    actions.Add(new DropdownAction
+                    {
+                        Title = "👨‍💼 Promote to OrgAdmin",
+                        Description = "Upgrade user to Organization Administrator role",
+                        IconClass = "fas fa-crown",
+                        Type = ActionType.Warning,
+                        OnClick = EventCallback.Factory.Create(this, () => ShowPromoteToOrgAdminConfirmation(user)),
+                        IsDisabled = isLoading
+                    });
+                }
+                // Allow revocation from OrgAdmin to User only (full admin rights revocation)
+                else if (userRole == UserRole.OrgAdmin)
+                {
+                    actions.Add(new DropdownAction
+                    {
+                        Title = "🚫 Revoke Admin Rights",
+                        Description = "Remove administrator privileges and revert user to standard User role",
+                        IconClass = "fas fa-ban",
+                        Type = ActionType.Danger,
+                        OnClick = EventCallback.Factory.Create(this, () => ShowRevokeAdminRightsConfirmation(user)),
+                        IsDisabled = isLoading
+                    });
+                }
             }
         }
 
@@ -1895,6 +1910,30 @@
                 Logger.LogError("SECURITY: SuperAdmin {CurrentUser} attempted to assign forbidden role {ForbiddenRole} to user {TargetUser}",
                     currentUserEmail, newRole, user.Email);
                 return;
+            }
+
+            // SECURITY: OrgAdmins can only manage users in their own organization
+            if (currentUserRole == UserRole.OrgAdmin)
+            {
+                // Verify target user is in the same organization
+                if (user.OnboardedUser?.OrganizationId != currentUserOrgId)
+                {
+                    errorMessage = $"❌ Access Denied: You can only manage users in your organization. User {user.Email} is in a different organization.";
+                    var currentUserEmail = HttpContextAccessor.HttpContext?.User.FindFirst("email")?.Value ?? "Unknown";
+                    Logger.LogWarning("SECURITY: OrgAdmin {CurrentUser} attempted to manage user {TargetUser} in different organization",
+                        currentUserEmail, user.Email);
+                    return;
+                }
+
+                // OrgAdmins cannot assign higher roles (SuperAdmin or Developer)
+                if (newRole == UserRole.Developer || newRole == UserRole.SuperAdmin)
+                {
+                    errorMessage = $"❌ Security Policy Violation: Organization Admins cannot assign {newRole.GetDisplayName()} role. Only Organization Administrator and Standard User roles are allowed.";
+                    var currentUserEmail = HttpContextAccessor.HttpContext?.User.FindFirst("email")?.Value ?? "Unknown";
+                    Logger.LogError("SECURITY: OrgAdmin {CurrentUser} attempted to assign forbidden role {ForbiddenRole} to user {TargetUser}",
+                        currentUserEmail, newRole, user.Email);
+                    return;
+                }
             }
 
             Logger.LogInformation("Changing role for user {UserId} ({Email}) from {OldRole} to {NewRole}",

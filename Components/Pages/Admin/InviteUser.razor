@@ -274,8 +274,8 @@
                                     <ValidationMessage For="@(() => invitationModel.DisplayName)" />
                                 </div>
 
-                                @* NEW: Role Selection for SuperAdmin *@
-                                @if (currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer)
+                                @* NEW: Role Selection for SuperAdmin only (when creating new organizations) *@
+                                @if (currentUserRole == UserRole.SuperAdmin)
                                 {
                                     <div class="mb-3 p-3 border rounded bg-light">
                                         <label for="userRole" class="form-label">
@@ -757,8 +757,8 @@
 
     private bool IsFormValid()
     {
-        // NEW: If SuperAdmin/Developer, role selection is required
-        if (currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer)
+        // NEW: If SuperAdmin, role selection is required (only SuperAdmin can assign roles)
+        if (currentUserRole == UserRole.SuperAdmin)
         {
             if (string.IsNullOrEmpty(selectedUserRole))
             {
@@ -823,8 +823,9 @@
                 Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgId);
             }
             // NEW: Determine the role based on SuperAdmin selection or default to User
+            // Only SuperAdmin can assign roles when creating organizations
             UserRole invitedUserRole = UserRole.User;
-            if ((currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer) &&
+            if (currentUserRole == UserRole.SuperAdmin &&
                 !string.IsNullOrEmpty(selectedUserRole) &&
                 Enum.TryParse<UserRole>(selectedUserRole, out var parsedRole))
             {
@@ -888,8 +889,8 @@
                     additionalInfo = " The user will receive an email with agent share links and instructions to join your organization.";
                 }
 
-                // NEW: Include role information in success message
-                var roleInfo = (currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer) && invitedUserRole != UserRole.User
+                // NEW: Include role information in success message (SuperAdmin can assign roles)
+                var roleInfo = currentUserRole == UserRole.SuperAdmin && invitedUserRole != UserRole.User
                     ? $" Role: {invitedUserRole}."
                     : "";
 
