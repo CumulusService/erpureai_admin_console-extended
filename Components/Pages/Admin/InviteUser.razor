@@ -274,8 +274,10 @@
                                     <ValidationMessage For="@(() => invitationModel.DisplayName)" />
                                 </div>
 
-                                @* NEW: Role Selection for SuperAdmin only (when creating new organizations) *@
-                                @if (currentUserRole == UserRole.SuperAdmin)
+                                @* NEW: Role Selection for SuperAdmin, OrgAdmin, and Developer *@
+                                @if (currentUserRole == UserRole.SuperAdmin ||
+                                     currentUserRole == UserRole.OrgAdmin ||
+                                     currentUserRole == UserRole.Developer)
                                 {
                                     <div class="mb-3 p-3 border rounded bg-light">
                                         <label for="userRole" class="form-label">
@@ -549,7 +551,7 @@
     {
         try
         {
-            currentUserRole = DataIsolationService.GetCurrentUserRole();
+            currentUserRole = await DataIsolationService.GetCurrentUserRoleAsync();
             
             // Get current user's organization to determine allowed domain and load databases
             var currentUserOrgId = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
@@ -757,8 +759,10 @@
 
     private bool IsFormValid()
     {
-        // NEW: If SuperAdmin, role selection is required (only SuperAdmin can assign roles)
-        if (currentUserRole == UserRole.SuperAdmin)
+        // NEW: If SuperAdmin, OrgAdmin, or Developer, role selection is required
+        if (currentUserRole == UserRole.SuperAdmin ||
+            currentUserRole == UserRole.OrgAdmin ||
+            currentUserRole == UserRole.Developer)
         {
             if (string.IsNullOrEmpty(selectedUserRole))
             {
@@ -822,15 +826,17 @@
                 }
                 Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgId);
             }
-            // NEW: Determine the role based on SuperAdmin selection or default to User
-            // Only SuperAdmin can assign roles when creating organizations
+            // NEW: Determine the role based on selection or default to User
+            // SuperAdmin, OrgAdmin, and Developer can assign roles
             UserRole invitedUserRole = UserRole.User;
-            if (currentUserRole == UserRole.SuperAdmin &&
+            if ((currentUserRole == UserRole.SuperAdmin ||
+                 currentUserRole == UserRole.OrgAdmin ||
+                 currentUserRole == UserRole.Developer) &&
                 !string.IsNullOrEmpty(selectedUserRole) &&
                 Enum.TryParse<UserRole>(selectedUserRole, out var parsedRole))
             {
                 invitedUserRole = parsedRole;
-                Logger.LogInformation("SuperAdmin inviting user {Email} as {Role}", invitationModel.Email, invitedUserRole);
+                Logger.LogInformation("{Role} inviting user {Email} as {NewRole}", currentUserRole, invitationModel.Email, invitedUserRole);
             }
 
             var result = await InvitationService.InviteUserAsync(
@@ -889,8 +895,10 @@
                     additionalInfo = " The user will receive an email with agent share links and instructions to join your organization.";
                 }
 
-                // NEW: Include role information in success message (SuperAdmin can assign roles)
-                var roleInfo = currentUserRole == UserRole.SuperAdmin && invitedUserRole != UserRole.User
+                // NEW: Include role information in success message (SuperAdmin, OrgAdmin, Developer can assign roles)
+                var roleInfo = (currentUserRole == UserRole.SuperAdmin ||
+                                currentUserRole == UserRole.OrgAdmin ||
+                                currentUserRole == UserRole.Developer) && invitedUserRole != UserRole.User
                     ? $" Role: {invitedUserRole}."
                     : "";
 

@@ -107,13 +107,13 @@ public class DatabaseRoleHandler : AuthorizationHandler<DatabaseRoleRequirement>
                 return user.IsInRole("SuperAdmin");
                 
             case UserRole.OrgAdmin:
-                return requirement.AllowHigherRoles 
-                    ? (user.IsInRole("SuperAdmin") || user.IsInRole("OrgAdmin"))
+                return requirement.AllowHigherRoles
+                    ? (user.IsInRole("SuperAdmin") || user.IsInRole("DevRole") || user.IsInRole("OrgAdmin"))
                     : user.IsInRole("OrgAdmin");
-                    
+
             case UserRole.User:
                 return requirement.AllowHigherRoles
-                    ? (user.IsInRole("SuperAdmin") || user.IsInRole("OrgAdmin") || user.IsInRole("OrgUser"))
+                    ? (user.IsInRole("SuperAdmin") || user.IsInRole("DevRole") || user.IsInRole("OrgAdmin") || user.IsInRole("OrgUser"))
                     : user.IsInRole("OrgUser");
                     
             case UserRole.Developer:

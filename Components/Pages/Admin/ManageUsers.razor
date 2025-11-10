@@ -878,7 +878,7 @@
         try
         {
             // Get current user role for access control
-            currentUserRole = DataIsolationService.GetCurrentUserRole();
+            currentUserRole = await DataIsolationService.GetCurrentUserRoleAsync();
             
             // Get current user's organization
             var currentUserOrgIdStr = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
@@ -947,7 +947,7 @@
         try
         {
             // Get current user role for access control
-            currentUserRole = DataIsolationService.GetCurrentUserRole();
+            currentUserRole = await DataIsolationService.GetCurrentUserRoleAsync();
             
             // Get current user's organization
             var currentUserOrgIdStr = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
@@ -1291,8 +1291,8 @@
             var userRole = GetUserRole(user);
             var canManageRoles = false;
 
-            // SuperAdmin can manage all users
-            if (currentUserRole == UserRole.SuperAdmin)
+            // SuperAdmin and Developer can manage all users
+            if (currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer)
             {
                 canManageRoles = true;
             }
@@ -1901,14 +1901,14 @@
             isProcessingConfirmation = true;
 
             // SECURITY: Validate role assignment policy
-            // SuperAdmins can ONLY assign OrgAdmin or User roles, never Developer or SuperAdmin
-            if (currentUserRole == UserRole.SuperAdmin &&
+            // SuperAdmins and Developers can ONLY assign OrgAdmin or User roles, never Developer or SuperAdmin
+            if ((currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer) &&
                 (newRole == UserRole.Developer || newRole == UserRole.SuperAdmin))
             {
                 errorMessage = $"❌ Security Policy Violation: SuperAdmins cannot assign {newRole.GetDisplayName()} role. Only Organization Administrator and Standard User roles are allowed.";
                 var currentUserEmail = HttpContextAccessor.HttpContext?.User.FindFirst("email")?.Value ?? "Unknown";
-                Logger.LogError("SECURITY: SuperAdmin {CurrentUser} attempted to assign forbidden role {ForbiddenRole} to user {TargetUser}",
-                    currentUserEmail, newRole, user.Email);
+                Logger.LogError("SECURITY: {CurrentRole} {CurrentUser} attempted to assign forbidden role {ForbiddenRole} to user {TargetUser}",
+                    currentUserRole, currentUserEmail, newRole, user.Email);
                 return;
             }
 

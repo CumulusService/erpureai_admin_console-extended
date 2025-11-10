@@ -400,6 +400,11 @@ public class DataIsolationService : IDataIsolationService
                 _logger.LogInformation("User has SuperAdmin app role - returning SuperAdmin");
                 return UserRole.SuperAdmin;
             }
+            if (user.IsInRole("DevRole"))
+            {
+                _logger.LogInformation("User has DevRole app role - returning Developer");
+                return UserRole.Developer;
+            }
             if (user.IsInRole("OrgAdmin"))
             {
                 _logger.LogInformation("User has OrgAdmin app role - returning OrgAdmin");
