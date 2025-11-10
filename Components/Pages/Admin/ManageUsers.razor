@@ -75,6 +75,51 @@
         </div>
     </div>
 
+    <!-- Organization Selector for SuperAdmin/Developer -->
+    @if (currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer)
+    {
+        <div class="card mb-3 border-primary">
+            <div class="card-body py-3">
+                <div class="row align-items-center">
+                    <div class="col-md-6">
+                        <label class="form-label mb-2 fw-bold">
+                            <i class="fas fa-building text-primary me-2"></i>Select Organization
+                        </label>
+                        <select class="form-select" @bind="selectedOrganizationId" @bind:after="OnOrganizationSelected" disabled="@isLoadingOrganizations">
+                            <option value="">-- Select an organization --</option>
+                            @foreach (var org in organizations)
+                            {
+                                <option value="@org.OrganizationId">@org.Name (@org.UserCount users)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-6 mt-3 mt-md-0">
+                        @if (selectedOrganizationId != null && selectedOrganizationId != Guid.Empty)
+                        {
+                            var selectedOrg = organizations.FirstOrDefault(o => o.OrganizationId == selectedOrganizationId);
+                            if (selectedOrg != null)
+                            {
+                                <div class="alert alert-info mb-0 py-2">
+                                    <small>
+                                        <strong>Managing:</strong> @selectedOrg.Name<br/>
+                                        <strong>Domain:</strong> @selectedOrg.Domain<br/>
+                                        <strong>Users:</strong> @selectedOrg.UserCount
+                                    </small>
+                                </div>
+                            }
+                        }
+                        else
+                        {
+                            <div class="alert alert-warning mb-0 py-2">
+                                <small><i class="fas fa-info-circle me-1"></i> Please select an organization to view and manage its users.</small>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
     <!-- Filter and Search -->
     <div class="card shadow mb-4">
         <div class="card-header py-3">
@@ -798,7 +843,12 @@
     private Guid currentUserOrgId;
     private UserRole currentUserRole = UserRole.User;
     private bool isLoading = true;
-    
+
+    // Organization selector for SuperAdmin/Developer
+    private List<Organization> organizations = new();
+    private Guid? selectedOrganizationId = null;
+    private bool isLoadingOrganizations = false;
+
     // 🚀 Performance optimization: Prevent unnecessary re-renders
     protected override bool ShouldRender()
     {
@@ -953,31 +1003,36 @@
             // For OrgAdmin, they can only view users in their organization
             var isSuperAdminOrDeveloper = currentUserRole == UserRole.SuperAdmin || currentUserRole == UserRole.Developer;
 
-            // Get current user's organization
-            var currentUserOrgIdStr = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
-            if (!string.IsNullOrEmpty(currentUserOrgIdStr) || isSuperAdminOrDeveloper)
+            // SuperAdmin and Developer need to select an organization first
+            if (isSuperAdminOrDeveloper)
             {
-                // For SuperAdmin/Developer, use their org if available, otherwise use a placeholder
-                if (!string.IsNullOrEmpty(currentUserOrgIdStr))
+                Logger.LogInformation("SuperAdmin/Developer user detected. Loading organization list for selection.");
+                await LoadOrganizations();
+                // Don't load users yet - wait for user to select an organization
+                return;
+            }
+
+            // OrgAdmin path - get their organization and load data
+            var currentUserOrgIdStr = await DataIsolationService.GetCurrentUserOrganizationIdAsync();
+            if (!string.IsNullOrEmpty(currentUserOrgIdStr))
+            {
+                // Try to parse as GUID, otherwise generate one from the string
+                if (!Guid.TryParse(currentUserOrgIdStr, out currentUserOrgId))
                 {
-                    // Try to parse as GUID, otherwise generate one from the string
-                    if (!Guid.TryParse(currentUserOrgIdStr, out currentUserOrgId))
+                    // Generate deterministic GUID from organization ID string
+                    using (var md5 = System.Security.Cryptography.MD5.Create())
                     {
-                        // Generate deterministic GUID from organization ID string
-                        using (var md5 = System.Security.Cryptography.MD5.Create())
-                        {
-                            var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(currentUserOrgIdStr));
-                            currentUserOrgId = new Guid(hash);
-                        }
-                        Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgIdStr);
+                        var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(currentUserOrgIdStr));
+                        currentUserOrgId = new Guid(hash);
                     }
+                    Logger.LogInformation("Generated GUID for non-GUID organization ID: {OrgId}", currentUserOrgIdStr);
                 }
 
                 if (currentUserOrgId != Guid.Empty)
                 {
                     await LoadOrganizationAgentTypes();
                 }
-                
+
                 // Initialize secrets asynchronously in the background - don't block page loading
                 // This prevents the heavy Key Vault operation from blocking page load
                 _ = Task.Run(async () =>
@@ -1001,7 +1056,7 @@
                         Logger.LogWarning(ex, "Could not check existing secrets for organization {OrganizationId}, skipping secret initialization", currentUserOrgIdStr);
                     }
                 });
-                
+
                 await LoadUsers();
             }
             else
@@ -2442,7 +2497,54 @@
             organizationAgentTypes = new List<AgentTypeEntity>();
         }
     }
-    
+
+    private async Task LoadOrganizations()
+    {
+        try
+        {
+            isLoadingOrganizations = true;
+            Logger.LogInformation("Loading organizations for SuperAdmin/Developer organization selector");
+
+            var orgs = await OrganizationService.GetAllOrganizationsAsync();
+            organizations = orgs.ToList();
+
+            Logger.LogInformation("Loaded {OrgCount} organizations: {OrgNames}",
+                organizations.Count, string.Join(", ", organizations.Select(o => o.Name)));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading organizations for selector");
+            organizations = new List<Organization>();
+            errorMessage = "Failed to load organizations. Please refresh the page.";
+        }
+        finally
+        {
+            isLoadingOrganizations = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnOrganizationSelected()
+    {
+        if (selectedOrganizationId == null || selectedOrganizationId == Guid.Empty)
+        {
+            Logger.LogInformation("Organization selector cleared");
+            currentUserOrgId = Guid.Empty;
+            allUsers = new List<GuestUser>();
+            filteredUsers = new List<GuestUser>();
+            successMessage = "";
+            return;
+        }
+
+        Logger.LogInformation("SuperAdmin/Developer selected organization: {OrgId}", selectedOrganizationId);
+
+        // Set the current org ID to the selected organization
+        currentUserOrgId = selectedOrganizationId.Value;
+
+        // Load data for this organization
+        await LoadUsers();
+    }
+
     private List<AgentTypeEntity> GetUserAgentTypes(GuestUser user)
     {
         if (userAgentTypesCache.TryGetValue(user.Email, out var agentTypes))
